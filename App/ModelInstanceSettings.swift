@@ -19,6 +19,20 @@ struct WindowFrame: Codable, Equatable {
 
 enum InteractionMode: String, Codable { case passthrough, edit }
 
+enum ZoomGeometry {
+    static func resize(frame: CGRect, currentScale: Double, factor: Double) -> (frame: CGRect, scale: Double) {
+        guard factor.isFinite, factor > 0, frame.width > 0, frame.height > 0 else { return (frame, currentScale) }
+        let requestedScale = min(max(currentScale * factor, 0.25), 3)
+        // Bound one common ratio. Clamping width and height independently
+        // changes aspect ratio and compounds size drift after zooming back in.
+        let smallestRatio = max(160 / frame.width, 180 / frame.height)
+        let largestRatio = min(1600 / frame.width, 1800 / frame.height)
+        let ratio = min(max(requestedScale / currentScale, smallestRatio), largestRatio)
+        let width = frame.width * ratio, height = frame.height * ratio
+        return (CGRect(x: frame.midX - width / 2, y: frame.minY, width: width, height: height), currentScale * ratio)
+    }
+}
+
 struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     var id = UUID()
     var displayName: String

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 @main struct Tests {
     static func main() throws {
@@ -47,6 +48,15 @@ import Foundation
         extreme.zOrder = Int.max
         extreme.sanitize()
         precondition(extreme.windowFrame.x == 1_000_000 && extreme.windowFrame.y == -1_000_000 && extreme.zOrder == 1_000_000)
+        var zoomFrame = CGRect(x: -500, y: 80, width: 360, height: 480)
+        var zoomScale = 1.0
+        for factor in [0.01, 100.0, 0.01, 100.0, 0.01, 100.0] {
+            let resized = ZoomGeometry.resize(frame: zoomFrame, currentScale: zoomScale, factor: factor)
+            precondition(abs(resized.frame.width / resized.frame.height - 0.75) < 0.0001, "Zoom limits must preserve model window aspect")
+            precondition(resized.frame.width >= 160 && resized.frame.height >= 180 && resized.frame.width <= 1600 && resized.frame.height <= 1800)
+            precondition(abs(resized.frame.midX - zoomFrame.midX) < 0.0001 && resized.frame.minY == zoomFrame.minY)
+            zoomFrame = resized.frame; zoomScale = resized.scale
+        }
         let fixture = directory.appendingPathComponent("model.json")
         func rejects(_ json: [String: Any]) throws {
             try JSONSerialization.data(withJSONObject: json).write(to: fixture)

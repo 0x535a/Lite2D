@@ -138,6 +138,11 @@ final class SelfTestRunner {
             let roundTrip = controller.window.convertPoint(toScreen: local)
             try check(abs(roundTrip.x - point.x) < 0.01 && abs(roundTrip.y - point.y) < 0.01, "Coordinate conversion round trip: \(screen.localizedName)")
         }
+        let displaced = manager.record(a)!.controller!
+        displaced.window.setFrameOrigin(NSPoint(x: 500_000, y: 500_000))
+        manager.record(a)!.settings.windowFrame = WindowFrame(displaced.window.frame)
+        NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        try check(NSScreen.screens.contains { displaced.window.frame.intersection($0.visibleFrame).width >= 80 && displaced.window.frame.intersection($0.visibleFrame).height >= 80 }, "Screen-change notification recovers an offscreen instance into a visible screen")
         manager.resetPosition(a)
         manager.mutate(b) { $0.animationPaused = false }
         manager.mutate(a) { $0.isVisible = false }
@@ -241,6 +246,9 @@ final class SelfTestRunner {
     }
     private func finishStress() throws {
         recordMemory("after-20-replace-settled")
+        for record in manager.records {
+            try check(try view(record.settings.id).glErrorCount == 0, "No transient GL errors accumulated for surviving instance")
+        }
         for record in manager.records { _ = try capture(record.settings.id, label: "final-\(record.settings.id.uuidString.prefix(4))") }
         manager.mutate(a) { $0.displayName = "22 persistent A"; $0.trackingEnabled = false; $0.targetFPS = 30 }
         manager.mutate(b) { $0.displayName = "33 persistent B"; $0.trackingEnabled = true; $0.targetFPS = 60; $0.animationPaused = true }

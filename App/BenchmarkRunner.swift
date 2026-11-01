@@ -43,6 +43,10 @@ final class BenchmarkRunner {
         catch { complete(1); return }
         // Exclude launch/texture decode/JIT warmup from steady-state measurements.
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [self] in
+            let hidden = min(max(Int(ProcessInfo.processInfo.environment["LITE2D_HIDE_AFTER_WARMUP"] ?? "0") ?? 0, 0), manager.records.count)
+            if hidden > 0 {
+                for record in manager.records.suffix(hidden) { manager.mutate(record.settings.id) { $0.isVisible = false } }
+            }
             start = ProcessInfo.processInfo.systemUptime; previousTime = start
             initialCPU = Self.cpuSeconds(); previousCPU = initialCPU
             guard manager.records.allSatisfy({ !$0.settings.isVisible || ($0.controller?.view.frames ?? 0) > 0 }) else {
@@ -71,7 +75,8 @@ final class BenchmarkRunner {
                                   "cpuPercentOneCore100": (cpu - previousCPU) / (now - previousTime) * 100,
                                   "residentBytes": memory.resident, "physicalFootprintBytes": memory.footprint,
                                   "frames": manager.records.map { ["id": $0.settings.id.uuidString, "count": $0.controller?.view.frames ?? 0,
-                                                                     "glError": $0.controller?.view.lastGLError ?? 0] }]
+                                                                     "glError": $0.controller?.view.lastGLError ?? 0,
+                                                                     "glErrorCount": $0.controller?.view.glErrorCount ?? 0] }]
         samples.append(row); previousCPU = cpu; previousTime = now
         try? JSONSerialization.data(withJSONObject: samples, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("samples.json"), options: .atomic)
         if elapsed >= staticSeconds + movingSeconds {
@@ -87,16 +92,18 @@ final class BenchmarkRunner {
                         "gpuTimingAvailable": record.controller?.view.bridge.gpuTimingAvailable ?? false,
                         "gpuMeasuredFrames": record.controller?.view.bridge.gpuMeasuredFrames ?? 0,
                         "gpuNanoseconds": record.controller?.view.bridge.gpuNanoseconds ?? 0,
+                        "glErrorCount": record.controller?.view.glErrorCount ?? 0,
                         "glError": record.controller?.view.lastGLError ?? 0]
             }
             let summary: [String: Any] = ["durationSeconds": elapsed, "staticSeconds": staticSeconds,
                 "movingSeconds": movingSeconds, "instances": manager.records.count,
+                "visibleInstances": manager.records.filter { $0.settings.isVisible }.count,
                 "cpuSeconds": cpu - initialCPU, "meanCPUPercentOneCore100": (cpu - initialCPU) / elapsed * 100,
                 "frames": frames, "samples": samples.count,
                 "targetInput": "In-process shared target, stationary then 1 Hz moving trajectory; does not move OS cursor."]
             try? JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("summary.json"), options: .atomic)
             NSLog("BENCHMARK_DONE instances=%d elapsed=%.1f cpu=%.1f", manager.records.count, elapsed, (cpu - initialCPU) / elapsed * 100)
-            complete(frames.allSatisfy { ($0["glError"] as? UInt32) == 0 } ? 0 : 1)
+            complete(frames.allSatisfy { ($0["glErrorCount"] as? UInt64) == 0 } ? 0 : 1)
         }
     }
 }

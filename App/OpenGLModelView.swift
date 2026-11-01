@@ -29,6 +29,7 @@ final class OpenGLModelView: NSOpenGLView {
     private(set) var filteredLook = NSPoint.zero
     private(set) var animationTime = 0.0
     private(set) var lastGLError: UInt32 = 0
+    private(set) var glErrorCount: UInt64 = 0
     override var isOpaque: Bool { false }
 
     init?(settings: ModelInstanceSettings) {
@@ -125,6 +126,7 @@ final class OpenGLModelView: NSOpenGLView {
         bridge.render(width: w, height: h, scale: 1)
         if measureGPU { bridge.endGPUMeasurement() }
         lastGLError = glGetError()
+        if lastGLError != 0 { glErrorCount += 1 }
         frames += 1
         if captureRequested {
             var bytes = [UInt8](repeating: 0, count: Int(w) * Int(h) * 4)

@@ -96,3 +96,34 @@ F01–F24 最终验收表仍待逐项审计；未实测的桌面行为不会由�
 
 - GPU 可选诊断通过 `GL_EXT_timer_query` 非阻塞读取。0–4 每场景 4 秒预热、5 秒静止、5 秒 1Hz 移动目标，GL error 均为 0、实际约 30 FPS。各实例 GPU 绘制区间均值（含预热已收集的查询，ms/frame）：1 实例 [0.981]，2 [0.732,0.388]，3 [1.221,0.436,0.354]，4 [0.765,0.285,0.373,0.428]。这是绘制区间耗时，不是整 GPU 利用率或能耗；系统其他进程和上下文调度会影响值。原始记录 `.local/verification/gpu-matrix/`。
 - Xcode 生成脚本 Exit 0。以隔离输出执行 `xcodebuild -project build/xcode-verification/Lite2D.xcodeproj -scheme Lite2D -configuration Release CODE_SIGNING_ALLOWED=NO -jobs 2 build` Exit 0，日志含 BUILD SUCCEEDED。修复 CMake Xcode 默认 Swift 4，显式固定 Swift 5。Ninja 与 Xcode 使用同一源码清单。
+
+### 用户实机反馈
+
+用户回复：“手测我没测出什么问题，我给手测版本的退了”。核对手测 PID 已退出；隔离设置已保存两个实例（原先三个，删除了一个），两者均恢复穿透，保存了显著缩放及含负坐标的位置。将此记录为用户手测总体未发现问题；没有录屏或逐项日志，不据此声称已自动验证 Finder/Space/Stage Manager/物理拔屏。当前三屏均为 2×，1× 显示器仍未覆盖。
+
+### 正式 0–4 基线已完成
+
+`python3 scripts/benchmark.py` 所有 5 个场景均 Exit 0，每组预热 4 秒后 300 秒静止目标 + 120 秒 1Hz 合成移动目标。以下 CPU 为本进程 getrusage，100% 代表一个核心；内存为样本均值，含本机框架/窗口/纹理/JSC，不等同于纯模型内存。
+
+| 实例 | 时长 s | 静止 CPU % | 移动目标 CPU % | 常驻 MiB | 物理占用 MiB | 各实例实际 FPS |
+|---:|---:|---:|---:|---:|---:|---|
+| 0 | 420.0 | 0.59 | 0.85 | 56.0 | 20.8 | — |
+| 1 | 420.0 | 28.21 | 21.77 | 88.6 | 177.2 | 29.92 |
+| 2 | 420.0 | 23.25 | 22.95 | 108.7 | 225.5 | 29.91, 29.91 |
+| 3 | 420.0 | 36.01 | 38.40 | 138.3 | 263.7 | 29.83, 29.83, 29.83 |
+| 4 | 420.0 | 44.62 | 43.73 | 154.7 | 297.7 | 29.84, 29.84, 29.84, 29.84 |
+
+这些数据来自正在使用的工作站；期间其他应用、用户手测以及隔离候选的编译/验证可能并发，CPU 不应被解释为严格单调的实例增量定律。1→2 实例 CPU 下降说明时段/模型差异与系统调度噪声不可忽略；内存增量则约为首次 +32.6 MiB resident / +156.4 MiB footprint，随后分别 +20.1/+48.3、+29.6/+38.2、+16.4/+34.0 MiB。没有用不同数量/资源的数据宣称胜过其他播放器。
+
+长时基线使用已固定并记录 SHA 的早期稳定构建；后续候选保留相同旧版模型渲染路径，增加原生更新顺序修正、边界和诊断。正式产物已重建（Exit 0），后续 profiling 针对当前产物。
+
+### 最后回归
+
+`.local/verification/release-integration/`：152 项集成检查、17 项新进程恢复检查通过，约 30.00 / 59.52 FPS；新增记录整个实例生命周期中瞬时 GL error 计数，存活实例均为 0。离屏窗口经屏幕变化通知回到可见区域。缩放达到窗口最小/最大尺寸后仍保持一个共同缩放比例，避免反复放大缩小时纵横比漂移；几何边界单测通过。
+
+### 压力之后的 Leaks 与工具附加问题
+
+- `python3 scripts/leaks_after_stress.py` Exit 0：先通过 152 项集成检查（含 30 次增删、20 次替换），在 30 秒的静止保留窗口扫描同一存活进程。`leaks` Exit 0，报告 `0 leaks for 0 total leaked bytes`，应用最终 Exit 0。记录 `.local/verification/post-stress-leaks/run-20261102-010319/`。该结果不代表能证明不存在任何未来模型或驱动泄漏。
+- 最初的串行热附加流程在 Allocations 后停止推进采样，整体看门狗退出，故不计为正常完成。单独复现的线程采样显示 JSC 调用与 Instruments 注入的 liboainject 栈。改用每个模板启动新进程：Allocations 已正常取得记录，目标约 29.60 FPS / GL errorCount=0，正常自动退出。
+- `scripts/profile_app.py` 已改为每模板独立 launch、检查应用自身 summary 与目标退出状态，并清理该次 Instruments 遗留的项目内停止占位进程；不以单独 xctrace Exit 0 作为应用成功证据。
+- Power Profiler 实际报错：`The Power Profiler instrument is not supported on macOS. Record on iOS or iPadOS instead.` 未把此工具输出当作有效能耗数据；正在使用 macOS Activity Monitor 模板核对可用指标。
