@@ -47,13 +47,9 @@ final class ModelInstanceController: NSObject, NSWindowDelegate {
         if visible { window.orderFrontRegardless() } else { window.orderOut(nil) }
     }
     func zoom(by factor: Double) {
-        let previous = record.settings.scale
-        let scale = min(max(previous * factor, 0.25), 3)
-        let ratio = scale / previous
-        let frame = window.frame
-        let size = NSSize(width: min(max(frame.width * ratio, 160), 1600), height: min(max(frame.height * ratio, 180), 1800))
-        record.settings.scale = scale
-        window.setFrame(NSRect(x: frame.midX - size.width / 2, y: frame.minY, width: size.width, height: size.height), display: true)
+        let resized = ZoomGeometry.resize(frame: window.frame, currentScale: record.settings.scale, factor: factor)
+        record.settings.scale = resized.scale
+        window.setFrame(resized.frame, display: true)
         record.settings.windowFrame = WindowFrame(window.frame)
         view.settings = record.settings
         onChange?()

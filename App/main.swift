@@ -24,7 +24,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--self-test") || CommandLine.arguments.contains("--verify-restore") {
             let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LITE2D_TEST_OUTPUT"] ?? ".local/verification/integration")
             let runner = SelfTestRunner(manager: manager, status: status, output: output) { [weak self] code in
-                self?.exitCode = code; NSApp.terminate(nil)
+                self?.exitCode = code
+                let hold = min(max(Double(ProcessInfo.processInfo.environment["LITE2D_LEAK_SCAN_HOLD_SECONDS"] ?? "0") ?? 0, 0), 60)
+                if code == 0 && hold > 0 {
+                    // A bounded, quiescent post-stress window for the external
+                    // leaks scanner; normal app launches never enter this path.
+                    self?.manager.setSleeping(true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + hold) { NSApp.terminate(nil) }
+                } else { NSApp.terminate(nil) }
             }
             selfTest = runner
             if CommandLine.arguments.contains("--verify-restore") { runner.verifyRestored() } else { runner.run() }

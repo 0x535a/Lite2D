@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--static-seconds", type=int, default=300)
 parser.add_argument("--moving-seconds", type=int, default=120)
 parser.add_argument("--counts", nargs="+", type=int, default=[0, 1, 2, 3, 4])
+parser.add_argument("--hide-after-warmup", type=int, choices=range(5), default=0)
 parser.add_argument("--output", type=Path, default=root / ".local/verification/performance")
 args = parser.parse_args()
 assets = [root / ".local/models/bilibili-22/model.json", root / ".local/models/bilibili-33/model.json",
@@ -33,6 +34,7 @@ for count in args.counts:
     settings.write_text(json.dumps(dict(schemaVersion=2, instances=descriptors), indent=2) + "\n")
     env = dict(os.environ, LITE2D_SETTINGS_PATH=str(settings), LITE2D_BENCH_OUTPUT=str(out),
                LITE2D_STATIC_SECONDS=str(args.static_seconds), LITE2D_MOVING_SECONDS=str(args.moving_seconds))
+    env["LITE2D_HIDE_AFTER_WARMUP"] = str(args.hide_after_warmup)
     print(f"Starting {count} instances: {args.static_seconds}s stationary + {args.moving_seconds}s moving target", flush=True)
     with (out / "run.log").open("w") as log:
         process = subprocess.Popen([application, "--benchmark"],
