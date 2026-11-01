@@ -1,7 +1,7 @@
 # 第三方依赖与许可
 
 - [Cubism Native Samples](https://github.com/Live2D/CubismNativeSamples) 与 [Framework](https://github.com/Live2D/CubismNativeFramework)：使用官方 submodule，版权归 Live2D Inc.，适用上游 LICENSE / NOTICE 及 Live2D Open Software License。固定版本见 BUILD.md。不要把它们描述为 MIT。
-- Cubism Core：Live2D Proprietary Software License，官方 [Native SDK 下载](https://www.live2d.com/en/sdk/download/native/)。本仓库不提交或公开发布专有二进制。
+- Cubism Core：Live2D Proprietary Software License，官方 [Native SDK 下载](https://www.live2d.com/en/sdk/download/native/)。专有二进制不提交到 Git；发行附件是否可附带须单独确认，不能从本项目 MIT 推导。
 - GLEW / GLFW / stb_image：官方 Sample 的第三方依赖，各自许可见其源码；下载/生成目录不提交。
 - 首批个人测试模型来自已安装 Live2DViewerEX 的工坊资源，作者及来源信息保留在原始 config.json。资源仅本机测试，不提交或再分发；订阅或解包不赋予再发布权。
 - 旧版 Cubism 2 使用本机已有 `Live2D 2.1.00_1` JavaScript 运行库，以独立 JavaScriptCore VM 执行，原生 OpenGL 提供绘制 API。该运行库为 Live2D 专有内容，保持本地、记录来源及 SHA，不随源码再分发。旧版 SDK 的许可和现代 Core 的许可需分别考虑；不宣称 Cubism 5 Core 可以直接兼容旧模型。
@@ -17,3 +17,7 @@
 2026-11-02 重新核对官方 [Expandable Applications](https://www.live2d.com/en/sdk/license/expandable/) 和 [Live2D Open Software License](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html)：前者明确可添加不定数量模型的应用需要发布前审查和特殊协议；后者对 Publish / Distribute 的定义较广。不能仅凭“没有把 Core 加入 git”就认定源码公开或可执行程序发行已经获准。公开方式与许可适用范围应向 Live2D 核实，本仓库不声明已获得此类授权。
 
 图标由项目作者提供，不使用测试模型的立绘或截图。源码仓库不附带模型选择清单、专有 Core 或旧版运行库。公开前隐私与仓库边界审计见 `PUBLIC_RELEASE_AUDIT.md`。
+
+## v0.1.1 发布记录
+
+维护者已明确确认此次 `.app` 中专有 Core 与旧版运行库的发行授权，并要求发布不含模型、配置的应用包。v0.1.1 附带 MIT、第三方说明及相关上游许可文本；Git 源码仍不提交专有库。这是维护者的授权确认记录，不是本项目签发的 Live2D 官方许可证明，最终适用协议仍由维护者负责核实。
