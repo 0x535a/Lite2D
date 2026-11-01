@@ -57,6 +57,18 @@ def main():
                 raise RuntimeError("Archive has no ARM64 macOS static Core")
             destination = ROOT / "vendor/CubismNativeSamples/Core"
             shutil.copytree(staging, destination, dirs_exist_ok=True)
+    # Headers are proprietary SDK contents too. Upstream ignores binary Core
+    # files but leaves include/ unignored; keep this installation local without
+    # changing or committing the pinned dependency's .gitignore.
+    repository = ROOT / "vendor/CubismNativeSamples"
+    exclude = Path(subprocess.run(["git", "rev-parse", "--git-path", "info/exclude"],
+                                 cwd=repository, check=True, capture_output=True, text=True).stdout.strip())
+    if not exclude.is_absolute():
+        exclude = repository / exclude
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    existing = exclude.read_text() if exclude.exists() else ""
+    if "/Core/include/" not in existing.splitlines():
+        exclude.write_text(existing.rstrip() + "\n/Core/include/\n")
     record = {"source": URL if not args.archive else str(archive.resolve()),
               "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
               "licensePage": PAGE}

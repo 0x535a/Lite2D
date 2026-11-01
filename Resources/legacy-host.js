@@ -15,6 +15,37 @@ var gl=Object.assign({canvas:{width:1,height:1}},glConstants);
  'createBuffer','createTexture','createFramebuffer','createRenderbuffer','createShader','createProgram',
  'deleteBuffer','deleteTexture','deleteFramebuffer','deleteRenderbuffer','deleteShader','deleteProgram']
 .forEach(function(name){gl[name]=function(){return __gl(name,Array.from(arguments));};});
+// Preserve the SDK's OpenGL command order, but cross the ObjC/JSC boundary once
+// per batch rather than once per GL argument. Readbacks/creation flush first.
+var glCommands=[], glBuffers=[];
+function flushGLCommands(){
+    if(!glCommands.length)return;
+    var commands=new Float64Array(glCommands), buffers=glBuffers;
+    glCommands=[];glBuffers=[];
+    __glBatch(commands,buffers);
+}
+var batchNames=['activeTexture','bindBuffer','bindTexture','bindFramebuffer','bindRenderbuffer',
+ 'blendEquationSeparate','blendFuncSeparate','enable','disable','frontFace','cullFace',
+ 'enableVertexAttribArray','disableVertexAttribArray','vertexAttribPointer','drawElements',
+ 'useProgram','uniform1i','uniform4f','texParameteri','viewport','clearColor','clear','colorMask'];
+Object.keys(gl).forEach(function(name){
+    if(typeof gl[name]!=='function')return;
+    var immediate=gl[name], opcode=batchNames.indexOf(name);
+    if(opcode>=0)gl[name]=function(){
+        glCommands.push(opcode);
+        for(var i=0;i<arguments.length;i++)glCommands.push(Number(arguments[i]||0));
+    };
+    else gl[name]=function(){flushGLCommands();return immediate.apply(gl,arguments);};
+});
+gl.bufferData=function(target,data,usage){
+    if(typeof data==='number'){glCommands.push(24,target,data,usage);return;}
+    var snapshot=new Uint8Array(data.buffer,data.byteOffset,data.byteLength).slice();
+    glCommands.push(23,target,usage,glBuffers.length);glBuffers.push(snapshot);
+};
+gl.uniformMatrix4fv=function(location,transpose,data){
+    glCommands.push(25,location,Number(transpose),data.length/16);
+    for(var i=0;i<data.length;i++)glCommands.push(data[i]);
+};
 var motions={}, queue, idleGroup='', blinkTime=0;
 function registerMotion(group,index,settings){
     if(!motions[group]) motions[group]=[];
@@ -57,5 +88,5 @@ function drawLegacy(width,height,scale){
     var s=Math.min(width/w,height/h)*0.96*scale;
     matrix.fill(0);matrix[0]=2*s/width;matrix[5]=-2*s/height;matrix[10]=matrix[15]=1;
     matrix[12]=-w*s/width;matrix[13]=h*s/height;
-    model.setMatrix(matrix);model.draw();
+    model.setMatrix(matrix);model.draw();flushGLCommands();
 }
