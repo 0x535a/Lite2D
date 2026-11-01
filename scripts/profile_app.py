@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = Path(os.environ.get("LITE2D_APP_PATH", str(ROOT / "dist/Lite2D.app/Contents/MacOS/Lite2D")))
 OUT = ROOT / ".local/verification/profiling" / time.strftime("launch-%Y%m%d-%H%M%S")
 OUT.mkdir(parents=True, exist_ok=True)
-assets = [ROOT / ".local/models/bilibili-22/model.json", ROOT / ".local/models/bilibili-33/model.json",
-          ROOT / ".local/models/bilibili-22/model.json", ROOT / ".local/models/bilibili-33/model.json"]
+assets = [ROOT / ".local/models/legacy-a/model.json", ROOT / ".local/models/legacy-b/model.json",
+          ROOT / ".local/models/legacy-a/model.json", ROOT / ".local/models/legacy-b/model.json"]
 
 
 def test_processes():

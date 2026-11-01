@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".local/verification/post-stress-leaks" / time.strftime("run-%Y%m%d-%H%M%S")
 OUT.mkdir(parents=True, exist_ok=True)
 subprocess.run(["python3", str(ROOT / "scripts/create_test_fixtures.py")], check=True, stdout=subprocess.DEVNULL)
-models = [ROOT / ".local/models/bilibili-22/model.json", ROOT / ".local/models/bilibili-33/model.json",
+models = [ROOT / ".local/models/legacy-a/model.json", ROOT / ".local/models/legacy-b/model.json",
           ROOT / "vendor/CubismNativeSamples/Samples/Resources/Haru/Haru.model3.json"]
 env = dict(os.environ, LITE2D_SETTINGS_PATH=str(OUT / "settings.json"), LITE2D_TEST_OUTPUT=str(OUT),
            LITE2D_LEAK_SCAN_HOLD_SECONDS="30")

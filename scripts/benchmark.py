@@ -16,8 +16,8 @@ parser.add_argument("--counts", nargs="+", type=int, default=[0, 1, 2, 3, 4])
 parser.add_argument("--hide-after-warmup", type=int, choices=range(5), default=0)
 parser.add_argument("--output", type=Path, default=root / ".local/verification/performance")
 args = parser.parse_args()
-assets = [root / ".local/models/bilibili-22/model.json", root / ".local/models/bilibili-33/model.json",
-          root / ".local/models/bilibili-22/model.json", root / ".local/models/bilibili-33/model.json"]
+assets = [root / ".local/models/legacy-a/model.json", root / ".local/models/legacy-b/model.json",
+          root / ".local/models/legacy-a/model.json", root / ".local/models/legacy-b/model.json"]
 application = os.environ.get("LITE2D_APP_PATH", str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"))
 for count in args.counts:
     if count not in range(5):

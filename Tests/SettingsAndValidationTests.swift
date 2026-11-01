@@ -28,7 +28,7 @@ import CoreGraphics
         precondition(store.load().instances.isEmpty && store.lastError != nil)
         let backups = try FileManager.default.contentsOfDirectory(at: store.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
         precondition(backups.contains { $0.lastPathComponent.contains("corrupt-") })
-        for name in ["bilibili-22", "bilibili-33"] {
+        for name in ["legacy-a", "legacy-b"] {
             let validated = try ModelFileValidator.validate(root.appendingPathComponent(".local/models/\(name)/model.json"))
             precondition(validated.legacy)
         }

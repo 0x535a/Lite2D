@@ -35,7 +35,7 @@ subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True, cap
 settings = out / "settings.json"
 if not settings.exists():
     descriptors = []
-    for index, name in enumerate(["bilibili-22", "bilibili-33", "bilibili-22"]):
+    for index, name in enumerate(["legacy-a", "legacy-b", "legacy-a"]):
         model = root / ".local/models" / name / "model.json"
         if not model.exists():
             raise FileNotFoundError(f"Prepare selected models first: {model}")

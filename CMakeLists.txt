@@ -45,6 +45,18 @@ set_target_properties(Lite2D PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
   RUNTIME_OUTPUT_DIRECTORY "${LITE2D_OUTPUT_ROOT}")
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js")
+# Liquid Glass icon (macOS 26/27): actool emits Assets.car for the layered .icon
+# plus a flattened AppIcon.icns that macOS 14-25 fall back to. Must precede codesign.
+set(APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon.icon")
+file(GLOB_RECURSE APP_ICON_FILES CONFIGURE_DEPENDS "${APP_ICON}/*")
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS ${APP_ICON_FILES})
+add_custom_command(TARGET Lite2D POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
+  COMMAND /usr/bin/xcrun actool "${APP_ICON}" --compile "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
+    --output-partial-info-plist "${CMAKE_BINARY_DIR}/AppIcon-partial.plist"
+    --app-icon AppIcon --include-all-app-icons --enable-on-demand-resources NO
+    --development-region en --target-device mac --platform macosx --minimum-deployment-target 14.0
+    --output-format human-readable-text --errors --warnings --notices)
 add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE:Lite2D>.d"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/FrameworkShaders"

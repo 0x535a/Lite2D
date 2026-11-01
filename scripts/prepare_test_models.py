@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Read the two selected installed Workshop packages into a local test cache.
+"""Read explicitly selected installed Workshop packages into a local test cache.
 
 Does not modify Steam files, execute model scripts, or redistribute model assets.
-LPK reading follows the already installed RimeLive2D importer; runtime files are
-classified by content so Cubism 2 data can never be mislabeled as Cubism 3.
+Runtime files are classified by content so Cubism 2 data is not mislabeled
+as Cubism 3. Package identifiers and model choices are supplied locally.
 """
 import argparse
 import hashlib
@@ -105,8 +105,13 @@ def main():
     parser.add_argument("--source", type=Path, default=Path.home() /
                         "Library/Application Support/Steam/steamapps/workshop/content/616720")
     parser.add_argument("--output", type=Path, default=ROOT / ".local/models")
+    parser.add_argument("--item", action="append", required=True, metavar="ID:ALIAS",
+                        help="installed Workshop item and local fixture name, repeatable (e.g. 12345:legacy-a)")
     args = parser.parse_args()
-    for ident, label in [("3291128407", "bilibili-22"), ("1831347285", "bilibili-33")]:
+    for item in args.item:
+        ident, separator, label = item.partition(":")
+        if not separator or not ident.isdecimal() or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", label):
+            parser.error("each --item must be a numeric ID followed by a safe local fixture alias")
         print(prepare(args.source, ident, args.output / label))
 
 
