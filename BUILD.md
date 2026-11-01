@@ -18,7 +18,7 @@ git submodule update --init --recursive
 sh vendor/CubismNativeSamples/Samples/OpenGL/thirdParty/scripts/setup_glew_glfw
 ```
 
-官方 [Native 下载页](https://www.live2d.com/en/sdk/download/native/) 的 `download.js` 当前列出 R5，发布日期 2026-04-02。页面明确要求同意许可，且下载即视为同意；本轮已请求用户授权，确认前不下载 SDK。
+官方 [Native 下载页](https://www.live2d.com/en/sdk/download/native/) 的 `download.js` 当前列出 R5，发布日期 2026-04-02。页面明确要求同意许可，且下载即视为同意；用户已于本轮明确同意并授权下载用于本机开发。
 
 获得授权后可使用 `scripts/install_core.py --accept-sdk-license` 从该页面实际引用的官方 URL 下载，或传入已下载的 SDK ZIP。脚本仅安装 Core，不覆盖固定 Samples / Framework。
 
@@ -34,4 +34,6 @@ cmake -S vendor/CubismNativeSamples/Samples/OpenGL/Demo/proj.mac.cmake \
 cmake --build build/official-minimum --parallel 6
 ```
 
-这些是基于当前上游 CMakeLists 的准备命令；实际执行结果将在 TEST_REPORT 中记录。当前尚无 App 构建产物。
+上述命令已执行，configure/build 均 Exit 0。可使用 `python3 scripts/probe_official_demo.py` 进行 90 帧的程序内 GPU readback 验证；运行正常退出，模型可见且帧内容变化。该脚本临时插入采样，构建后恢复上游源文件，不操作桌面输入或捕获桌面。
+
+`python3 scripts/prepare_test_models.py` 将选定工坊模型读取到忽略的 `.local/models/`，保留来源收据，不改动 Steam 资源。`xcrun swift Tests/LegacyCPUProbe.swift` 验证已有 Cubism 2 JS 运行库在进程内 JavaScriptCore 中加载模型，不使用 Pixi 或 WebView。GPU 适配仍待实现。当前尚无自己的 App 产物。

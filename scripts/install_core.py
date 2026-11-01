@@ -5,8 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
-import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,13 +27,13 @@ def main():
     cache.mkdir(parents=True, exist_ok=True)
     archive = args.archive or cache / "CubismSdkForNative-5-r.5.zip"
     if not args.archive:
-        with urllib.request.urlopen(SCRIPT, timeout=60) as response:
-            listing = response.read().decode("utf-8")
+        listing = subprocess.run(["curl", "-fLsS", "--retry", "2", "--max-time", "60", SCRIPT],
+                                 check=True, capture_output=True, text=True).stdout
         if 'CubismSdkForNative-5-r.5.zip' not in listing:
             raise RuntimeError("R5 archive no longer listed by official download page")
         partial = archive.with_suffix(".partial")
-        with urllib.request.urlopen(URL, timeout=60) as response, partial.open("wb") as output:
-            shutil.copyfileobj(response, output)
+        subprocess.run(["curl", "-fL", "--retry", "2", "--max-time", "300",
+                        "--output", str(partial), URL], check=True)
         partial.replace(archive)
     with zipfile.ZipFile(archive) as package:
         entries = [n for n in package.namelist() if "/Core/" in n and not n.endswith("/")]
