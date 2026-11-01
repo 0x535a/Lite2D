@@ -5,6 +5,7 @@
 #include <set>
 #include <map>
 #include <algorithm>
+#include <vector>
 
 @implementation L2DLegacyHost {
  JSContext* _context;
@@ -130,6 +131,69 @@ unsupported:
  [JSContext currentContext].exception=[JSValue valueWithNewErrorFromMessage:_lastError inContext:_context];
  (void)count;return nil;
 }
+- (void)glBatch:(JSValue*)commands buffers:(JSValue*)buffers {
+ // Copy the numeric command stream before making any further JSC API call:
+ // typed-array backing-store pointers may move across those calls.
+ JSObjectRef object=(JSObjectRef)commands.JSValueRef;
+ size_t length=JSObjectGetTypedArrayByteLength(_context.JSGlobalContextRef,object,nullptr)/sizeof(double);
+ size_t offset=JSObjectGetTypedArrayByteOffset(_context.JSGlobalContextRef,object,nullptr);
+ auto* storage=(unsigned char*)JSObjectGetTypedArrayBytesPtr(_context.JSGlobalContextRef,object,nullptr);
+ if(!storage)return;
+ auto* start=(double*)(storage+offset);
+ std::vector<double> stream(start,start+length);
+ size_t cursor=0;
+ auto next=[&]()->double {return cursor<stream.size()?stream[cursor++]:0;};
+ while(cursor<stream.size()) {
+  int op=(int)next();
+  // Evaluate arguments in stream order, never as multiple next() calls in a
+  // GL function's unspecified C++ argument evaluation order.
+  double p[6]={0};
+  static const int arity[]={1,2,2,2,2,2,4,1,1,1,1,1,1,6,4,1,2,5,3,4,4,1,4,3,3};
+  if(op>=0&&op<25)for(int i=0;i<arity[op];++i)p[i]=next();
+  switch(op) {
+   case 0:glActiveTexture(p[0]);break;
+   case 1:glBindBuffer(p[0],p[1]);break;
+   case 2:glBindTexture(p[0],p[1]);break;
+   case 3:glBindFramebuffer(p[0],p[1]);break;
+   case 4:glBindRenderbuffer(p[0],p[1]);break;
+   case 5:glBlendEquationSeparate(p[0],p[1]);break;
+   case 6:glBlendFuncSeparate(p[0],p[1],p[2],p[3]);break;
+   case 7:glEnable(p[0]);break;
+   case 8:glDisable(p[0]);break;
+   case 9:glFrontFace(p[0]);break;
+   case 10:glCullFace(p[0]);break;
+   case 11:glEnableVertexAttribArray(p[0]);break;
+   case 12:glDisableVertexAttribArray(p[0]);break;
+   case 13:glVertexAttribPointer(p[0],p[1],p[2],p[3]!=0,p[4],(void*)(uintptr_t)p[5]);break;
+   case 14:glDrawElements(p[0],p[1],p[2],(void*)(uintptr_t)p[3]);break;
+   case 15:glUseProgram(p[0]);break;
+   case 16:glUniform1i(p[0],p[1]);break;
+   case 17:glUniform4f(p[0],p[1],p[2],p[3],p[4]);break;
+   case 18:glTexParameteri(p[0],p[1],p[2]);break;
+   case 19:glViewport(p[0],p[1],p[2],p[3]);break;
+   case 20:glClearColor(p[0],p[1],p[2],p[3]);break;
+   case 21:glClear(p[0]);break;
+   case 22:glColorMask(p[0]!=0,p[1]!=0,p[2]!=0,p[3]!=0);break;
+   case 23: {
+    JSValue* value=[buffers valueAtIndex:(NSUInteger)p[2]];
+    JSObjectRef array=(JSObjectRef)value.JSValueRef;
+    size_t bytes=JSObjectGetTypedArrayByteLength(_context.JSGlobalContextRef,array,nullptr);
+    size_t base=JSObjectGetTypedArrayByteOffset(_context.JSGlobalContextRef,array,nullptr);
+    auto* source=(unsigned char*)JSObjectGetTypedArrayBytesPtr(_context.JSGlobalContextRef,array,nullptr);
+    glBufferData(p[0],bytes,source?source+base:nullptr,p[1]);break;
+   }
+   case 24:glBufferData(p[0],p[1],nullptr,p[2]);break;
+   case 25: {
+    GLint location=(GLint)next();GLboolean transpose=next()!=0;size_t count=(size_t)next();
+    if(count>256||cursor+count*16>stream.size())return;
+    std::vector<GLfloat> matrices(count*16);
+    for(auto& value:matrices)value=(GLfloat)next();
+    glUniformMatrix4fv(location,(GLsizei)count,transpose,matrices.data());break;
+   }
+   default:_lastError=@"Unknown GL batch opcode";return;
+  }
+ }
+}
 - (BOOL)loadPath:(NSString*)path error:(NSError**)error {
  glewExperimental=GL_TRUE;
  if(glewInit()!=GLEW_OK){if(error)*error=[NSError errorWithDomain:@"Lite2D.Legacy" code:2 userInfo:@{NSLocalizedDescriptionKey:@"GLEW initialization failed"}];return NO;}
@@ -139,6 +203,7 @@ unsupported:
   L2DLegacyHost* host=weakSelf;if(host)host->_lastError=exception.toString;fprintf(stderr,"Legacy: %s\n",exception.toString.UTF8String);
  };
  _context[@"__gl"]=^id(NSString* name,JSValue* args){return [weakSelf glCall:name args:args];};
+ _context[@"__glBatch"]=^(JSValue* commands,JSValue* buffers){[weakSelf glBatch:commands buffers:buffers];};
  _context[@"__log"]=^(NSString* text){fprintf(stderr,"Legacy SDK: %s\n",text.UTF8String);};
  NSMutableDictionary* constants=[NSMutableDictionary dictionary];
 #define CONST(NAME) constants[@#NAME]=@(GL_##NAME)

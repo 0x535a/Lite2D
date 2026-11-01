@@ -57,3 +57,13 @@ python3 scripts/probe_app.py .local/models/bilibili-33/model.json --name legacy-
 ```
 
 运行库安装器默认读取本机已有 RimeLive2D 中的 `live2d.min.js`，也可传入已有合法文件路径。没有从第三方下载 Core，不提交运行库或模型。宿主适配脚本 `Resources/legacy-host.js` 为本项目代码。兼容路径使用进程内 JavaScriptCore 加原生 OpenGL，既不启动浏览器，也不启动额外常驻服务；实际性能须后续测量。
+
+## 多实例验证
+
+```sh
+python3 scripts/run_integration.py
+xcrun swiftc -parse-as-library App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+.local/verification/unit/settings-tests
+```
+
+集成测试通过独立 `LITE2D_SETTINGS_PATH` 隔离设置；运行 22/33/Haru 和重复模型，进行 30 增删、20 替换与新进程恢复。内部帧捕获和 JSON 结果保存在 `.local/verification/integration/`，程序正常退出；不依赖 Computer Use。`scripts/probe_app.py` 可继续单模型诊断。

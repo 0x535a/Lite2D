@@ -2,7 +2,7 @@
 
 个人自用的 macOS 菜单栏 Live2D 播放器，使用 Swift、AppKit 和 OpenGL。目标是在一个进程中同时显示多个模型，各实例独立管理窗口、动画、视线追踪和持久化状态。
 
-项目正在实施，当前不能作为已完成播放器使用。真实验证记录见 [TEST_REPORT.md](TEST_REPORT.md)，依赖和构建步骤见 [BUILD.md](BUILD.md)。
+项目正在实施，当前可运行菜单栏播放器已支持多实例，最终性能与桌面体验验收仍在进行。真实验证记录见 [TEST_REPORT.md](TEST_REPORT.md)，依赖和构建步骤见 [BUILD.md](BUILD.md)。
 
 首批测试模型为 **Bilibili 22娘**（工坊 3291128407）和 **BiliBili33娘**（1831347285）。它们使用 Cubism 2 `.moc`，因此在 Cubism 5 Native `.moc3` 支持之外增加旧版兼容路径；不能将 `.moc` 改名来转换格式。模型、Core 和其他专有运行库不随源码提交。
 
@@ -11,3 +11,11 @@
 原始需求和本机模型盘点在 git 已忽略的 `doc/` 中，不提交该目录。开发与测试进展记录在根目录文档，随代码分阶段提交。
 
 本项目是个人自用实验项目，不代表 Live2D 官方授权公开发行。可导入任意模型的播放器可能属于 Expandable Application，公开发行前须单独确认官方许可；模型作者许可独立适用。详见 [第三方说明](docs/THIRD_PARTY_NOTICES.md)。
+
+## 运行与控制
+
+构建后运行 `dist/Lite2D.app`。菜单栏人物图标 → 添加模型，可选模型 JSON 或文件夹；同一路径可重复添加。每个实例子菜单按名称和 UUID 短码区分，提供显示、编辑/穿透、追踪和平滑、暂停、动作/Idle/表情、30/60 FPS、缩放、置前、位置重置、重命名、更换、复制和移除。可撤销最近一次移除。
+
+编辑模式可拖动模型窗口，滚轮缩放；选择另一个实例编辑会让前一个回到穿透。日常穿透仍采样全局鼠标。全部隐藏是临时覆盖，再次恢复保留每实例偏好。默认配置保存于 `~/Library/Application Support/Lite2D/settings.json`，退出自动保存并在重启恢复；失效模型在菜单中单独标错，可更换或移除。没有 Dock 图标时仍可从菜单栏恢复窗口和退出。
+
+资源不随仓库附带。首次使用本机 22/33娘按 BUILD.md 准备，添加 `.local/models/bilibili-22/model.json`、`.local/models/bilibili-33/model.json`。`python3 scripts/run_integration.py` 使用隔离设置运行集成测试，不覆盖日常布局。

@@ -42,12 +42,14 @@ target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framewor
 set_target_properties(Lite2D PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dist")
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js")
 add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE:Lite2D>.d"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/FrameworkShaders"
   COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/legacy-host.js"
   COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")
+  set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")
   add_custom_command(TARGET Lite2D PRE_LINK
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/legacy-core.js")

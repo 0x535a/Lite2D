@@ -16,4 +16,7 @@ for name in ["CubismShader_OpenGLES2", "CubismOffscreenManager_OpenGLES2"]:
     # Erase the context slot when its resources are explicitly destroyed.
     source = source.replace("s_instance = NULL;", "s_instances.erase(CGLGetCurrentContext());")
     source = source.replace("s_instance = nullptr;", "s_instances.erase(CGLGetCurrentContext());")
-    (output / (name + ".cpp")).write_text("#include <GL/glew.h>\n#include <map>\n#include <OpenGL/OpenGL.h>\n" + source)
+    destination = output / (name + ".cpp")
+    generated = "#include <GL/glew.h>\n#include <map>\n#include <OpenGL/OpenGL.h>\n" + source
+    if not destination.exists() or destination.read_text() != generated:
+        destination.write_text(generated)
