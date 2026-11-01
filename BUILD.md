@@ -1,0 +1,37 @@
+# 构建记录
+
+## 本机环境
+
+2026-11-01：Apple M3 Pro（12 核 CPU / 18 核 GPU），18 GB；macOS 27.2 (26B123)，arm64；Xcode 27.2 (27B52)，SDK 27.2；CMake 4.4.5，Ninja。三显示器均为 2× backing scale，存在负屏幕坐标。
+
+`xcrun swift` 实际编译运行 AppKit / OpenGL 导入及 NSOpenGLView 类访问成功，Exit 0。OpenGL 的弃用警告属于首版已接受技术债；该检查不证明模型渲染成功。
+
+## 固定依赖
+
+- CubismNativeSamples：官方 `5-r.5`，`b8024738f108e6003e4925193e8d5ec04cd18196`。
+- CubismNativeFramework：Samples 引用的 `c5cc765a885ac95e07fde93f300fab019f8c11f7`。
+- GLEW 2.2.0 / GLFW 3.4：使用官方 Sample 提供的下载脚本。
+- Cubism Core：须从官方 SDK 获取，不能从未知镜像获取或提交二进制。
+
+```sh
+git submodule update --init --recursive
+sh vendor/CubismNativeSamples/Samples/OpenGL/thirdParty/scripts/setup_glew_glfw
+```
+
+官方 [Native 下载页](https://www.live2d.com/en/sdk/download/native/) 的 `download.js` 当前列出 R5，发布日期 2026-04-02。页面明确要求同意许可，且下载即视为同意；本轮已请求用户授权，确认前不下载 SDK。
+
+获得授权后可使用 `scripts/install_core.py --accept-sdk-license` 从该页面实际引用的官方 URL 下载，或传入已下载的 SDK ZIP。脚本仅安装 Core，不覆盖固定 Samples / Framework。
+
+## 官方 Minimum Demo
+
+先完成官方 Demo 的构建与可见模型验证，再集成 AppKit。官方 NOTICE 指出 GLEW 2.2.0 与 CMake 4 的兼容问题，因此使用 CMake 的 `CMAKE_POLICY_VERSION_MINIMUM=3.5` 兼容参数，保留上游源码。
+
+```sh
+cmake -S vendor/CubismNativeSamples/Samples/OpenGL/Demo/proj.mac.cmake \
+  -B build/official-minimum -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCSM_MINIMUM_DEMO=ON \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build/official-minimum --parallel 6
+```
+
+这些是基于当前上游 CMakeLists 的准备命令；实际执行结果将在 TEST_REPORT 中记录。当前尚无 App 构建产物。

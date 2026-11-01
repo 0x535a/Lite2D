@@ -1,2 +1,14 @@
 # personal doc
-doc
+doc/
+.DS_Store
+build/
+dist/
+.local/
+*.xcuserstate
+xcuserdata/
+# Proprietary runtimes and personal model assets are local-only.
+Resources/LegacyRuntime/
+*.moc
+*.moc3
+*.lpk
+*.wpk
