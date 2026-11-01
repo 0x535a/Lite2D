@@ -45,3 +45,15 @@ python3 scripts/probe_app.py vendor/CubismNativeSamples/Samples/Resources/Hiyori
 ```
 
 构建和程序内 GPU 验证均 Exit 0。产物 `dist/Lite2D.app` 为 ARM64，使用 ad-hoc 签名。当前仅为基础渲染里程碑，功能进度见 TEST_REPORT。CMake 生成原生项目；GL 资源隔离补丁在构建目录生成，固定上游源码保持原样。
+
+## 旧版模型兼容依赖
+
+```sh
+python3 scripts/install_legacy_runtime.py
+python3 scripts/prepare_test_models.py
+sh scripts/build.sh
+python3 scripts/probe_app.py .local/models/bilibili-22/model.json --name legacy-22
+python3 scripts/probe_app.py .local/models/bilibili-33/model.json --name legacy-33
+```
+
+运行库安装器默认读取本机已有 RimeLive2D 中的 `live2d.min.js`，也可传入已有合法文件路径。没有从第三方下载 Core，不提交运行库或模型。宿主适配脚本 `Resources/legacy-host.js` 为本项目代码。兼容路径使用进程内 JavaScriptCore 加原生 OpenGL，既不启动浏览器，也不启动额外常驻服务；实际性能须后续测量。

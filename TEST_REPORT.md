@@ -35,6 +35,13 @@
 - R5 的 shader / offscreen pool 原为全局单例。构建时生成按 CGLContext 区分的版本，不修改 submodule；下一阶段需多上下文增删实测。
 - 单实例原型可通过命令行传模型路径，显示透明穿透窗口并提供退出菜单。尚未完成输入校验、添加模型菜单、鼠标追踪、多实例和恢复，不能认定完整 M1 错误输入验收或 M2–M5 通过。
 
+## Cubism 2 兼容路径（22/33娘已实际绘制）
+
+- 复用本机已有 `Live2D 2.1.00_1` 运行库，在每实例独立 JavaScriptCore VM 执行；绘制调用映射到该实例的原生 OpenGL context。未引入 Pixi、DOM、WebView、浏览器或其他进程；不自行实现 `.moc` 解码/蒙版。
+- `python3 scripts/probe_app.py .local/models/bilibili-22/model.json --name legacy-22` 和 33 对应命令均 Exit 0，30 帧正常退出，GL error=0。内部帧图确认角色完整纹理和透明背景。
+- 22娘可见 alpha 129442 像素，33娘 126084 像素（720×1080）。修复 GLEW 初始化、TypedArray backing-store 字节偏移、Cubism 2 所需 texture flipY 和预乘 alpha。未将首次贴图错位但 GL error=0 的结果计为通过。
+- 专有旧运行库只存在忽略目录；来源收据位于 `Resources/LegacyRuntime/source-receipt.json`。仅测试选定模型，未声称任意 Cubism 2 表情/物理均已支持。
+
 ## M2–M5
 
 尚未完成。F01–F24 均未验收；0–4 实例性能、30 次增删、20 次替换、5 分钟静止及 2 分钟鼠标负载均未测量。无 `.app` 交付物。后续记录必须包含实际命令、Exit Code、场景与数据，不能用计划代替结果。
