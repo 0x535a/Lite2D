@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var status: StatusBarController!
     var exitCode: Int32 = 0
     var selfTest: SelfTestRunner?
+    var benchmark: BenchmarkRunner?
     private var terminating = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         do { try L2DBridge.startRuntime(at: Bundle.main.resourcePath!) }
@@ -28,6 +29,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selfTest = runner
             if CommandLine.arguments.contains("--verify-restore") { runner.verifyRestored() } else { runner.run() }
             return
+        }
+        if CommandLine.arguments.contains("--benchmark") {
+            let env = ProcessInfo.processInfo.environment
+            let output = URL(fileURLWithPath: env["LITE2D_BENCH_OUTPUT"] ?? ".local/verification/benchmark")
+            let runner = BenchmarkRunner(manager: manager, output: output,
+                                         staticSeconds: Double(env["LITE2D_STATIC_SECONDS"] ?? "300") ?? 300,
+                                         movingSeconds: Double(env["LITE2D_MOVING_SECONDS"] ?? "120") ?? 120) { [weak self] code in
+                self?.exitCode = code; NSApp.terminate(nil)
+            }
+            benchmark = runner; runner.run(); return
         }
         if let directory = probeDirectory {
             guard let controller = manager.records.first?.controller else { exitCode = 2; NSApp.terminate(nil); return }
