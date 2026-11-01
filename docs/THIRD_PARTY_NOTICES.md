@@ -7,3 +7,5 @@
 - 旧版 Cubism 2 兼容运行时仍在核实，确认技术及来源后补充条目，不宣称 Cubism 5 Core 可以直接兼容旧模型。
 
 个人开发许可不等于发行许可。该应用可导入不定数量模型，可能属于 [Expandable Application](https://www.live2d.com/en/sdk/license/expandable/)，公开发行前应向 Live2D 核实并完成相应协议。源码、Core、模型各自的许可不能互相替代。
+
+宿主复用 Framework 的公共 API，NativeHost 的资源加载和更新流程参照官方 Minimum Demo；依赖中的版权与许可仍适用。`scripts/isolate_gl_contexts.py` 仅生成 GL 资源单例按 context 隔离的构建副本，不改变模型解码、物理或蒙版算法。

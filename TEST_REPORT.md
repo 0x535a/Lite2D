@@ -26,6 +26,15 @@
 - `xcrun swift Tests/LegacyCPUProbe.swift` Exit 0：22/33娘分别以独立 JavaScriptCore context 成功通过已有旧版运行库加载，canvas 均 1000×1200，首个 drawable 分别 18/8 个坐标，SDK error=0。这仅验证 CPU 模型数据，不代表旧版 GPU 渲染通过。
 - 旧版运行时技术验证；Cubism 5 Core 不支持 `.moc`，不能假定已兼容。
 
-## M1–M5
+## M1 AppKit 宿主（基础渲染已验证）
+
+- `sh scripts/build.sh` Exit 0；`dist/Lite2D.app/Contents/MacOS/Lite2D` 为 arm64；`codesign --verify --strict dist/Lite2D.app` Exit 0（本机 ad-hoc 签名）。
+- `python3 scripts/probe_app.py vendor/CubismNativeSamples/Samples/Resources/Hiyori/Hiyori.model3.json --name native-app` Exit 0。30 帧后自行正常退出，720×1080 backing buffer，GL error=0。
+- 内部 RGBA 捕获有 135176 个可见 alpha 像素、642424 个全透明像素，各 RGB 通道非零；检查 PNG 确认角色纹理。捕获来自本程序 framebuffer，不使用 Computer Use 或桌面截图。
+- 修复 SDK Option 回调对象生命周期（必须进程级存活）、R5 强制 mipmap 采样导致黑色模型、Scale 覆盖投影比例的问题。
+- R5 的 shader / offscreen pool 原为全局单例。构建时生成按 CGLContext 区分的版本，不修改 submodule；下一阶段需多上下文增删实测。
+- 单实例原型可通过命令行传模型路径，显示透明穿透窗口并提供退出菜单。尚未完成输入校验、添加模型菜单、鼠标追踪、多实例和恢复，不能认定完整 M1 错误输入验收或 M2–M5 通过。
+
+## M2–M5
 
 尚未完成。F01–F24 均未验收；0–4 实例性能、30 次增删、20 次替换、5 分钟静止及 2 分钟鼠标负载均未测量。无 `.app` 交付物。后续记录必须包含实际命令、Exit Code、场景与数据，不能用计划代替结果。

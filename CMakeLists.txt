@@ -1,0 +1,48 @@
+cmake_minimum_required(VERSION 3.25)
+project(Lite2D LANGUAGES C CXX OBJCXX Swift)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_OBJCXX_STANDARD 17)
+set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0)
+set(SDK "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CubismNativeSamples")
+set(CORE "${SDK}/Core")
+set(THIRD "${SDK}/Samples/OpenGL/thirdParty")
+if(NOT EXISTS "${CORE}/lib/macos/arm64/libLive2DCubismCore.a")
+  message(FATAL_ERROR "Install official Core first: python3 scripts/install_core.py --accept-sdk-license")
+endif()
+set(BUILD_UTILS OFF CACHE BOOL "" FORCE)
+add_subdirectory("${THIRD}/glew/build/cmake" "${CMAKE_BINARY_DIR}/glew")
+set(FRAMEWORK_SOURCE OpenGL)
+add_subdirectory("${SDK}/Framework" "${CMAKE_BINARY_DIR}/Framework")
+target_compile_definitions(Framework PUBLIC CSM_TARGET_MAC_GL)
+target_include_directories(Framework PUBLIC "${CORE}/include" "${THIRD}/glew/include")
+
+# R5 uses process singletons for shader/FBO pools. Each Lite2D GL context must
+# own them separately. Generate patched build copies; the pinned submodule stays
+# intact. No model, physics or masking implementation is replaced.
+execute_process(COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/isolate_gl_contexts.py"
+  "${SDK}/Framework" "${CMAKE_BINARY_DIR}/context-isolation" COMMAND_ERROR_IS_FATAL ANY)
+get_target_property(FRAMEWORK_SOURCES Framework SOURCES)
+foreach(NAME CubismShader_OpenGLES2 CubismOffscreenManager_OpenGLES2)
+  list(FILTER FRAMEWORK_SOURCES EXCLUDE REGEX "/${NAME}\\.cpp$")
+  list(APPEND FRAMEWORK_SOURCES "${CMAKE_BINARY_DIR}/context-isolation/${NAME}.cpp")
+endforeach()
+set_property(TARGET Framework PROPERTY SOURCES "${FRAMEWORK_SOURCES}")
+target_include_directories(Framework PRIVATE "${SDK}/Framework/src/Rendering/OpenGL")
+target_link_libraries(Framework PUBLIC "${CORE}/lib/macos/arm64/libLive2DCubismCore.a" glew_s "-framework OpenGL")
+
+add_library(Lite2DEngine STATIC Engine/NativeHost.mm Bridge/Live2DBridge.mm)
+target_include_directories(Lite2DEngine PRIVATE Engine Bridge "${THIRD}/stb")
+target_compile_options(Lite2DEngine PRIVATE -fobjc-arc -Wno-deprecated-declarations)
+target_link_libraries(Lite2DEngine PUBLIC Framework "-framework Foundation" "-framework AppKit" "-framework JavaScriptCore")
+
+file(GLOB APP_SOURCES CONFIGURE_DEPENDS "App/*.swift")
+add_executable(Lite2D MACOSX_BUNDLE ${APP_SOURCES})
+target_compile_options(Lite2D PRIVATE -import-objc-header "${CMAKE_CURRENT_SOURCE_DIR}/Bridge/Live2DBridge.h")
+target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framework QuartzCore" "-framework OpenGL" "-lc++")
+set_target_properties(Lite2D PROPERTIES
+  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dist")
+add_custom_command(TARGET Lite2D POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE:Lite2D>.d"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/FrameworkShaders"
+  COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")

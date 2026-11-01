@@ -36,4 +36,12 @@ cmake --build build/official-minimum --parallel 6
 
 上述命令已执行，configure/build 均 Exit 0。可使用 `python3 scripts/probe_official_demo.py` 进行 90 帧的程序内 GPU readback 验证；运行正常退出，模型可见且帧内容变化。该脚本临时插入采样，构建后恢复上游源文件，不操作桌面输入或捕获桌面。
 
-`python3 scripts/prepare_test_models.py` 将选定工坊模型读取到忽略的 `.local/models/`，保留来源收据，不改动 Steam 资源。`xcrun swift Tests/LegacyCPUProbe.swift` 验证已有 Cubism 2 JS 运行库在进程内 JavaScriptCore 中加载模型，不使用 Pixi 或 WebView。GPU 适配仍待实现。当前尚无自己的 App 产物。
+`python3 scripts/prepare_test_models.py` 将选定工坊模型读取到忽略的 `.local/models/`，保留来源收据，不改动 Steam 资源。`xcrun swift Tests/LegacyCPUProbe.swift` 验证已有 Cubism 2 JS 运行库在进程内 JavaScriptCore 中加载模型，不使用 Pixi 或 WebView。GPU 适配仍待实现。
+## AppKit 原型构建
+
+```sh
+sh scripts/build.sh
+python3 scripts/probe_app.py vendor/CubismNativeSamples/Samples/Resources/Hiyori/Hiyori.model3.json --name native-app
+```
+
+构建和程序内 GPU 验证均 Exit 0。产物 `dist/Lite2D.app` 为 ARM64，使用 ad-hoc 签名。当前仅为基础渲染里程碑，功能进度见 TEST_REPORT。CMake 生成原生项目；GL 资源隔离补丁在构建目录生成，固定上游源码保持原样。
