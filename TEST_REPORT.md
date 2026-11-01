@@ -124,3 +124,9 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 应用作者提供的分层 AppIcon，actool 构建成功，产物包含 Assets.car / AppIcon.icns，签名检查通过。README 加入去除 EXIF/XMP 元数据的静态预览，并移除具体模型名称。测试工具改用通用本地别名、显式运行库路径与显式工坊选择；未重新运行模型压力测试，历史性能数字仍为原先记录。
 
 根仓库历史 Gitleaks 无命中，个人绝对路径/已知设备标识规则未命中；作者邮箱按用户要求保留，未改写历史。自有代码加入 MIT，第三方 SDK 与发布许可单独适用；源码公开不是 Live2D 发行授权证明。具体边界见 docs/PUBLIC_RELEASE_AUDIT.md。
+
+## 本机安装交付（2026-11-02）
+
+新构建目录 `build/deploy` configure/build Exit 0，版本 0.1.1 / build 2；图标 Assets.car 和 AppIcon.icns 均存在，安装前后及 dist 签名校验通过。安装到 `/Applications/Lite2D.app`，仅刷新该应用的 LaunchServices 注册；NSWorkspace 文件级图标服务返回项目自定义图标。旧 dist 和原设置有本地回退备份。
+
+两个用户选定模型已逐文件校验后复制到用户 Application Support 数据目录，配置含两个独立实例，绑定当前主显示器，不引用项目模型目录。已从安装路径正常启动：进程存活、启动日志无模型失败标记，WindowServer 元数据显示两个在线浮动模型窗口。私人模型名、路径、显示器 UUID、导入收据和启动日志仅保留本机，不写入公开文档或 git。没有追加压力测试或真实开机测试。

@@ -120,3 +120,9 @@ xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings
 测试脚本使用通用本地夹具 `legacy-a` / `legacy-b`，不内置个人模型选择。准备工坊测试资源时显式提供 `--item ID:ALIAS`，只处理你有权使用的本地资源；也可自行准备标准模型目录。安装旧版运行库须提供授权文件路径。模型收据、真实路径、测试日志和所有生成物保留在忽略目录中。
 
 自有代码采用 MIT；Live2D 相关组件、衍生部分及发行要求单独适用。不要把 `.local`、`doc`、SDK Core、模型或本机 `.app` 当作源码公开包附带上传，详见 `docs/PUBLIC_RELEASE_AUDIT.md`。
+
+## 本机安装
+
+本机安装产物位于 `/Applications/Lite2D.app`，版本 0.1.1（build 2）；`dist/Lite2D.app` 同步更新。此版本使用新的构建目录重新编译、在签名前生成图标资源，并对安装路径单独刷新 LaunchServices 注册，未清除全局图标缓存。
+
+模型应存放在稳定的数据目录，例如 `~/Library/Application Support/Lite2D/Models/`，不依赖项目目录。部署时备份现有设置，按现有 schema 追加模型实例并绑定显示器，不把私人资产或配置加入 git。登录启动沿用系统设置，不因安装而自动开启。
