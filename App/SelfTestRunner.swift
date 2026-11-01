@@ -23,6 +23,9 @@ final class SelfTestRunner {
     var fps: [String: Double] = [:]
     var callbackCounters: [UInt64] = []
     var memorySamples: [[String: Any]] = []
+    var originalDisplays: [DisplayDescriptor] = []
+    var offlineDisplayID = ""
+    var savedDisplayPosition: DisplayPosition?
     private var removedViews: [WeakModelView] = []
     private var finished = false
 
@@ -132,18 +135,59 @@ final class SelfTestRunner {
         manager.edit(b)
         for screen in NSScreen.screens {
             let controller = manager.record(a)!.controller!
+            let anchorBeforeSystemMove = manager.record(a)!.settings.displayPosition
             controller.window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 20, y: screen.visibleFrame.minY + 20))
+            try check(manager.record(a)!.settings.displayPosition == anchorBeforeSystemMove, "System-originated window moves do not rewrite a saved display anchor")
+            controller.view.onDragFinished?(controller.window.frame)
+            let expectedDisplay = DisplayLayout.matching(controller.window.frame, in: manager.displayRegistry.displays)
+            try check(manager.record(a)!.settings.displayUUID == expectedDisplay?.id, "User drag callback explicitly updates the physical display binding")
             let point = NSPoint(x: screen.frame.midX, y: screen.frame.midY)
             let local = controller.window.convertPoint(fromScreen: point)
             let roundTrip = controller.window.convertPoint(toScreen: local)
             try check(abs(roundTrip.x - point.x) < 0.01 && abs(roundTrip.y - point.y) < 0.01, "Coordinate conversion round trip: \(screen.localizedName)")
         }
-        let displaced = manager.record(a)!.controller!
-        displaced.window.setFrameOrigin(NSPoint(x: 500_000, y: 500_000))
-        manager.record(a)!.settings.windowFrame = WindowFrame(displaced.window.frame)
-        NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
-        try check(NSScreen.screens.contains { displaced.window.frame.intersection($0.visibleFrame).width >= 80 && displaced.window.frame.intersection($0.visibleFrame).height >= 80 }, "Screen-change notification recovers an offscreen instance into a visible screen")
         manager.resetPosition(a)
+        originalDisplays = manager.displayRegistry.displays
+        try check(originalDisplays.count >= 2, "Display binding integration uses two actual display identities")
+        offlineDisplayID = originalDisplays[0].id
+        manager.bind(a, to: offlineDisplayID)
+        manager.bind(b, to: originalDisplays[1].id)
+        savedDisplayPosition = manager.record(a)!.settings.displayPosition
+        let cached = manager.record(a)!.settings.windowFrame
+        manager.displayRegistry.testingDisplays = originalDisplays.filter { $0.id != offlineDisplayID }
+        NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        try check(!manager.record(a)!.controller!.window.isVisible && !manager.record(a)!.controller!.view.active, "Disconnecting bound display hides and unschedules its instance")
+        try check(manager.record(a)!.settings.windowFrame == cached && manager.record(a)!.settings.displayPosition == savedDisplayPosition, "Display absence preserves saved global cache and screen-local anchor")
+        try check(manager.record(b)!.controller!.window.isVisible, "Instance bound to another display remains visible")
+        rememberFrames()
+        later(0.5) { try self.disconnectedDisplay() }
+    }
+    private func disconnectedDisplay() throws {
+        try check(try view(a).frames == counters[a], "Disconnected display instance draws zero frames")
+        try check(try view(b).frames > counters[b]!, "Other display instance continues rendering")
+        manager.bringForward(a)
+        manager.toggleAllHidden(); manager.toggleAllHidden()
+        try check(!manager.record(a)!.controller!.window.isVisible, "Bring-forward and global restore cannot surface an offline-bound instance")
+        let offlineCopy = try manager.duplicate(a)!
+        try check(offlineCopy.settings.displayUUID == offlineDisplayID && !offlineCopy.controller!.window.isVisible, "Duplicating an offline binding stays on the absent display")
+        manager.bind(offlineCopy.settings.id, to: originalDisplays[1].id)
+        try check(offlineCopy.controller!.window.isVisible && manager.record(a)!.settings.displayUUID == offlineDisplayID, "Explicit rebind shows only the selected offline instance on the chosen display")
+        manager.remove(offlineCopy.settings.id)
+        manager.save()
+        try check(manager.store.load().instances.first { $0.id == a }?.displayUUID == offlineDisplayID, "Disconnected binding persists without changing its display identity")
+        let original = originalDisplays[0]
+        let relocated = DisplayDescriptor(id: original.id, name: original.name, frame: original.frame.offsetBy(dx: 30, dy: -20), visibleFrame: original.visibleFrame.offsetBy(dx: 30, dy: -20))
+        manager.mutate(a) { $0.isVisible = false }
+        manager.displayRegistry.testingDisplays = [relocated] + originalDisplays.dropFirst()
+        manager.refreshDisplayBindings()
+        try check(!manager.record(a)!.controller!.window.isVisible, "Reconnecting a display preserves a user's explicit hidden preference")
+        manager.mutate(a) { $0.isVisible = true }
+        let frame = manager.record(a)!.controller!.window.frame
+        try check(abs(frame.minX - relocated.frame.minX - savedDisplayPosition!.x) < 1 && abs(frame.minY - relocated.frame.minY - savedDisplayPosition!.y) < 1, "Reconnected and reordered display restores the same screen-local position")
+        try check(manager.record(a)!.controller!.window.isVisible && manager.record(a)!.settings.displayUUID == offlineDisplayID, "Display reconnection restores visibility without rebinding")
+        manager.displayRegistry.testingDisplays = nil
+        manager.refreshDisplayBindings()
+        try check(manager.record(a)!.settings.displayPosition == savedDisplayPosition, "Returning to actual topology preserves the anchor")
         manager.mutate(b) { $0.animationPaused = false }
         manager.mutate(a) { $0.isVisible = false }
         rememberFrames()
@@ -181,12 +225,15 @@ final class SelfTestRunner {
         } else { throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Native test model must have expressions"]) }
         manager.play(a, group: "tap", index: 0)
         manager.setIdle(a, group: "idle")
+        // Measure the two requested rates on the same fixed-refresh display;
+        // the built-in ProMotion panel may adapt its callback rate separately.
+        if let display = manager.displayRegistry.primary { manager.bind(b, to: display.id) }
         manager.mutate(a) { $0.animationPaused = false; $0.targetFPS = 30 }
         manager.mutate(b) { $0.targetFPS = 60 }
         later(0.5) { [self] in
             rememberFrames(); fpsStart = ProcessInfo.processInfo.systemUptime
             callbackCounters = [try view(a).displayCallbacks, try view(b).displayCallbacks, try view(a).scheduledFrames, try view(b).scheduledFrames]
-            later(2) { try self.measureFPS() }
+            later(3) { try self.measureFPS() }
         }
     }
     private func measureFPS() throws {
@@ -198,8 +245,8 @@ final class SelfTestRunner {
         fps["B_callbacks"] = Double(try view(b).displayCallbacks - callbackCounters[1]) / duration
         fps["A_scheduled"] = Double(try view(a).scheduledFrames - callbackCounters[2]) / duration
         fps["B_scheduled"] = Double(try view(b).scheduledFrames - callbackCounters[3]) / duration
-        try check(first >= 22 && first <= 38, "A independently schedules approximately 30 FPS")
-        try check(second >= 44 && second <= 75, "B independently schedules approximately 60 FPS")
+        try check(first >= 27 && first <= 33, "A independently schedules approximately 30 FPS")
+        try check(second >= 54 && second <= 66, "B independently schedules approximately 60 FPS")
         recordMemory("before-add-remove")
         stressAdd(0)
     }
@@ -283,8 +330,8 @@ final class SelfTestRunner {
             for record in manager.records {
                 if FileManager.default.fileExists(atPath: record.settings.modelPath) {
                     try check(record.controller != nil, "Existing asset restores its renderer")
-                    if record.settings.isVisible { _ = try capture(record.settings.id, label: "restored-\(record.settings.id.uuidString.prefix(4))") }
-                    else { try check(record.controller?.view.frames == 0, "Restored hidden instance draws zero frames") }
+                    if record.settings.isVisible && manager.isDisplayConnected(record) { _ = try capture(record.settings.id, label: "restored-\(record.settings.id.uuidString.prefix(4))") }
+                    else { try check(record.controller?.view.frames == 0 && record.controller?.window.isVisible == false, "Restored hidden or offline-bound instance draws zero frames") }
                 } else { try check(record.error != nil && record.controller == nil, "Missing asset is isolated to its own failed descriptor") }
             }
             finish(nil)

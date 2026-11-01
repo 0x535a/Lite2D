@@ -48,13 +48,18 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     var idleMotionGroup: String?
     var expressionId: String?
     var zOrder = 0
+    var displayUUID: String?
+    var boundDisplayName: String?
+    var displayPosition: DisplayPosition?
+    var displayBindingVersion = 1
 
     init(displayName: String, modelPath: String) {
         self.displayName = displayName; self.modelPath = modelPath
     }
     enum CodingKeys: String, CodingKey {
         case id, displayName, modelPath, windowFrame, scale, isVisible, trackingEnabled,
-             trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, expressionId, zOrder
+             trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, expressionId, zOrder,
+             displayUUID, boundDisplayName, displayPosition, displayBindingVersion
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -72,6 +77,10 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         idleMotionGroup = try? c.decode(String.self, forKey: .idleMotionGroup)
         expressionId = try? c.decode(String.self, forKey: .expressionId)
         zOrder = (try? c.decode(Int.self, forKey: .zOrder)) ?? 0
+        displayUUID = try? c.decode(String.self, forKey: .displayUUID)
+        boundDisplayName = try? c.decode(String.self, forKey: .boundDisplayName)
+        displayPosition = try? c.decode(DisplayPosition.self, forKey: .displayPosition)
+        displayBindingVersion = (try? c.decode(Int.self, forKey: .displayBindingVersion)) ?? 0
         sanitize()
     }
     mutating func sanitize() {
@@ -81,11 +90,13 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         trackingSmoothingSeconds = trackingSmoothingSeconds.isFinite ? min(max(trackingSmoothingSeconds, 0.03), 1) : 0.14
         targetFPS = targetFPS == 60 ? 60 : 30
         zOrder = min(max(zOrder, 0), 1_000_000)
+        if displayUUID?.isEmpty == true { displayUUID = nil }
+        displayPosition?.sanitize()
     }
 }
 
 struct AppSettings: Codable {
-    var schemaVersion = 2
+    var schemaVersion = 3
     var instances: [ModelInstanceSettings] = []
     init() {}
     init(from decoder: Decoder) throws {
@@ -99,14 +110,16 @@ struct AppSettings: Codable {
             }
         }
         if instances.isEmpty, let legacy = try? c.decode(String.self, forKey: .modelPath) {
-            instances = [ModelInstanceSettings(displayName: "模型", modelPath: legacy)]
+            var migrated = ModelInstanceSettings(displayName: "模型", modelPath: legacy)
+            migrated.displayBindingVersion = 0
+            instances = [migrated]
         }
         var seen = Set<UUID>()
         for i in instances.indices {
             if !seen.insert(instances[i].id).inserted { instances[i].id = UUID(); seen.insert(instances[i].id) }
             instances[i].sanitize()
         }
-        schemaVersion = 2
+        schemaVersion = 3
     }
     enum CodingKeys: String, CodingKey { case schemaVersion, instances, modelPath }
     func encode(to encoder: Encoder) throws {

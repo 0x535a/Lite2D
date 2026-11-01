@@ -23,7 +23,7 @@ import CoreGraphics
         store.save(settings)
         precondition(store.load().instances == settings.instances, "All independent state must round-trip")
         let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"modelPath":"/old"}"#.utf8))
-        precondition(old.schemaVersion == 2 && old.instances.count == 1)
+        precondition(old.schemaVersion == 3 && old.instances.count == 1)
         try Data("invalid JSON".utf8).write(to: store.url)
         precondition(store.load().instances.isEmpty && store.lastError != nil)
         let backups = try FileManager.default.contentsOfDirectory(at: store.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
@@ -57,6 +57,17 @@ import CoreGraphics
             precondition(abs(resized.frame.midX - zoomFrame.midX) < 0.0001 && resized.frame.minY == zoomFrame.minY)
             zoomFrame = resized.frame; zoomScale = resized.scale
         }
+        let first = DisplayDescriptor(id: "physical-A", name: "A", frame: CGRect(x: 0, y: 0, width: 1920, height: 1280), visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1255))
+        let second = DisplayDescriptor(id: "physical-B", name: "B", frame: CGRect(x: -1080, y: -625, width: 1080, height: 1920), visibleFrame: CGRect(x: -1080, y: -625, width: 1080, height: 1895))
+        var bound = ModelInstanceSettings(displayName: "bound", modelPath: "/model")
+        bound.displayUUID = first.id; bound.boundDisplayName = first.name
+        bound.displayPosition = DisplayPosition(x: 80, y: 50)
+        precondition(DisplayLayout.windowFrame(for: bound, in: [first, second])?.origin == CGPoint(x: 80, y: 50))
+        precondition(DisplayLayout.windowFrame(for: bound, in: [second]) == nil, "Disconnected target must never fall back to another display")
+        let movedDisplay = DisplayDescriptor(id: first.id, name: first.name, frame: CGRect(x: 2160, y: -400, width: 1920, height: 1280), visibleFrame: CGRect(x: 2160, y: -400, width: 1920, height: 1255))
+        precondition(DisplayLayout.windowFrame(for: bound, in: [second, movedDisplay])?.origin == CGPoint(x: 2240, y: -350), "Identity and local position survive screen reorder")
+        let boundRoundTrip = try JSONDecoder().decode(ModelInstanceSettings.self, from: JSONEncoder().encode(bound))
+        precondition(boundRoundTrip.displayUUID == first.id && boundRoundTrip.displayPosition == bound.displayPosition)
         let fixture = directory.appendingPathComponent("model.json")
         func rejects(_ json: [String: Any]) throws {
             try JSONSerialization.data(withJSONObject: json).write(to: fixture)

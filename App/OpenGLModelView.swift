@@ -14,6 +14,7 @@ final class OpenGLModelView: NSOpenGLView {
     let bridge = L2DBridge()
     var settings: ModelInstanceSettings
     var onZoom: ((Double) -> Void)?
+    var onDragFinished: ((NSRect) -> Void)?
     var onFrame: ((OpenGLModelView) -> Void)?
     private var displayLink: CADisplayLink?
     private let measureGPU = ProcessInfo.processInfo.environment["LITE2D_GPU_TIMING"] == "1"
@@ -74,7 +75,9 @@ final class OpenGLModelView: NSOpenGLView {
         lastTime = nil
     }
     func setActive(_ value: Bool) {
-        active = value && loaded
+        let next = value && loaded
+        guard next != active else { return }
+        active = next
         lastTime = nil
         displayLink?.isPaused = !active
         if active { needsDisplay = true }
@@ -149,7 +152,14 @@ final class OpenGLModelView: NSOpenGLView {
         captured = nil
         return result
     }
-    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+    override func mouseDown(with event: NSEvent) {
+        guard settings.interactionMode == .edit, let window else { return }
+        window.performDrag(with: event)
+        onDragFinished?(window.frame)
+    }
+    override func mouseUp(with event: NSEvent) {
+        if settings.interactionMode == .edit, let window { onDragFinished?(window.frame) }
+    }
     override func scrollWheel(with event: NSEvent) {
         guard settings.interactionMode == .edit else { return }
         onZoom?(exp(-event.scrollingDeltaY * 0.012))
@@ -157,7 +167,7 @@ final class OpenGLModelView: NSOpenGLView {
     func shutdown() {
         active = false
         displayLink?.invalidate(); displayLink = nil
-        onFrame = nil; onZoom = nil
+        onFrame = nil; onZoom = nil; onDragFinished = nil
         openGLContext?.makeCurrentContext()
         bridge.unload(); loaded = false
         NSOpenGLContext.clearCurrentContext()

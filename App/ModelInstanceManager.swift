@@ -2,6 +2,7 @@ import AppKit
 
 final class ModelInstanceManager {
     let store: SettingsStore
+    let displayRegistry: DisplayRegistry
     private(set) var records: [ModelRecord] = []
     private(set) var allHidden = false
     private(set) var sleeping = false
@@ -9,15 +10,17 @@ final class ModelInstanceManager {
     var onChange: (() -> Void)?
     private var notifications: [NSObjectProtocol] = []
 
-    init(store: SettingsStore = SettingsStore()) {
+    init(store: SettingsStore = SettingsStore(), displayRegistry: DisplayRegistry = DisplayRegistry()) {
         self.store = store
+        self.displayRegistry = displayRegistry
         let workspace = NSWorkspace.shared.notificationCenter
         notifications.append(workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.setSleeping(true) })
         notifications.append(workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.setSleeping(false) })
-        notifications.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.recoverOffscreenWindows() })
+        notifications.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplayBindings() })
     }
     func restore() {
-        for settings in store.load().instances {
+        for var settings in store.load().instances {
+            preparePlacement(&settings)
             let record = ModelRecord(settings)
             records.append(record)
             load(record)
@@ -28,21 +31,72 @@ final class ModelInstanceManager {
             if edited { record.settings.interactionMode = .passthrough; apply(record) }
             edited = true
         }
-        recoverOffscreenWindows()
-        for record in records.sorted(by: { $0.settings.zOrder < $1.settings.zOrder }) {
-            if record.settings.isVisible { record.controller?.window.orderFrontRegardless() }
-        }
+        refreshDisplayBindings()
         onChange?()
     }
     private func load(_ record: ModelRecord) {
         do {
             record.controller = try ModelInstanceController(record: record)
             record.error = nil
-            record.controller?.onChange = { [weak self] in self?.changed() }
+            configure(record)
             apply(record)
         } catch { record.error = error.localizedDescription; record.controller = nil; NSLog("模型载入失败：%@", error.localizedDescription) }
     }
     func record(_ id: UUID) -> ModelRecord? { records.first { $0.settings.id == id } }
+    private func configure(_ record: ModelRecord) {
+        let id = record.settings.id
+        record.controller?.onZoomRequested = { [weak self] factor in self?.zoom(id, factor: factor) }
+        record.controller?.onUserMoved = { [weak self] frame in self?.move(id, to: frame) }
+    }
+    private func preparePlacement(_ settings: inout ModelInstanceSettings) {
+        let displays = displayRegistry.displays
+        if settings.displayBindingVersion == 0 {
+            // Legacy global frames have no physical identity. Infer only an
+            // intersecting connected display once; never move an unknown frame
+            // to the primary display as a fallback.
+            if let display = DisplayLayout.matching(settings.windowFrame.rect, in: displays) {
+                settings.displayUUID = display.id; settings.boundDisplayName = display.name
+                settings.displayPosition = DisplayPosition(x: settings.windowFrame.x - display.frame.minX,
+                                                          y: settings.windowFrame.y - display.frame.minY)
+            }
+            settings.displayBindingVersion = 1
+        }
+        if let id = settings.displayUUID, let display = displays.first(where: { $0.id == id }) {
+            if settings.displayPosition == nil {
+                settings.displayPosition = DisplayPosition(x: settings.windowFrame.x - display.frame.minX,
+                                                          y: settings.windowFrame.y - display.frame.minY)
+            }
+            settings.boundDisplayName = display.name
+        }
+        if let frame = DisplayLayout.windowFrame(for: settings, in: displays) { settings.windowFrame = WindowFrame(frame) }
+    }
+    func isDisplayConnected(_ record: ModelRecord) -> Bool {
+        DisplayLayout.windowFrame(for: record.settings, in: displayRegistry.displays) != nil
+    }
+    func bind(_ id: UUID, to displayID: String) {
+        guard let record = record(id), let display = displayRegistry.displays.first(where: { $0.id == displayID }) else { return }
+        record.settings.displayUUID = display.id; record.settings.boundDisplayName = display.name
+        record.settings.displayBindingVersion = 1
+        if record.settings.displayPosition == nil {
+            record.settings.displayPosition = DisplayPosition(x: display.visibleFrame.minX - display.frame.minX + 60,
+                                                             y: display.visibleFrame.minY - display.frame.minY + 50)
+        }
+        apply(record); changed()
+    }
+    func move(_ id: UUID, to frame: NSRect) {
+        guard let record = record(id) else { return }
+        if let display = DisplayLayout.matching(frame, in: displayRegistry.displays) {
+            record.settings.displayUUID = display.id; record.settings.boundDisplayName = display.name
+            record.settings.displayBindingVersion = 1
+            record.settings.displayPosition = DisplayPosition(x: frame.minX - display.frame.minX,
+                                                             y: frame.minY - display.frame.minY)
+        } else if let oldPosition = record.settings.displayPosition {
+            record.settings.displayPosition = DisplayPosition(x: oldPosition.x + frame.minX - record.settings.windowFrame.x,
+                                                             y: oldPosition.y + frame.minY - record.settings.windowFrame.y)
+        }
+        record.settings.windowFrame = WindowFrame(frame)
+        apply(record); changed()
+    }
     private func uniqueName(_ base: String) -> String {
         let names = Set(records.map { $0.settings.displayName })
         if !names.contains(base) { return base }
@@ -54,16 +108,21 @@ final class ModelInstanceManager {
         let checked = try ModelFileValidator.validate(url)
         let base = name ?? url.deletingLastPathComponent().lastPathComponent
         var settings = ModelInstanceSettings(displayName: uniqueName(base), modelPath: checked.url.path)
-        let origin = NSScreen.main?.visibleFrame.origin ?? .zero
+        let display = displayRegistry.primary
+        let origin = display?.visibleFrame.origin ?? .zero
         let offset = Double(records.count % 6) * 55
         settings.windowFrame = WindowFrame(NSRect(x: origin.x + 80 + offset, y: origin.y + 60 + offset, width: 360, height: 480))
+        if let display {
+            settings.displayUUID = display.id; settings.boundDisplayName = display.name
+            settings.displayPosition = DisplayPosition(x: settings.windowFrame.x - display.frame.minX,
+                                                      y: settings.windowFrame.y - display.frame.minY)
+        }
         settings.zOrder = (records.map { $0.settings.zOrder }.max() ?? -1) + 1
         let record = ModelRecord(settings)
         // Commit to the instance list only after all engine/GPU loading succeeds.
         let controller = try ModelInstanceController(record: record)
         record.controller = controller
-        controller.onChange = { [weak self] in self?.changed() }
-        records.append(record); apply(record); changed()
+        records.append(record); configure(record); apply(record); changed()
         return record
     }
     @discardableResult func duplicate(_ id: UUID) throws -> ModelRecord? {
@@ -71,12 +130,15 @@ final class ModelInstanceManager {
         var settings = source.settings
         settings.id = UUID(); settings.displayName = uniqueName(source.settings.displayName)
         settings.windowFrame.x += 45; settings.windowFrame.y += 35
+        if let position = settings.displayPosition {
+            settings.displayPosition = DisplayPosition(x: position.x + 45, y: position.y + 35)
+        }
         settings.interactionMode = .passthrough
         settings.zOrder = (records.map { $0.settings.zOrder }.max() ?? -1) + 1
         let next = ModelRecord(settings)
         let controller = try ModelInstanceController(record: next)
-        next.controller = controller; controller.onChange = { [weak self] in self?.changed() }
-        records.append(next); apply(next); changed(); return next
+        next.controller = controller
+        records.append(next); configure(next); apply(next); changed(); return next
     }
     func remove(_ id: UUID) {
         guard let index = records.firstIndex(where: { $0.settings.id == id }) else { return }
@@ -102,7 +164,7 @@ final class ModelInstanceManager {
         let replacement = ModelRecord(settings)
         let controller = try ModelInstanceController(record: replacement)
         replacement.controller = controller
-        controller.onChange = { [weak self] in self?.changed() }
+        configure(replacement)
         guard let index = records.firstIndex(where: { $0.settings.id == id }) else { controller.shutdown(); return }
         old.controller?.shutdown(); old.controller = nil
         records[index] = replacement
@@ -141,32 +203,55 @@ final class ModelInstanceManager {
             record.settings.expressionId = expression.isEmpty ? nil : expression; changed()
         }
     }
-    func zoom(_ id: UUID, factor: Double) { record(id)?.controller?.zoom(by: factor) }
+    func zoom(_ id: UUID, factor: Double) {
+        guard let record = record(id) else { return }
+        let previous = record.settings.windowFrame.rect
+        let resized = ZoomGeometry.resize(frame: previous, currentScale: record.settings.scale, factor: factor)
+        record.settings.scale = resized.scale
+        record.settings.windowFrame = WindowFrame(resized.frame)
+        if let position = record.settings.displayPosition {
+            record.settings.displayPosition = DisplayPosition(x: position.x + resized.frame.minX - previous.minX,
+                                                             y: position.y + resized.frame.minY - previous.minY)
+        }
+        apply(record); changed()
+    }
     func bringForward(_ id: UUID) {
         guard let record = record(id) else { return }
         record.settings.zOrder = (records.map { $0.settings.zOrder }.max() ?? 0) + 1
-        if record.settings.isVisible && !allHidden { record.controller?.window.orderFrontRegardless() }
+        if record.settings.isVisible && !allHidden && isDisplayConnected(record) { record.controller?.window.orderFrontRegardless() }
         changed()
     }
     func resetPosition(_ id: UUID) {
-        guard let record = record(id), let window = record.controller?.window, let screen = NSScreen.main else { return }
-        let bounds = screen.visibleFrame
-        window.setFrameOrigin(NSPoint(x: bounds.minX + 60, y: bounds.minY + 50))
-        record.settings.windowFrame = WindowFrame(window.frame); changed()
+        guard let record = record(id) else { return }
+        if let display = displayRegistry.displays.first(where: { $0.id == record.settings.displayUUID }) {
+            record.settings.displayPosition = DisplayPosition(x: display.visibleFrame.minX - display.frame.minX + 60,
+                                                             y: display.visibleFrame.minY - display.frame.minY + 50)
+        } else { record.settings.displayPosition = DisplayPosition(x: 60, y: 50) }
+        apply(record); changed()
     }
-    func recoverOffscreenWindows() {
-        let screens = NSScreen.screens.map(\.visibleFrame)
-        for record in records {
-            let rect = record.settings.windowFrame.rect
-            if !screens.contains(where: { rect.intersection($0).width >= 80 && rect.intersection($0).height >= 80 }) {
-                resetPosition(record.settings.id)
-            }
+    func refreshDisplayBindings() {
+        for record in records { apply(record) }
+        restoreStacking()
+        changed()
+    }
+    private func restoreStacking() {
+        guard !allHidden else { return }
+        for record in records.sorted(by: { $0.settings.zOrder < $1.settings.zOrder }) {
+            if record.settings.isVisible && isDisplayConnected(record) { record.controller?.window.orderFrontRegardless() }
         }
     }
-    func toggleAllHidden() { allHidden.toggle(); for record in records { apply(record) }; onChange?() }
+    func toggleAllHidden() { allHidden.toggle(); for record in records { apply(record) }; restoreStacking(); onChange?() }
     func setSleeping(_ value: Bool) { sleeping = value; for record in records { apply(record) } }
     private func apply(_ record: ModelRecord) {
-        record.controller?.apply(visible: !allHidden && record.settings.isVisible, sleeping: sleeping)
+        let displayFrame = DisplayLayout.windowFrame(for: record.settings, in: displayRegistry.displays)
+        if let frame = displayFrame {
+            if let display = displayRegistry.displays.first(where: { $0.id == record.settings.displayUUID }) {
+                record.settings.boundDisplayName = display.name
+            }
+            record.settings.windowFrame = WindowFrame(frame)
+            record.controller?.setLayoutFrame(frame)
+        }
+        record.controller?.apply(visible: displayFrame != nil && !allHidden && record.settings.isVisible, sleeping: sleeping)
     }
     func snapshot() -> AppSettings {
         var settings = AppSettings(); settings.instances = records.map(\.settings); return settings

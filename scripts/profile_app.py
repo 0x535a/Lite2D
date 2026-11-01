@@ -80,8 +80,12 @@ def record(template, count, label):
         # xctrace leaves an orphaned, stopped launch placeholder on this host.
         # Clean only new, project-local benchmark processes from this recording.
         cleaned = []
+        owned_targets = {int(target["pid"]) for target in result.get("target", []) if target.get("pid")}
         for pid, info in test_processes().items():
             if pid in before:
+                continue
+            orphan_placeholder = info["parent"] == 1 and info["state"].startswith("T")
+            if pid not in owned_targets and not orphan_placeholder:
                 continue
             try:
                 os.kill(pid, signal.SIGTERM)

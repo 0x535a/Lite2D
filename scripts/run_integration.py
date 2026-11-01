@@ -35,6 +35,10 @@ expected = json.loads((output / "expected-settings.json").read_text())
 missing = dict(expected["instances"][0], id=str(uuid.uuid4()), displayName="Missing asset test",
                modelPath=str(output / "missing/model.json"))
 expected["instances"].append(missing)
+offline = dict(expected["instances"][0], id=str(uuid.uuid4()), displayName="Offline bound display test",
+               displayUUID=str(uuid.uuid4()).upper(), boundDisplayName="Disconnected fixture display",
+               displayBindingVersion=1, displayPosition=dict(x=80, y=50), isVisible=True)
+expected["instances"].append(offline)
 encoded = json.dumps(expected, indent=2) + "\n"
 settings.write_text(encoded)
 (output / "expected-settings.json").write_text(encoded)
