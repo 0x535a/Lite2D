@@ -3,10 +3,9 @@ import JavaScriptCore
 
 // CPU-only compatibility probe, deliberately without AppKit, WebView or Pixi.
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let runtime = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/RimeLive2D/web/vendor/live2d.min.js")
+let runtime = root.appendingPathComponent("Resources/LegacyRuntime/legacy-core.js")
 let sdk = try String(contentsOf: runtime, encoding: .utf8)
-for name in ["bilibili-22", "bilibili-33"] {
+for name in ["legacy-a", "legacy-b"] {
     let context = JSContext()!
     var exceptions: [String] = []
     context.exceptionHandler = { _, value in exceptions.append(value?.toString() ?? "Unknown exception") }

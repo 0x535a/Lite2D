@@ -1,0 +1,121 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.17000,0.17500,0.19500,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.07000,0.07000,0.08000,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "Pointer",
+      "layers": [
+        {
+          "name": "cursor",
+          "image-name": "cursor.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "extended-gray:1.00000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.4
+      }
+    },
+    {
+      "name": "Companion",
+      "layers": [
+        {
+          "name": "face",
+          "image-name": "face.svg",
+          "glass": false
+        },
+        {
+          "name": "body",
+          "image-name": "body.svg",
+          "glass": true
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "name": "Dock",
+      "layers": [
+        {
+          "name": "tiles",
+          "image-name": "tiles.svg",
+          "glass": false
+        },
+        {
+          "name": "dock",
+          "image-name": "dock.svg",
+          "glass": true
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "name": "Desktop",
+      "layers": [
+        {
+          "name": "lights",
+          "image-name": "lights.svg",
+          "glass": false
+        },
+        {
+          "name": "window",
+          "image-name": "window.svg",
+          "glass": true
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

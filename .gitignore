@@ -1,4 +1,4 @@
-# personal doc
+# Local documents, assets and build output
 doc/
 .DS_Store
 build/
@@ -12,3 +12,19 @@ Resources/LegacyRuntime/
 *.moc3
 *.lpk
 *.wpk
+# Private configuration, signing material and diagnostic captures
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+*.trace/
+*.ips
+*.crash
+*.log
+/models/
+/Models/

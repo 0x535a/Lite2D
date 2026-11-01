@@ -8,8 +8,7 @@ import shutil
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("source", nargs="?", type=Path, default=Path.home() /
-                    "Library/Application Support/RimeLive2D/web/vendor/live2d.min.js")
+parser.add_argument("source", type=Path, help="path to a Cubism 2 runtime you are authorized to use")
 args = parser.parse_args()
 data = args.source.read_bytes()
 if b"Live2DModelWebGL" not in data or b"Live2DMotion" not in data:

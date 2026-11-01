@@ -49,14 +49,14 @@ python3 scripts/probe_app.py vendor/CubismNativeSamples/Samples/Resources/Hiyori
 ## 旧版模型兼容依赖
 
 ```sh
-python3 scripts/install_legacy_runtime.py
-python3 scripts/prepare_test_models.py
+python3 scripts/install_legacy_runtime.py "/path/to/authorized/live2d.min.js"
+python3 scripts/prepare_test_models.py --item "<ITEM_ID_A>:legacy-a" --item "<ITEM_ID_B>:legacy-b"
 sh scripts/build.sh
-python3 scripts/probe_app.py .local/models/bilibili-22/model.json --name legacy-22
-python3 scripts/probe_app.py .local/models/bilibili-33/model.json --name legacy-33
+python3 scripts/probe_app.py .local/models/legacy-a/model.json --name legacy-22
+python3 scripts/probe_app.py .local/models/legacy-b/model.json --name legacy-33
 ```
 
-运行库安装器默认读取本机已有 RimeLive2D 中的 `live2d.min.js`，也可传入已有合法文件路径。没有从第三方下载 Core，不提交运行库或模型。宿主适配脚本 `Resources/legacy-host.js` 为本项目代码。兼容路径使用进程内 JavaScriptCore 加原生 OpenGL，既不启动浏览器，也不启动额外常驻服务；实际性能与工具限制见 TEST_REPORT。
+运行库安装器要求显式传入你有权使用的旧版运行库路径，不依赖其他本地项目。没有从第三方下载 Core，不提交运行库或模型。宿主适配脚本 `Resources/legacy-host.js` 为本项目代码。兼容路径使用进程内 JavaScriptCore 加原生 OpenGL，既不启动浏览器，也不启动额外常驻服务；实际性能与工具限制见 TEST_REPORT。
 
 ## 多实例验证
 
@@ -66,7 +66,7 @@ xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings
 .local/verification/unit/settings-tests
 ```
 
-集成测试通过独立 `LITE2D_SETTINGS_PATH` 隔离设置；运行 22/33/Haru 和重复模型，进行 30 增删、20 替换与新进程恢复。内部帧捕获和 JSON 结果保存在 `.local/verification/integration/`，程序正常退出；不依赖 Computer Use。`scripts/probe_app.py` 可继续单模型诊断。
+集成测试通过独立 `LITE2D_SETTINGS_PATH` 隔离设置；运行旧版测试夹具 A/B、官方原生示例和重复模型，进行 30 增删、20 替换与新进程恢复。内部帧捕获和 JSON 结果保存在 `.local/verification/integration/`，程序正常退出；不依赖 Computer Use。`scripts/probe_app.py` 可继续单模型诊断。
 
 ## 资源测量
 
@@ -75,7 +75,7 @@ python3 scripts/benchmark.py
 python3 scripts/summarize_benchmark.py
 ```
 
-默认顺序测量 0/1/2/3/4 实例，每组预热 4 秒、静止目标 300 秒、移动目标 120 秒，约 35 分钟。选定 22/33娘交替加载，3/4 实例包含重复模型。各实例 360×480 points、30 FPS、穿透、追踪/动画开启。模型纹理和运行库全部本机读取，不启动额外运行时服务。每秒记录进程 CPU（100% 代表一个核心）、resident、physical footprint、逐实例 draw 和 GL error。
+默认顺序测量 0/1/2/3/4 实例，每组预热 4 秒、静止目标 300 秒、移动目标 120 秒，约 35 分钟。旧版测试夹具 A/B 交替加载，3/4 实例包含重复模型。各实例 360×480 points、30 FPS、穿透、追踪/动画开启。模型纹理和运行库全部本机读取，不启动额外运行时服务。每秒记录进程 CPU（100% 代表一个核心）、resident、physical footprint、逐实例 draw 和 GL error。
 
 为遵守不使用 Computer Use 的要求，移动阶段使用应用内共享目标轨迹（每秒变化），不移动系统鼠标；这不是人工连续移动鼠标的测试。结果必须按此条件解释。测试配置和输出均隔离于 `.local/verification/performance/`，未完成场景在汇总中明确标记。
 
@@ -112,3 +112,11 @@ xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings
 通过系统 ServiceManagement.framework 的 `SMAppService.mainApp` 管理主应用登录项，要求已签名的 `.app`；现有 ad-hoc 构建在本机登记/撤销验证成功。菜单开关不会在普通启动或恢复模型时自动改动登录设置，也不把系统状态复制成 JSON 布尔值。
 
 项目已移动到 `~/Repo/lite2d`，本轮在新目录下以 `build/login-item` 重新配置，避免复用旧目录的 CMake 绝对路径缓存；产物仍为 `dist/Lite2D.app`。诊断参数 `--login-item-status` 只读系统状态；`--check-login-item-registration` 是显式登记/撤销核验，已有登记时保留原设置。无需重复运行或进行注销/重启压测。
+
+## 应用图标与公开源码
+
+`Resources/AppIcon.icon` 是分层图标源。构建需要支持 Icon Composer `.icon` 的 Xcode 26+（当前验证为 Xcode 27.2）；运行部署目标仍为 macOS 14+。CMake 在签名前调用 actool，生成 `Assets.car` 与旧系统使用的 `AppIcon.icns`；Info.plist 同时配置图标名称与文件。README 使用 `docs/assets/app-icon.png` 静态预览，已去除 EXIF/XMP 文本元数据。
+
+测试脚本使用通用本地夹具 `legacy-a` / `legacy-b`，不内置个人模型选择。准备工坊测试资源时显式提供 `--item ID:ALIAS`，只处理你有权使用的本地资源；也可自行准备标准模型目录。安装旧版运行库须提供授权文件路径。模型收据、真实路径、测试日志和所有生成物保留在忽略目录中。
+
+自有代码采用 MIT；Live2D 相关组件、衍生部分及发行要求单独适用。不要把 `.local`、`doc`、SDK Core、模型或本机 `.app` 当作源码公开包附带上传，详见 `docs/PUBLIC_RELEASE_AUDIT.md`。

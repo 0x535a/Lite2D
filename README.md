@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="docs/assets/app-icon.png" width="128" height="128" alt="Lite2D 图标" />
+</p>
+
 # Lite2D
 
-个人自用的 macOS 原生菜单栏 Live2D 播放器。Swift + AppKit + OpenGL，支持多个同时显示、独立控制的模型实例；首批 Bilibili 22娘和 BiliBili33娘已验证。实际产物：`dist/Lite2D.app`。构建步骤见 [BUILD.md](BUILD.md)，验证与测量见 [TEST_REPORT.md](TEST_REPORT.md)。
+macOS 原生菜单栏 Live2D 播放器。Swift + AppKit + OpenGL，支持多个同时显示、独立控制的模型实例。实际产物：`dist/Lite2D.app`。构建步骤见 [BUILD.md](BUILD.md)，验证与测量见 [TEST_REPORT.md](TEST_REPORT.md)。
 
 ## 使用
 
@@ -20,11 +24,11 @@
 
 ## 模型与限制
 
-Cubism Native R5/Core 用于 `.model3.json` + `.moc3`。首批旧版 `.moc` 使用进程内 JavaScriptCore 与原生 OpenGL，未引入浏览器、WebView、Unity 或额外常驻服务。旧版物理、姿势、表情及 Live2DViewerEX 专用控制器未实现；首批 22/33娘已按其实际资源验证。不能通过改后缀转换模型版本。
+Cubism Native R5/Core 用于 `.model3.json` + `.moc3`。旧版 `.moc` 使用进程内 JavaScriptCore 与原生 OpenGL，未引入浏览器、WebView、Unity 或额外常驻服务。旧版物理、姿势、表情及 Live2DViewerEX 专用控制器未实现。不能通过改后缀转换模型版本。
 
-准备本机首批模型后，添加 `.local/models/bilibili-22/model.json`、`.local/models/bilibili-33/model.json`。模型、专有运行库和 Core 不随源码提交。
+从你有权使用的模型目录选择入口 JSON；模型、专有运行库和 Core 不随源码提交。第三方打包格式需先准备为受支持的模型目录。
 
-当前实测为 M3 Pro / macOS 27.2，部署目标 macOS 14+、ARM64。OpenGL 已弃用。Stage Manager 和跨 1×/2× DPI 按用户要求跳过；物理拔插留待用户之后验证；Space/全屏表现未作完整实机验收，不承诺所有系统场景强制置顶。
+当前实测为 M3 Pro / macOS 27.2，部署目标 macOS 14+、ARM64。OpenGL 已弃用。Stage Manager、跨 1×/2× DPI 和物理热插拔尚未完成实机验收；Space/全屏表现未作完整实机验收，不承诺所有系统场景强制置顶。
 
 ## 常见问题
 
@@ -33,7 +37,7 @@ Cubism Native R5/Core 用于 `.model3.json` + `.moc3`。首批旧版 `.moc` 使�
 - 角色太大或位置不合适：在实例菜单缩小或重置绑定屏内位置，不需要 Dock 图标。
 - 重建：使用 BUILD.md 的脚本；测试采用隔离配置，不覆盖日常布局。
 
-本项目是个人自用实验项目，不代表 Live2D 官方授权公开发行。可导入模型的播放器可能属于 Expandable Application，发行前须单独确认许可；模型作者许可独立适用。见 [第三方说明](docs/THIRD_PARTY_NOTICES.md)。`doc/` 保持 git 忽略；源码和构建/测试文档已分阶段提交。
+本项目自有代码采用 [MIT License](LICENSE)，第三方依赖及其衍生部分不因此改为 MIT。Live2D 对可扩展应用另有发布许可要求；源码公开也不能当作取得该许可的证明，公开仓库或发布 `.app` 前应核实适用要求。见 [第三方说明](docs/THIRD_PARTY_NOTICES.md) 和 [公开前审计](docs/PUBLIC_RELEASE_AUDIT.md)。
 
 ## 登录时自动启动
 
