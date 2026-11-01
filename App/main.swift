@@ -9,6 +9,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var benchmark: BenchmarkRunner?
     private var terminating = false
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--check-login-item-registration") {
+            Task { @MainActor in
+                do {
+                    let result = try await LaunchAtLogin().checkRegistration()
+                    let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+                    print(String(decoding: data, as: UTF8.self))
+                } catch {
+                    NSLog("登录项登记核验失败：%@", error.localizedDescription)
+                    exitCode = 1
+                }
+                NSApp.terminate(nil)
+            }
+            return
+        }
+        if CommandLine.arguments.contains("--login-item-status") {
+            let value: [String: Any] = ["status": LaunchAtLogin().statusName, "bundlePath": Bundle.main.bundlePath]
+            if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+               let text = String(data: data, encoding: .utf8) { print(text) }
+            NSApp.terminate(nil)
+            return
+        }
         do { try L2DBridge.startRuntime(at: Bundle.main.resourcePath!) }
         catch { NSLog("Runtime failed: %@", error.localizedDescription); exitCode = 1; NSApp.terminate(nil); return }
         let probeDirectory = ProcessInfo.processInfo.environment["LITE2D_PROBE_DIR"]
@@ -61,7 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationWillTerminate(_ notification: Notification) {
         guard !terminating else { return }; terminating = true
-        manager?.shutdown(); L2DBridge.stopRuntime()
+        manager?.shutdown()
+        if manager != nil { L2DBridge.stopRuntime() }
         if exitCode != 0 { exit(exitCode) }
     }
 }

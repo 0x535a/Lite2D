@@ -106,3 +106,9 @@ xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings
 已收取的验证、长时基线、GPU 区间计时、Instruments 及压力之后的 Leaks 结果见 TEST_REPORT。用户已要求停止新增/重复压测，交付不再依赖补测。Stage Manager / 跨 DPI 跳过，物理插拔由用户后续验证。
 
 原始诊断与测量文件仅保留于忽略的 `.local/verification/`，可能含本机路径和 Instruments 环境元数据，不随源码或 `.app` 公开发布。
+
+## 登录项支持（2026-11-02）
+
+通过系统 ServiceManagement.framework 的 `SMAppService.mainApp` 管理主应用登录项，要求已签名的 `.app`；现有 ad-hoc 构建在本机登记/撤销验证成功。菜单开关不会在普通启动或恢复模型时自动改动登录设置，也不把系统状态复制成 JSON 布尔值。
+
+项目已移动到 `~/Repo/lite2d`，本轮在新目录下以 `build/login-item` 重新配置，避免复用旧目录的 CMake 绝对路径缓存；产物仍为 `dist/Lite2D.app`。诊断参数 `--login-item-status` 只读系统状态；`--check-login-item-registration` 是显式登记/撤销核验，已有登记时保留原设置。无需重复运行或进行注销/重启压测。

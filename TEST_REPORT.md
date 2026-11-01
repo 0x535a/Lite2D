@@ -110,3 +110,11 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 源码、README、BUILD、TEST_REPORT、第三方说明和生成脚本已交付；`doc/` 保持忽略，不提交个人模型/Core/专有旧运行库或 `.app`。`.app` 只作为本机产物保留于 dist。
 
 旧版兼容以首批22/33娘为验收对象，旧版专用物理/姿势/表情、音频和 ViewerEX 自定义控制器未实现；原生 `.moc3` 按官方 Framework 处理可用资源。OpenGL 已弃用；实际运行验证为 macOS 27.2 / M3 Pro，macOS 14 是部署目标而非额外实机验证。显示器 UUID 被系统重新分配时需显式重新绑定。没有公开发布许可或第三方模型再分发授权的声明。
+
+## 登录启动增量交付（2026-11-02）
+
+- 新增菜单“登录时自动启动”，使用 `SMAppService.mainApp` 登记/撤销主 `.app`；以系统状态决定勾选，等待允许时使用 mixed 状态并提供系统设置入口，失败显示实际错误。异步撤销期间禁用重复操作。不引入额外登录辅助进程或 LaunchAgent。
+- 在新目录 `~/Repo/lite2d` 使用 `cmake -S . -B build/login-item -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_POLICY_VERSION_MINIMUM=3.5` 及 `cmake --build build/login-item --parallel 6`，Exit 0。签名校验通过，实际链接 ServiceManagement.framework。
+- 对已签名产物执行一次显式登记/撤销核验，Exit 0：`before=notFound`、`registered=enabled`、`after=notRegistered`，结果 `registrationAndRemovalPassed`。测试登记已撤销，最终由用户通过菜单开启。原始日志 `.local/verification/login-item/`。
+- 未进行注销、重启或新增模型压力测试；不把 API 登记成功说成已实测一次真实开机。登录后仍使用既有配置恢复路径和显示器绑定逻辑。
+- 工作区出现独立的图标改动，本功能提交只包含 ServiceManagement 依赖及登录项代码/文档，保留并行图标工作。

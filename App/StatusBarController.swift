@@ -1,5 +1,6 @@
 import AppKit
 import UniformTypeIdentifiers
+import ServiceManagement
 
 final class ActionMenuItem: NSMenuItem {
     var handler: (() -> Void)?
@@ -16,6 +17,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     let manager: ModelInstanceManager
     let statusItem: NSStatusItem
     let menu = NSMenu()
+    private let launchAtLogin = LaunchAtLogin()
+    private var updatingLoginItem = false
     init(manager: ModelInstanceManager) {
         self.manager = manager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -103,7 +106,40 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(item("刷新显示器连接状态") { [weak self] in self?.manager.refreshDisplayBindings() })
         menu.addItem(item("撤销上次移除", enabled: manager.removedSettings != nil) { [weak self] in self?.manager.undoRemove() })
         menu.addItem(.separator())
+        let loginStatus = launchAtLogin.status
+        let loginTitle = updatingLoginItem ? "正在更新登录启动…" :
+            loginStatus == .requiresApproval ? "登录时自动启动（等待系统允许）" : "登录时自动启动"
+        let loginItem = item(loginTitle, checked: loginStatus == .enabled, enabled: !updatingLoginItem) { [weak self] in
+            self?.toggleLaunchAtLogin()
+        }
+        if loginStatus == .requiresApproval { loginItem.state = .mixed }
+        menu.addItem(loginItem)
+        if loginStatus == .requiresApproval {
+            menu.addItem(item("在系统设置中允许登录启动…") { [weak self] in self?.launchAtLogin.openSystemSettings() })
+        }
+        menu.addItem(.separator())
         let quit = item("退出 Lite2D") { NSApp.terminate(nil) }; quit.keyEquivalent = "q"; menu.addItem(quit)
+    }
+    private func toggleLaunchAtLogin() {
+        guard !updatingLoginItem else { return }
+        let enabled = !launchAtLogin.isRegistered
+        updatingLoginItem = true
+        rebuild()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { updatingLoginItem = false; rebuild() }
+            do { try await launchAtLogin.setEnabled(enabled) }
+            catch {
+                // Registration can require consent rather than being active.
+                // Keep the menu truthful and let the user open System Settings.
+                if enabled && launchAtLogin.status == .requiresApproval { return }
+                let alert = NSAlert()
+                alert.messageText = enabled ? "无法开启登录启动" : "无法关闭登录启动"
+                alert.informativeText = error.localizedDescription
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
+        }
     }
     private func attempt(_ body: () throws -> Void) {
         do { try body() }
