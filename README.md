@@ -6,6 +6,10 @@
 
 macOS 原生菜单栏 Live2D 播放器。Swift + AppKit + OpenGL，支持多个同时显示、独立控制的模型实例。实际产物：`dist/Lite2D.app`。
 
+## 下载
+
+[Lite2D v0.1.1 · macOS ARM64](https://gitlab.com/stephenzeng/lite2d/-/releases/v0.1.1)。应用包不附模型或个人配置，当前为 ad-hoc 签名、未公证；自有代码和第三方组件的许可说明随包提供。
+
 ## 使用
 
 运行 `.app`，点击菜单栏人物图标 → **添加模型…**，选择模型 JSON 或文件夹。同一路径可以重复添加，每个实例拥有独立 UUID、窗口、GL context、动画和设置。
