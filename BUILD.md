@@ -67,3 +67,14 @@ xcrun swiftc -parse-as-library App/ModelInstanceSettings.swift App/SettingsStore
 ```
 
 集成测试通过独立 `LITE2D_SETTINGS_PATH` 隔离设置；运行 22/33/Haru 和重复模型，进行 30 增删、20 替换与新进程恢复。内部帧捕获和 JSON 结果保存在 `.local/verification/integration/`，程序正常退出；不依赖 Computer Use。`scripts/probe_app.py` 可继续单模型诊断。
+
+## 资源测量
+
+```sh
+python3 scripts/benchmark.py
+python3 scripts/summarize_benchmark.py
+```
+
+默认顺序测量 0/1/2/3/4 实例，每组预热 4 秒、静止目标 300 秒、移动目标 120 秒，约 35 分钟。选定 22/33娘交替加载，3/4 实例包含重复模型。各实例 360×480 points、30 FPS、穿透、追踪/动画开启。模型纹理和运行库全部本机读取，不启动额外运行时服务。每秒记录进程 CPU（100% 代表一个核心）、resident、physical footprint、逐实例 draw 和 GL error。
+
+为遵守不使用 Computer Use 的要求，移动阶段使用应用内共享目标轨迹（每秒变化），不移动系统鼠标；这不是人工连续移动鼠标的测试。结果必须按此条件解释。测试配置和输出均隔离于 `.local/verification/performance/`，未完成场景在汇总中明确标记。
