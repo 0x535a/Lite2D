@@ -33,6 +33,20 @@ import Foundation
         }
         let native = try ModelFileValidator.validate(root.appendingPathComponent("vendor/CubismNativeSamples/Samples/Resources/Hiyori/Hiyori.model3.json"))
         precondition(!native.legacy)
+        let minimal = try ModelFileValidator.validate(root.appendingPathComponent(".local/verification/fixtures/native-minimal/model.model3.json"))
+        precondition(!minimal.legacy && minimal.warnings.isEmpty)
+        for name in ["native-missing-moc", "native-missing-texture"] {
+            do {
+                _ = try ModelFileValidator.validate(root.appendingPathComponent(".local/verification/fixtures/\(name)/model.model3.json"))
+                fatalError("Missing required native resource must be rejected")
+            } catch { /* Both fail before entering the SDK. */ }
+        }
+        var extreme = ModelInstanceSettings(displayName: "extreme", modelPath: "/model")
+        extreme.windowFrame.x = Double.greatestFiniteMagnitude
+        extreme.windowFrame.y = -Double.greatestFiniteMagnitude
+        extreme.zOrder = Int.max
+        extreme.sanitize()
+        precondition(extreme.windowFrame.x == 1_000_000 && extreme.windowFrame.y == -1_000_000 && extreme.zOrder == 1_000_000)
         let fixture = directory.appendingPathComponent("model.json")
         func rejects(_ json: [String: Any]) throws {
             try JSONSerialization.data(withJSONObject: json).write(to: fixture)

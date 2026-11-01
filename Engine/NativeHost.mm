@@ -51,6 +51,18 @@ csmByte* shaderFile(const std::string path,csmSizeInt* size) {
  }catch(...){*size=0;return nullptr;}
 }
 void releaseFile(csmByte* bytes){delete[] bytes;}
+// Keep the R5 scheduler's declared order (expression 300, look 400, breath
+// 500, physics 600, pose 800) without applying CubismTargetPoint's extra
+// smoothing on top of the host's time-based filter.
+class DirectLookUpdater : public ICubismUpdater {
+ const CubismLook& look;
+ const float& x;
+ const float& y;
+public:
+ DirectLookUpdater(const CubismLook& look,const float& x,const float& y)
+  :ICubismUpdater(CubismUpdateOrder_Look),look(look),x(x),y(y){}
+ void OnLateUpdate(CubismModel* model,const csmFloat32) override {look.UpdateParameters(model,x,y);}
+};
 }
 namespace Lite2D {
 void startRuntime(const std::string& resources) {
@@ -72,6 +84,7 @@ public:
  std::map<std::string,ACubismMotion*> expressionMap;
  std::string idleGroup;
  int renderWidth=0,renderHeight=0;
+ float lookX=0,lookY=0;
  ~Impl() override {
   _motionManager->StopAllMotions();_expressionManager->StopAllMotions();
   DeleteRenderer();
@@ -102,6 +115,8 @@ public:
   };
   optional(settings->GetPhysicsFileName(),[&](auto& b){LoadPhysics(b.data(),(int)b.size());});
   optional(settings->GetPoseFileName(),[&](auto& b){LoadPose(b.data(),(int)b.size());});
+  csmVector<CubismIdHandle> blinkIds,lipSyncIds;
+  for(int i=0;i<settings->GetEyeBlinkParameterCount();++i)blinkIds.PushBack(settings->GetEyeBlinkParameterId(i));
   for(int g=0;g<settings->GetMotionGroupCount();++g) {
    std::string group=settings->GetMotionGroupName(g);
    auto& entries=motions[group];
@@ -109,6 +124,7 @@ public:
     ACubismMotion* motion=nullptr;
     optional(settings->GetMotionFileName(group.c_str(),i),[&](auto& b){
      motion=LoadMotion(b.data(),(int)b.size(),nullptr,nullptr,nullptr,settings.get(),group.c_str(),i);
+     if(motion)static_cast<CubismMotion*>(motion)->SetEffectIds(blinkIds,lipSyncIds);
     });entries.push_back(motion);
    }
    if(group=="Idle"||group=="idle")idleGroup=group;
@@ -131,6 +147,7 @@ public:
   _look->SetParameters(look);
   // Caller already applies time-based look smoothing; avoid a second drag filter.
   _updateScheduler.AddUpdatableList(CSM_NEW CubismExpressionUpdater(*_expressionManager));
+  _updateScheduler.AddUpdatableList(CSM_NEW DirectLookUpdater(*_look,lookX,lookY));
   _updateScheduler.AddUpdatableList(CSM_NEW CubismBreathUpdater(*_breath));
   if(_physics)_updateScheduler.AddUpdatableList(CSM_NEW CubismPhysicsUpdater(*_physics));
   if(_pose)_updateScheduler.AddUpdatableList(CSM_NEW CubismPoseUpdater(*_pose));
@@ -158,7 +175,7 @@ public:
   if(_motionManager->IsFinished()&&!idleGroup.empty())play(idleGroup,0);
   bool moved=_motionManager->UpdateMotion(_model,(float)dt);_model->SaveParameters();
   if(!moved&&_eyeBlink)_eyeBlink->UpdateParameters(_model,(float)dt);
-  _look->UpdateParameters(_model,x,y);
+  lookX=x;lookY=y;
   _updateScheduler.OnLateUpdate(_model,(float)dt);_model->Update();
  }
  void render(int width,int height,float scale) {

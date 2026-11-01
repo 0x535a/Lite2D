@@ -73,3 +73,26 @@ F01–F24 最终验收表仍待逐项审计；未实测的桌面行为不会由�
 用户已选择自行验证桌面交互，结果尚待回复。已启动使用独立 bundle ID / settings 的手测副本，模型名称以“手测”开头；步骤见 `docs/MANUAL_ACCEPTANCE.md`。该副本不是播放器的后台依赖，可从自己的菜单退出。性能测量进程使用另一份隔离配置；手测副本与其他用户应用的并发系统负载需在分析 GPU/调度波动时考虑，不把本机数据当受控实验室结论。
 
 已准备 `scripts/compare_official.py`（同一 Hiyori、360×480 points、30 FPS 的官方/AppKit 比较）、`scripts/generate_xcode.sh` 和本地缺失资源 fixture 生成器；它们的运行验证安排在正式长时基线之后，当前不标记为已通过。
+
+### 2026-11-02 候选回归与构建复核
+
+- 候选构建输出隔离到 `.local/candidate/`，未替换正在进行 0–4 长时测试的 `dist` 基线二进制；基线 SHA 已记录于 `.local/verification/performance/build-receipt.json`。
+- 新回归 `LITE2D_APP_PATH=.../.local/candidate/Lite2D.app/Contents/MacOS/Lite2D LITE2D_INTEGRATION_OUTPUT=.../.local/verification/candidate-integration python3 scripts/run_integration.py` Exit 0：147 项集成检查 + 17 项新进程恢复检查通过；30/60 FPS 分别 29.879 / 59.758。
+- 增加原生无动作/无 Physics 的有效模型实测、缺 moc/纹理失败隔离、移除最后一个实例后菜单存活、全量清理再恢复所有 renderer。修正原生 R5 表情/视线更新顺序，并设置 Motion 的 EyeBlink Effect IDs。
+- 坐标与 zOrder 极端值限幅的单独设置/校验测试 Exit 0；避免损坏配置用巨大窗口坐标或 Int.max 排序进入 AppKit。
+- 压力采样（4 个描述符，MiB）：
+
+| 阶段 | Resident | Physical footprint |
+|---|---:|---:|
+| before-add-remove | 265.2 | 478.2 |
+| after-10-add-remove | 271.5 | 487.2 |
+| after-20-add-remove | 253.3 | 453.0 |
+| after-30-add-remove-settled | 253.6 | 450.8 |
+| after-10-replace | 262.3 | 456.3 |
+| after-20-replace-settled | 262.1 | 451.0 |
+| after-zero-and-restore-settled | 217.6 | 425.8 |
+
+这些是同进程生命周期诊断采样，含捕获、JIT 和资源缓存，不能代替 Leaks 工具。30 次增删和 20 次替换没有表现为持续单向增长，全部 renderer 清理再恢复后进一步回落。
+
+- GPU 可选诊断通过 `GL_EXT_timer_query` 非阻塞读取。0–4 每场景 4 秒预热、5 秒静止、5 秒 1Hz 移动目标，GL error 均为 0、实际约 30 FPS。各实例 GPU 绘制区间均值（含预热已收集的查询，ms/frame）：1 实例 [0.981]，2 [0.732,0.388]，3 [1.221,0.436,0.354]，4 [0.765,0.285,0.373,0.428]。这是绘制区间耗时，不是整 GPU 利用率或能耗；系统其他进程和上下文调度会影响值。原始记录 `.local/verification/gpu-matrix/`。
+- Xcode 生成脚本 Exit 0。以隔离输出执行 `xcodebuild -project build/xcode-verification/Lite2D.xcodeproj -scheme Lite2D -configuration Release CODE_SIGNING_ALLOWED=NO -jobs 2 build` Exit 0，日志含 BUILD SUCCEEDED。修复 CMake Xcode 默认 Swift 4，显式固定 Swift 5。Ninja 与 Xcode 使用同一源码清单。

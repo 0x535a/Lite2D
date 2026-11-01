@@ -1,3 +1,4 @@
+#include <GL/glew.h>
 #import "Live2DBridge.h"
 #include "NativeHost.hpp"
 #import "LegacyHost.h"
@@ -9,6 +10,11 @@ static void fail(NSError** error,const char* message) {
 @implementation L2DBridge {
  std::unique_ptr<Lite2D::NativeHost> _native;
  L2DLegacyHost* _legacy;
+ GLuint _gpuQuery;
+ bool _queryPending;
+ bool _queryActive;
+ unsigned long long _gpuNanoseconds;
+ unsigned long long _gpuMeasuredFrames;
 }
 + (BOOL)startRuntimeAt:(NSString*)path error:(NSError**)error {
  try{Lite2D::startRuntime(path.UTF8String);return YES;}catch(const std::exception& e){fail(error,e.what());return NO;}
@@ -35,7 +41,28 @@ static void fail(NSError** error,const char* message) {
 - (BOOL)playGroup:(NSString*)group index:(int)index {return _native?_native->play(group.UTF8String,index):[_legacy playGroup:group index:index];}
 - (BOOL)selectExpression:(NSString*)name {return _native?_native->expression(name.UTF8String):[_legacy selectExpression:name];}
 - (void)setIdleGroup:(NSString*)group {if(_native)_native->idle(group.UTF8String);else [_legacy setIdleGroup:group];}
-- (void)unload {_native.reset();_legacy=nil;}
+- (void)unload {
+ if(_queryActive){glEndQuery(GL_TIME_ELAPSED_EXT);_queryActive=false;}
+ if(_gpuQuery){glDeleteQueries(1,&_gpuQuery);_gpuQuery=0;}
+ _queryPending=false;_native.reset();_legacy=nil;
+}
+- (BOOL)gpuTimingAvailable {return GLEW_EXT_timer_query&&glGetQueryObjectui64vEXT;}
+- (unsigned long long)gpuNanoseconds {return _gpuNanoseconds;}
+- (unsigned long long)gpuMeasuredFrames {return _gpuMeasuredFrames;}
+- (void)beginGPUMeasurement {
+ if(!self.gpuTimingAvailable)return;
+ if(_queryPending){
+  GLint available=0;glGetQueryObjectiv(_gpuQuery,GL_QUERY_RESULT_AVAILABLE,&available);
+  if(!available)return;
+  GLuint64EXT elapsed=0;glGetQueryObjectui64vEXT(_gpuQuery,GL_QUERY_RESULT,&elapsed);
+  _gpuNanoseconds+=elapsed;++_gpuMeasuredFrames;_queryPending=false;
+ }
+ if(!_gpuQuery)glGenQueries(1,&_gpuQuery);
+ glBeginQuery(GL_TIME_ELAPSED_EXT,_gpuQuery);_queryActive=true;
+}
+- (void)endGPUMeasurement {
+ if(_queryActive){glEndQuery(GL_TIME_ELAPSED_EXT);_queryActive=false;_queryPending=true;}
+}
 - (NSDictionary<NSString*,NSNumber*>*)motionGroups {
  if(_legacy)return _legacy.motionGroups;
  NSMutableDictionary* result=[NSMutableDictionary dictionary];

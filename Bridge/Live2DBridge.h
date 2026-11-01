@@ -10,6 +10,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)selectExpression:(NSString *)name;
 - (void)setIdleGroup:(NSString *)group;
 - (void)unload;
+- (void)beginGPUMeasurement;
+- (void)endGPUMeasurement;
+@property(nonatomic, readonly) BOOL gpuTimingAvailable;
+@property(nonatomic, readonly) unsigned long long gpuNanoseconds;
+@property(nonatomic, readonly) unsigned long long gpuMeasuredFrames;
 @property(nonatomic, readonly) NSDictionary<NSString *, NSNumber *> *motionGroups;
 @property(nonatomic, readonly) NSArray<NSString *> *expressionNames;
 @property(nonatomic, readonly) float canvasAspect;

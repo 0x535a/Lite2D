@@ -78,3 +78,14 @@ python3 scripts/summarize_benchmark.py
 默认顺序测量 0/1/2/3/4 实例，每组预热 4 秒、静止目标 300 秒、移动目标 120 秒，约 35 分钟。选定 22/33娘交替加载，3/4 实例包含重复模型。各实例 360×480 points、30 FPS、穿透、追踪/动画开启。模型纹理和运行库全部本机读取，不启动额外运行时服务。每秒记录进程 CPU（100% 代表一个核心）、resident、physical footprint、逐实例 draw 和 GL error。
 
 为遵守不使用 Computer Use 的要求，移动阶段使用应用内共享目标轨迹（每秒变化），不移动系统鼠标；这不是人工连续移动鼠标的测试。结果必须按此条件解释。测试配置和输出均隔离于 `.local/verification/performance/`，未完成场景在汇总中明确标记。
+
+## 生成 Xcode 工程
+
+```sh
+sh scripts/generate_xcode.sh
+xcodebuild -project build/xcode/Lite2D.xcodeproj -scheme Lite2D -configuration Release CODE_SIGNING_ALLOWED=NO build
+```
+
+已在 `build/xcode-verification` 实际验证 Xcode 构建，Exit 0。Xcode 的产物默认在 `dist/Release/Lite2D.app`；Ninja 的产物为 `dist/Lite2D.app`。可用 `-DLITE2D_OUTPUT_ROOT=/absolute/output` 在独立 CMake build 目录隔离候选产物，避免覆盖运行中的基线。显式使用 Swift 5 语言模式，macOS 14 deployment target；本机用 ad-hoc 签名，无需开发证书。
+
+运行独立单元测试前先执行 `python3 scripts/create_test_fixtures.py`，以准备本地原生无可选资源、缺必要资源的夹具；不提交模型数据。集成脚本会自动准备这些夹具。

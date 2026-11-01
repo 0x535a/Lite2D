@@ -17,6 +17,7 @@ parser.add_argument("--output", type=Path, default=root / ".local/verification/p
 args = parser.parse_args()
 assets = [root / ".local/models/bilibili-22/model.json", root / ".local/models/bilibili-33/model.json",
           root / ".local/models/bilibili-22/model.json", root / ".local/models/bilibili-33/model.json"]
+application = os.environ.get("LITE2D_APP_PATH", str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"))
 for count in args.counts:
     if count not in range(5):
         raise ValueError("This baseline matrix covers 0–4 instances")
@@ -34,7 +35,7 @@ for count in args.counts:
                LITE2D_STATIC_SECONDS=str(args.static_seconds), LITE2D_MOVING_SECONDS=str(args.moving_seconds))
     print(f"Starting {count} instances: {args.static_seconds}s stationary + {args.moving_seconds}s moving target", flush=True)
     with (out / "run.log").open("w") as log:
-        process = subprocess.Popen([str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"), "--benchmark"],
+        process = subprocess.Popen([application, "--benchmark"],
                                    cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
         (args.output / "active-process.json").write_text(json.dumps(dict(pid=process.pid, count=count, started=time.time())) + "\n")
         try:
