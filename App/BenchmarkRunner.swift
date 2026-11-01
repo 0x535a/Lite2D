@@ -35,12 +35,20 @@ final class BenchmarkRunner {
         return result == KERN_SUCCESS ? (info.resident_size, info.phys_footprint) : (0, 0)
     }
     func run() {
+        guard manager.records.allSatisfy({ $0.controller?.view.loaded == true }) else {
+            NSLog("BENCHMARK_FAILED: one or more descriptors have no loaded renderer")
+            complete(1); return
+        }
         do { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
         catch { complete(1); return }
         // Exclude launch/texture decode/JIT warmup from steady-state measurements.
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [self] in
             start = ProcessInfo.processInfo.systemUptime; previousTime = start
             initialCPU = Self.cpuSeconds(); previousCPU = initialCPU
+            guard manager.records.allSatisfy({ !$0.settings.isVisible || ($0.controller?.view.frames ?? 0) > 0 }) else {
+                NSLog("BENCHMARK_FAILED: a visible model did not render during warmup")
+                complete(1); return
+            }
             for record in manager.records { initialFrames[record.settings.id] = record.controller?.view.frames ?? 0 }
             if let screen = NSScreen.main { SharedMouseTracker.shared.testPoint = NSPoint(x: screen.frame.midX, y: screen.frame.midY) }
             timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.sample() }
@@ -75,6 +83,10 @@ final class BenchmarkRunner {
                         "modelPath": record.settings.modelPath, "targetFPS": record.settings.targetFPS,
                         "frames": count - (initialFrames[record.settings.id] ?? 0),
                         "actualFPS": Double(count - (initialFrames[record.settings.id] ?? 0)) / elapsed,
+                        "gpuTimingRequested": ProcessInfo.processInfo.environment["LITE2D_GPU_TIMING"] == "1",
+                        "gpuTimingAvailable": record.controller?.view.bridge.gpuTimingAvailable ?? false,
+                        "gpuMeasuredFrames": record.controller?.view.bridge.gpuMeasuredFrames ?? 0,
+                        "gpuNanoseconds": record.controller?.view.bridge.gpuNanoseconds ?? 0,
                         "glError": record.controller?.view.lastGLError ?? 0]
             }
             let summary: [String: Any] = ["durationSeconds": elapsed, "staticSeconds": staticSeconds,

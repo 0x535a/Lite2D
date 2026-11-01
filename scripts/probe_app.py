@@ -15,7 +15,8 @@ args = parser.parse_args()
 output = root / ".local/verification" / args.name
 output.mkdir(parents=True, exist_ok=True)
 with (output / "run.log").open("w") as log:
-    result = subprocess.run([str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"), str(args.model.resolve())],
+    application = os.environ.get("LITE2D_APP_PATH", str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"))
+    result = subprocess.run([application, str(args.model.resolve())],
                             env=dict(os.environ, LITE2D_PROBE_DIR=str(output)), stdout=log,
                             stderr=subprocess.STDOUT, timeout=45)
 text = (output / "run.log").read_text()

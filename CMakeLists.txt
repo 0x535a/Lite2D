@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 project(Lite2D LANGUAGES C CXX OBJCXX Swift)
+set(LITE2D_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Local app bundle output directory")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_OBJCXX_STANDARD 17)
+set(CMAKE_Swift_LANGUAGE_VERSION 5)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0)
 set(SDK "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CubismNativeSamples")
 set(CORE "${SDK}/Core")
@@ -41,7 +43,7 @@ target_compile_options(Lite2D PRIVATE -import-objc-header "${CMAKE_CURRENT_SOURC
 target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framework QuartzCore" "-framework OpenGL" "-lc++")
 set_target_properties(Lite2D PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dist")
+  RUNTIME_OUTPUT_DIRECTORY "${LITE2D_OUTPUT_ROOT}")
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js")
 add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE:Lite2D>.d"

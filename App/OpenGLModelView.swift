@@ -16,6 +16,7 @@ final class OpenGLModelView: NSOpenGLView {
     var onZoom: ((Double) -> Void)?
     var onFrame: ((OpenGLModelView) -> Void)?
     private var displayLink: CADisplayLink?
+    private let measureGPU = ProcessInfo.processInfo.environment["LITE2D_GPU_TIMING"] == "1"
     private var lastTime: Double?
     private var captureRequested = false
     private var renderRequested = false
@@ -120,7 +121,9 @@ final class OpenGLModelView: NSOpenGLView {
         glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
         // Zoom is represented by a compact resized window; scaling the model
         // again here would double the zoom and clip the face.
+        if measureGPU { bridge.beginGPUMeasurement() }
         bridge.render(width: w, height: h, scale: 1)
+        if measureGPU { bridge.endGPUMeasurement() }
         lastGLError = glGetError()
         frames += 1
         if captureRequested {

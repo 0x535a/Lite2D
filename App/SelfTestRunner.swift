@@ -15,12 +15,14 @@ final class SelfTestRunner {
     var results: [String] = []
     var a = UUID(), b = UUID(), native = UUID(), duplicate = UUID()
     var nativeDuplicate = UUID()
+    var minimalID = UUID()
     var leftFrame: Data?
     var frozenTime = 0.0, nativeTime = 0.0
     var counters: [UUID: UInt64] = [:]
     var fpsStart = 0.0
     var fps: [String: Double] = [:]
     var callbackCounters: [UInt64] = []
+    var memorySamples: [[String: Any]] = []
     private var removedViews: [WeakModelView] = []
     private var finished = false
 
@@ -73,6 +75,22 @@ final class SelfTestRunner {
             _ = try capture(nativeDuplicate, label: "duplicate-native")
             manager.remove(nativeDuplicate)
             _ = try capture(native, label: "native-after-duplicate-removal")
+            let fixtures = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".local/verification/fixtures")
+            let minimal = try manager.add(fixtures.appendingPathComponent("native-minimal/model.model3.json"), name: "minimal native")
+            minimalID = minimal.settings.id
+            for missing in ["native-missing-moc", "native-missing-texture"] {
+                var rejected = false
+                do { _ = try manager.add(fixtures.appendingPathComponent("\(missing)/model.model3.json")) }
+                catch { rejected = true }
+                try check(rejected && manager.records.count == 4, "\(missing): required resource failure is isolated")
+            }
+            later(0.35) { try self.afterMinimal() }
+    }
+    private func afterMinimal() throws {
+            try check(try view(minimalID).bridge.motionGroups.isEmpty, "Native model without motions loads without fake idle resources")
+            _ = try capture(minimalID, label: "native-no-motion-no-physics")
+            manager.remove(minimalID)
+            _ = try capture(native, label: "native-after-failed-adds")
             let twin = try manager.duplicate(a)!
             duplicate = twin.settings.id
             try check(twin.settings.id != a && twin.settings.modelPath == manager.record(a)!.settings.modelPath, "Duplicate asset has a new UUID")
@@ -177,11 +195,19 @@ final class SelfTestRunner {
         fps["B_scheduled"] = Double(try view(b).scheduledFrames - callbackCounters[3]) / duration
         try check(first >= 22 && first <= 38, "A independently schedules approximately 30 FPS")
         try check(second >= 44 && second <= 75, "B independently schedules approximately 60 FPS")
+        recordMemory("before-add-remove")
         stressAdd(0)
+    }
+    private func recordMemory(_ stage: String) {
+        let memory = BenchmarkRunner.memory()
+        memorySamples.append(["stage": stage, "residentBytes": memory.resident,
+                              "physicalFootprintBytes": memory.footprint,
+                              "instances": manager.records.count])
     }
     private func stressAdd(_ index: Int) {
         later(0.02) { [self] in
-            if index == 30 { later(0.3) { try self.afterAdds() }; return }
+            if index == 30 { later(1) { try self.afterAdds() }; return }
+            if index > 0 && index.isMultiple(of: 10) { recordMemory("after-\(index)-add-remove") }
             try autoreleasepool {
                 let source = URL(fileURLWithPath: manager.record(a)!.settings.modelPath)
                 let added = try manager.add(source, name: "stress")
@@ -196,13 +222,15 @@ final class SelfTestRunner {
         }
     }
     private func afterAdds() throws {
+        recordMemory("after-30-add-remove-settled")
         try check(removedViews.allSatisfy { $0.value == nil }, "30 add/remove cycles release every removed render view")
         try check(manager.records.count == 4, "30 add/remove cycles preserve original four instances")
         stressReplace(0)
     }
     private func stressReplace(_ index: Int) {
         later(0.02) { [self] in
-            if index == 20 { try finishStress(); return }
+            if index == 20 { later(1) { try self.finishStress() }; return }
+            if index > 0 && index.isMultiple(of: 10) { recordMemory("after-\(index)-replace") }
             let unaffected = manager.record(b)!.controller!
             let path = manager.record(index.isMultiple(of: 2) ? b : duplicate)!.settings.modelPath
             try manager.replace(a, with: URL(fileURLWithPath: path))
@@ -212,6 +240,7 @@ final class SelfTestRunner {
         }
     }
     private func finishStress() throws {
+        recordMemory("after-20-replace-settled")
         for record in manager.records { _ = try capture(record.settings.id, label: "final-\(record.settings.id.uuidString.prefix(4))") }
         manager.mutate(a) { $0.displayName = "22 persistent A"; $0.trackingEnabled = false; $0.targetFPS = 30 }
         manager.mutate(b) { $0.displayName = "33 persistent B"; $0.trackingEnabled = true; $0.targetFPS = 60; $0.animationPaused = true }
@@ -222,8 +251,21 @@ final class SelfTestRunner {
         manager.remove(toRemove.settings.id); manager.undoRemove()
         try check(manager.record(toRemove.settings.id) != nil, "Removed instance can be restored with undo")
         manager.remove(toRemove.settings.id)
-        SharedMouseTracker.shared.testPoint = nil
-        finish(nil)
+        let saved = manager.snapshot()
+        for id in manager.records.map({ $0.settings.id }) { manager.remove(id) }
+        status.rebuild()
+        try check(manager.records.isEmpty && status.statusItem.button != nil && status.menu.items.count > 4, "Removing last instance leaves menu and add/quit commands alive")
+        manager.store.save(saved)
+        manager.restore()
+        try check(manager.records.map(\.settings) == saved.instances, "All instance descriptors restore after deleting every renderer")
+        later(1) { [self] in
+            for record in manager.records where record.settings.isVisible {
+                _ = try capture(record.settings.id, label: "after-zero-\(record.settings.id.uuidString.prefix(4))")
+            }
+            recordMemory("after-zero-and-restore-settled")
+            SharedMouseTracker.shared.testPoint = nil
+            finish(nil)
+        }
     }
     func verifyRestored() {
         later(1) { [self] in
@@ -243,7 +285,7 @@ final class SelfTestRunner {
     private func finish(_ error: Error?) {
         guard !finished else { return }; finished = true
         SharedMouseTracker.shared.testPoint = nil
-        let report: [String: Any] = ["passed": error == nil, "checks": results, "fps": fps,
+        let report: [String: Any] = ["passed": error == nil, "checks": results, "fps": fps, "memorySamples": memorySamples,
                                     "failure": error?.localizedDescription ?? "", "instances": manager.records.count]
         try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent(error == nil ? "passed.json" : "failed.json"))
         NSLog("SELF_TEST %@ checks=%d %@", error == nil ? "PASS" : "FAIL", results.count, error?.localizedDescription ?? "")

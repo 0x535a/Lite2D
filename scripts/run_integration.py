@@ -8,7 +8,8 @@ import sys
 import uuid
 
 root = Path(__file__).resolve().parents[1]
-output = root / ".local/verification/integration"
+subprocess.run([sys.executable, str(root / "scripts/create_test_fixtures.py")], check=True, stdout=subprocess.DEVNULL)
+output = Path(os.environ.get("LITE2D_INTEGRATION_OUTPUT", str(root / ".local/verification/integration")))
 output.mkdir(parents=True, exist_ok=True)
 for name in ["passed.json", "failed.json"]:
     previous = output / name
@@ -18,7 +19,7 @@ settings = output / "settings.json"
 if settings.exists():
     settings.rename(output / f"previous-settings-{uuid.uuid4().hex}.json")
 env = dict(os.environ, LITE2D_SETTINGS_PATH=str(settings), LITE2D_TEST_OUTPUT=str(output))
-app = str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D")
+app = os.environ.get("LITE2D_APP_PATH", str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"))
 models = [root / ".local/models/bilibili-22/model.json", root / ".local/models/bilibili-33/model.json",
           root / "vendor/CubismNativeSamples/Samples/Resources/Haru/Haru.model3.json"]
 with (output / "integration.log").open("w") as log:

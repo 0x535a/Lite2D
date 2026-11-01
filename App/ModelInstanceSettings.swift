@@ -10,7 +10,8 @@ struct WindowFrame: Codable, Equatable {
     init() {}
     init(_ rect: CGRect) { x = rect.minX; y = rect.minY; width = rect.width; height = rect.height }
     mutating func sanitize() {
-        if !x.isFinite { x = 100 }; if !y.isFinite { y = 100 }
+        x = x.isFinite ? min(max(x, -1_000_000), 1_000_000) : 100
+        y = y.isFinite ? min(max(y, -1_000_000), 1_000_000) : 100
         width = width.isFinite ? min(max(width, 160), 1600) : 360
         height = height.isFinite ? min(max(height, 180), 1800) : 480
     }
@@ -65,6 +66,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         scale = scale.isFinite ? min(max(scale, 0.25), 3) : 1
         trackingSmoothingSeconds = trackingSmoothingSeconds.isFinite ? min(max(trackingSmoothingSeconds, 0.03), 1) : 0.14
         targetFPS = targetFPS == 60 ? 60 : 30
+        zOrder = min(max(zOrder, 0), 1_000_000)
     }
 }
 
