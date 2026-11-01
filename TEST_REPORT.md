@@ -1,109 +1,76 @@
-# 验证记录
+# Lite2D 验证与交付报告
 
-最后更新：2026-11-01。
+最终更新：2026-11-02。最终产物：`dist/Lite2D.app`，原生 ARM64、ad-hoc 签名。
 
-## 范围变更
+## 当前结论与验收范围
 
-用户指定普通版 Bilibili 22娘 / BiliBili33娘作为首批测试模型。这覆盖原需求“不支持旧版 .moc”的限制：增加旧版运行时支持，同时保留 Cubism Native `.moc3`、一个进程、至少三个独立模型实例等原要求。禁止浏览器宿主、WebView 和额外常驻服务的约束不变。
+- 多实例播放器、所选 Bilibili 22娘 / BiliBili33娘、Cubism Native `.moc3` 支持及逐实例显示器绑定已完成。
+- 显示器按 UUID 和屏内 point 位置绑定；缺席时隐藏且零 draw，重连恢复原屏原位置；不再自动搬到主屏。旧配置迁移到 schemaVersion 3。用户拖动和显式菜单可更新绑定，系统自动移动窗口不会改写锚点。
+- 最后一轮集成 **171 项**、新进程恢复 **19 项**通过；当前产物再次完成 171 项生命周期检查后，`leaks` 报告 **0 leaks / 0 leaked bytes**，应用正常退出。
+- 用户前版模型交互手测无异常。用户明确要求 **Stage Manager、跨 1×/2× DPI 跳过**；**物理插拔之后由用户验证**。Space/全屏和未单列的系统交互作为限制，不冒充实机通过。
+- 用户要求停止新增/重复压测：已收取当前全部运行结果，后续交付不以补测为条件，也未再追加压测或优化。
 
-## M0 环境与依赖（官方 Demo 已通过）
+## 环境与依赖
 
-已验证：
+M3 Pro（12 CPU / 18 GPU 核），18 GB；macOS 27.2 (26B123)，arm64；Xcode 27.2 (27B52)，SDK 27.2；CMake 4.4.5、Ninja。三屏均 2×：MateView 1920×1280 points；内屏 1512×982，原点 (1920,-779)；竖屏 1080×1920，原点 (-1080,-625)。
 
-- macOS / 架构 / Xcode / clang++ / CMake 实际环境。
-- Swift AppKit + OpenGL 模块编译及执行，Exit 0。
-- 三屏布局及负坐标：主屏 (0,0)，内屏 (1920,-779)，竖屏 (-1080,-625)，backing scale 均为 2。
-- 官方 Samples / Framework 固定到 R5 对应 commit。
-- GLEW / GLFW 官方脚本下载完成，Exit 0。
-- 本机 13 个工坊资源：7 个 `.moc3`、4 个 `.moc`、2 个非 Cubism。检查描述及二进制魔数，并未实测渲染。
-- 首批两模型的本机旧版资源副本存在；22娘含多个动作/皮肤，33娘未声明动作和物理。
+官方 Samples R5：`b8024738f108e6003e4925193e8d5ec04cd18196`；Framework：`c5cc765a885ac95e07fde93f300fab019f8c11f7`。用户授权官方 SDK 许可后下载 Native R5，ZIP SHA-256 为 `7ff3a4bbc19c0a8728965aa522ab77eb11b252916453e68a8a78d3b71188bb12`，Core 自报 6.0.1。GLEW 2.2.0 / GLFW 3.4 使用上游脚本准备。Core / 模型 / 旧版专有运行库未加入 git。
 
-后续依赖与兼容性验证：
+## M0–M5
 
-- 用户已授权 SDK 许可，官方 R5 Core 已安装。SDK ZIP SHA-256：`7ff3a4bbc19c0a8728965aa522ab77eb11b252916453e68a8a78d3b71188bb12`。Core 自报版本 6.0.1。
-- 官方 Minimum Demo configure/build 均 Exit 0，97 个构建步骤；`file` 确认为 arm64。
-- 使用 `python3 scripts/probe_official_demo.py` 在程序内部捕获 GPU framebuffer，无桌面截图/输入自动化。90 帧运行正常退出。第 15/75 帧分别有 469015 / 453646 个非黑像素，GL error=0；帧 SHA 不同，捕获图确认完整 Hiyori 模型和纹理。日志 `.local/verification/official/`。
-- `xcrun swift Tests/LegacyCPUProbe.swift` Exit 0：22/33娘分别以独立 JavaScriptCore context 成功通过已有旧版运行库加载，canvas 均 1000×1200，首个 drawable 分别 18/8 个坐标，SDK error=0。这仅验证 CPU 模型数据，不代表旧版 GPU 渲染通过。
-- 旧版运行时技术验证；Cubism 5 Core 不支持 `.moc`，不能假定已兼容。
+| 阶段 | 实际完成与证据 |
+|---|---|
+| M0 | 环境探测；官方 Minimum Demo configure/build Exit 0，arm64；90 帧自动运行 Exit 0；内部 GPU 捕获确认完整模型、帧内容变化、GL error=0。`.local/verification/official/` |
+| M1 | AppKit 菜单栏、透明 NSWindow / NSOpenGLView、Objective-C++ 桥接、原生 ModelHost。Hiyori/Haru 内部 RGBA 捕获有纹理与透明像素；无桌面截图。`.local/verification/native-app/`、`xcode-native/` |
+| M2 | NSEvent.mouseLocation 共享采样、按独立窗口换算、时间低通、官方眨眼/呼吸/物理/姿势/动作/表情；R5 参数更新次序已修正。冻结动画的 33娘左右目标捕获不同、关闭追踪回中 |
+| M3 | 至少三种模型同时显示、同一路径重复实例、独立 UUID/window/context/bridge/引擎。30 次增删、20 次替换，其他实例继续。新进程恢复全部状态及失效/离线实例 |
+| M4 | 菜单独立控制、编辑/穿透、拖动/缩放、撤销移除、绑定显示器与屏内位置、离线隐藏、重连恢复；171 项软件回归。用户手测及未覆盖范围如上 |
+| M5 | 0–4 实例各 420 秒 CPU/内存/FPS、GPU timer query、隐藏零 draw、Instruments、压力之后 Leaks、官方同模型/尺寸/FPS 对比；真实 `.app` 与文档已生成。工具不支持的能耗指标明确保留限制 |
 
-## M1 AppKit 宿主（基础渲染已验证）
+## 最后一轮验证命令与产物
 
-- `sh scripts/build.sh` Exit 0；`dist/Lite2D.app/Contents/MacOS/Lite2D` 为 arm64；`codesign --verify --strict dist/Lite2D.app` Exit 0（本机 ad-hoc 签名）。
-- `python3 scripts/probe_app.py vendor/CubismNativeSamples/Samples/Resources/Hiyori/Hiyori.model3.json --name native-app` Exit 0。30 帧后自行正常退出，720×1080 backing buffer，GL error=0。
-- 内部 RGBA 捕获有 135176 个可见 alpha 像素、642424 个全透明像素，各 RGB 通道非零；检查 PNG 确认角色纹理。捕获来自本程序 framebuffer，不使用 Computer Use 或桌面截图。
-- 修复 SDK Option 回调对象生命周期（必须进程级存活）、R5 强制 mipmap 采样导致黑色模型、Scale 覆盖投影比例的问题。
-- R5 的 shader / offscreen pool 原为全局单例。构建时生成按 CGLContext 区分的版本，不修改 submodule；下一阶段需多上下文增删实测。
-- 单实例原型可通过命令行传模型路径，显示透明穿透窗口并提供退出菜单。尚未完成输入校验、添加模型菜单、鼠标追踪、多实例和恢复，不能认定完整 M1 错误输入验收或 M2–M5 通过。
+- `sh scripts/build.sh`：Exit 0，日志 `.local/sdk/display-binding-release-build.log`。构建脚本执行本机 ad-hoc 签名。
+- Xcode 隔离构建 `xcodebuild -project build/xcode-verification/Lite2D.xcodeproj -scheme Lite2D -configuration Release CODE_SIGNING_ALLOWED=NO -jobs 2 build`：Exit 0，`.local/sdk/xcode-binding-build.log` 含 BUILD SUCCEEDED；同一源码清单，Swift 5 / macOS 14 deployment target。
+- 单元测试（BUILD.md 完整命令）：Exit 0，覆盖配置修复/迁移/原子保存/损坏备份、实际模型校验、缺必要资源、越界路径、缩放比例极限、显示器身份和屏内坐标。
+- `.local/verification/display-binding-release/`：171 项 + 19 项恢复检查；30/60 FPS 为 29.69 / 59.38，在同一固定刷新率显示器测量约 3 秒。
+- `.local/verification/post-stress-leaks/run-20261102-013529/`：171 项之后静止扫描；scannerExit=0、zeroLeaks=true、appExit=0。删除视图的弱引用已释放；内存诊断不显示持续单向累积，不把单次零泄漏推论为所有未来模型均无泄漏。
 
-## Cubism 2 兼容路径（22/33娘已实际绘制）
+## F01–F24 验收表
 
-- 复用本机已有 `Live2D 2.1.00_1` 运行库，在每实例独立 JavaScriptCore VM 执行；绘制调用映射到该实例的原生 OpenGL context。未引入 Pixi、DOM、WebView、浏览器或其他进程；不自行实现 `.moc` 解码/蒙版。
-- `python3 scripts/probe_app.py .local/models/bilibili-22/model.json --name legacy-22` 和 33 对应命令均 Exit 0，30 帧正常退出，GL error=0。内部帧图确认角色完整纹理和透明背景。
-- 22娘可见 alpha 129442 像素，33娘 126084 像素（720×1080）。修复 GLEW 初始化、TypedArray backing-store 字节偏移、Cubism 2 所需 texture flipY 和预乘 alpha。未将首次贴图错位但 GL error=0 的结果计为通过。
-- 专有旧运行库只存在忽略目录；来源收据位于 `Resources/LegacyRuntime/source-receipt.json`。仅测试选定模型，未声称任意 Cubism 2 表情/物理均已支持。
+“自动”表示应用内接口、实际引擎与 GPU/状态证据，不是系统鼠标事件自动化。
 
-## M2–M4 / 多实例集成（自动化路径已验证）
+| ID | 结果与范围 |
+|---|---|
+| F01 | 通过：零实例稳定运行；删除最后实例后菜单仍有添加/退出，能再恢复全部实例 |
+| F02 | 通过：原生 Hiyori/Haru 正确纹理、透明 alpha、GL error=0 |
+| F03 | 通过：剥离动作/Physics 的原生有效模型仍实际绘制 |
+| F04 | 通过：缺 moc / 缺纹理拒绝，仅影响该操作；B/C 保持渲染 |
+| F05 | 自动穿透/非焦点追踪通过；用户模型交互总体无异常，Finder 拖动未单列实机结果，作为限制 |
+| F06 | 自动编辑选择、用户拖动回调、缩放和独立状态通过；前版用户拖动缩放手测无异常 |
+| F07 | 通过（自动）：三屏/负坐标转换、独立目标和屏内绑定；未冒充录制实际系统光标路线 |
+| F08 | 跳过：用户明确不使用跨 1×/2× DPI |
+| F09 | 软件拓扑通过：断开仅隐藏绑定实例、零 draw，重连同位置；物理拔插由用户后续验证，不阻塞交付 |
+| F10 | 通过：隐藏 A 零 draw，B/C 继续，恢复保留状态 |
+| F11 | 通过：20 次替换及删除不影响其他 controller；压力后 Leaks 为零 |
+| F12 | 通过：新进程恢复 UUID/顺序/名称/位置/比例/追踪/平滑/FPS/暂停/Idle/表情/绑定；错误路径独立标记 |
+| F13 | 通过：同屏独立 30/60 FPS，最后约 29.69/59.38 |
+| F14 | Stage Manager 跳过；Space/全屏未完整实测，明确限制，不承诺强制全屏置顶 |
+| F15 | 通过：22 / 33 / Haru 三种同时显示，分别产生实际帧 |
+| F16 | 通过：重复原生与旧版资产，UUID/context/bridge 与状态独立，删除复制体后源仍正确绘制 |
+| F17 | 通过：A 关闭回中、B 跟踪，冻结 B 动画后左右目标仍改变实际模型帧 |
+| F18 | 通过：仅目标动画时钟冻结，其余继续 |
+| F19 | 通过：逐实例动作/Idle/原生表情设置与持久化，不改 B |
+| F20 | 通过：重名区分、UUID 菜单定位、复制、删除和撤销，未使用可变数组索引定位 |
+| F21 | 通过：不同逐实例设置、显示器 UUID/屏内坐标与离线显示偏好往返恢复 |
+| F22 | 通过：全局隐藏保留偏好，离线绑定不被置前/恢复带到主屏；全部删除仍可控制 |
+| F23 | 通过：30 次增删、重复路径、20 次替换；弱引用释放、瞬时 GL error 计数为零，之后 leaks=0 |
+| F24 | 通过：1/2/3/4 组合与资源/FPS记录；不是多模型轮播 |
 
-2026-11-02：`python3 scripts/run_integration.py` Exit 0。实际程序中 127 项检查 + 新进程恢复 17 项检查通过。细项与帧图位于 `.local/verification/integration/`，通过应用内接口测试，无 Computer Use、事件注入或桌面截图。
+不宣称 24/24 场景均完成了硬件/系统实机验证，跳过与限制按用户最新指示交付。
 
-- 22 / 33 / Haru 三实例同时显示；另测试重复 Haru 和重复 22，共四个独立窗口/context/bridge。删除重复原生模型后源模型仍正确绘制，验证按 context 的 shader/FBO 隔离。
-- 逐实例显示、暂停、追踪、编辑、缩放、置前、动作/Idle 与原生表情操作；菜单列出四个实例；关闭 A 追踪平滑归中，冻结动画的 B 可随左右目标改变几何。目标通过共享鼠标采样器的测试输入提供，不移动系统光标。
-- 隐藏一个、全部隐藏、模拟睡眠路径时相应实例 draw 计数保持不变，其他可见实例继续绘制；全局隐藏不覆盖逐实例可见偏好。
-- 三个实际 NSScreen 坐标变换往返，包括负坐标；窗口可恢复到可见区域。实际跨不同 DPI（本机均 2×）、物理拔屏、Space/全屏/Stage Manager 和手动拖动滚轮交互尚未实测。
-- 30 次增删，每个临时实例先实际渲染，弱引用检查所有已删除 view 均释放；20 次模型替换，不影响 B 的 controller。失败添加/替换不损坏已有实例。
-- 新进程恢复四实例及 UUID/顺序/名称/frame/scale/追踪/平滑/FPS/暂停/Idle/表情；额外插入失效模型后，仅其描述符记录错误，其余恢复。隐藏实例零 draw。损坏配置、重复 UUID 和越界路径单独测试通过。
-- 帧率复测：A30=29.968，B60=59.937 FPS，测量 2.102 秒；CADisplayLink callback / scheduled / draw 计数一致。早期 38 次重绘和后续跳帧结果不计通过，修复 AppKit 额外绘制入口及 display clock 节流后通过。
-- Time Profiler 10 秒采集输出已保存；5592 个样本中 3342 栈包含 JSValue，2085 包含 ObjC callback，1030 包含旧 glCall。旧运行库 GL 调用改成有序批处理以减少桥接成本，保持官方解码/蒙版实现；批处理后图像与生命周期测试均通过。
+## 0–4 实例长时基线
 
-## M5 性能与交付（进行中）
-
-已完成 30 次增删和 20 次替换的功能/释放验证；0–4 实例资源成本、5 分钟静止/2 分钟移动目标、Allocations/Leaks、GPU/能耗与官方等条件比较尚未完成，不能宣称性能目标已达成。
-
-F01–F24 最终验收表仍待逐项审计；未实测的桌面行为不会由程序内状态测试代替。`dist/Lite2D.app` 是当前可运行构建，仍需后续验收和文档完善。
-
-### 2026-11-02 性能测试启动
-
-- 资源采集器使用 getrusage（进程 CPU）与 task_info/TASK_VM_INFO（resident、physical footprint），每秒记录逐实例 draw 和 GL error。
-- 短程 smoke：0/3 实例各 5 秒静止 + 3 秒移动目标，均正常退出；0 实例平均 CPU 0.18%，3 实例 42.80%。时长不足，不作为正式性能结论。
-- 正式 0–4 场景已启动，每场景预热 4 秒后 300 秒静止 + 120 秒应用内移动目标，总计约 35 分钟。运行进度以 `.local/verification/performance/active-process.json` 对应 PID 和实际进程状态核实，不能单独把该文件视为运行证明。
-- 本机 Bilibili 22娘：moc 188029 字节，4 张纹理共 626626 字节；33娘：moc 116879 字节，4 张纹理共 647856 字节。磁盘字节不等于解码/GPU 内存。
-
-### 实机验收安排
-
-用户已选择自行验证桌面交互，结果尚待回复。已启动使用独立 bundle ID / settings 的手测副本，模型名称以“手测”开头；步骤见 `docs/MANUAL_ACCEPTANCE.md`。该副本不是播放器的后台依赖，可从自己的菜单退出。性能测量进程使用另一份隔离配置；手测副本与其他用户应用的并发系统负载需在分析 GPU/调度波动时考虑，不把本机数据当受控实验室结论。
-
-已准备 `scripts/compare_official.py`（同一 Hiyori、360×480 points、30 FPS 的官方/AppKit 比较）、`scripts/generate_xcode.sh` 和本地缺失资源 fixture 生成器；它们的运行验证安排在正式长时基线之后，当前不标记为已通过。
-
-### 2026-11-02 候选回归与构建复核
-
-- 候选构建输出隔离到 `.local/candidate/`，未替换正在进行 0–4 长时测试的 `dist` 基线二进制；基线 SHA 已记录于 `.local/verification/performance/build-receipt.json`。
-- 新回归 `LITE2D_APP_PATH=.../.local/candidate/Lite2D.app/Contents/MacOS/Lite2D LITE2D_INTEGRATION_OUTPUT=.../.local/verification/candidate-integration python3 scripts/run_integration.py` Exit 0：147 项集成检查 + 17 项新进程恢复检查通过；30/60 FPS 分别 29.879 / 59.758。
-- 增加原生无动作/无 Physics 的有效模型实测、缺 moc/纹理失败隔离、移除最后一个实例后菜单存活、全量清理再恢复所有 renderer。修正原生 R5 表情/视线更新顺序，并设置 Motion 的 EyeBlink Effect IDs。
-- 坐标与 zOrder 极端值限幅的单独设置/校验测试 Exit 0；避免损坏配置用巨大窗口坐标或 Int.max 排序进入 AppKit。
-- 压力采样（4 个描述符，MiB）：
-
-| 阶段 | Resident | Physical footprint |
-|---|---:|---:|
-| before-add-remove | 265.2 | 478.2 |
-| after-10-add-remove | 271.5 | 487.2 |
-| after-20-add-remove | 253.3 | 453.0 |
-| after-30-add-remove-settled | 253.6 | 450.8 |
-| after-10-replace | 262.3 | 456.3 |
-| after-20-replace-settled | 262.1 | 451.0 |
-| after-zero-and-restore-settled | 217.6 | 425.8 |
-
-这些是同进程生命周期诊断采样，含捕获、JIT 和资源缓存，不能代替 Leaks 工具。30 次增删和 20 次替换没有表现为持续单向增长，全部 renderer 清理再恢复后进一步回落。
-
-- GPU 可选诊断通过 `GL_EXT_timer_query` 非阻塞读取。0–4 每场景 4 秒预热、5 秒静止、5 秒 1Hz 移动目标，GL error 均为 0、实际约 30 FPS。各实例 GPU 绘制区间均值（含预热已收集的查询，ms/frame）：1 实例 [0.981]，2 [0.732,0.388]，3 [1.221,0.436,0.354]，4 [0.765,0.285,0.373,0.428]。这是绘制区间耗时，不是整 GPU 利用率或能耗；系统其他进程和上下文调度会影响值。原始记录 `.local/verification/gpu-matrix/`。
-- Xcode 生成脚本 Exit 0。以隔离输出执行 `xcodebuild -project build/xcode-verification/Lite2D.xcodeproj -scheme Lite2D -configuration Release CODE_SIGNING_ALLOWED=NO -jobs 2 build` Exit 0，日志含 BUILD SUCCEEDED。修复 CMake Xcode 默认 Swift 4，显式固定 Swift 5。Ninja 与 Xcode 使用同一源码清单。
-
-### 用户实机反馈
-
-用户回复：“手测我没测出什么问题，我给手测版本的退了”。核对手测 PID 已退出；隔离设置已保存两个实例（原先三个，删除了一个），两者均恢复穿透，保存了显著缩放及含负坐标的位置。将此记录为用户手测总体未发现问题；没有录屏或逐项日志，不据此声称已自动验证 Finder/Space/Stage Manager/物理拔屏。当前三屏均为 2×，1× 显示器仍未覆盖。
-
-### 正式 0–4 基线已完成
-
-`python3 scripts/benchmark.py` 所有 5 个场景均 Exit 0，每组预热 4 秒后 300 秒静止目标 + 120 秒 1Hz 合成移动目标。以下 CPU 为本进程 getrusage，100% 代表一个核心；内存为样本均值，含本机框架/窗口/纹理/JSC，不等同于纯模型内存。
+每组预热 4 秒、静止目标 300 秒、1Hz 合成移动目标 120 秒；22/33 交替，3/4 含重复资产。360×480 points，30 FPS，追踪与动作开启，无选定模型 Physics 资源。CPU 100% 表示一个核心；MiB 为样本均值。不是连续人工移动鼠标的测试。
 
 | 实例 | 时长 s | 静止 CPU % | 移动目标 CPU % | 常驻 MiB | 物理占用 MiB | 各实例实际 FPS |
 |---:|---:|---:|---:|---:|---:|---|
@@ -113,17 +80,33 @@ F01–F24 最终验收表仍待逐项审计；未实测的桌面行为不会由�
 | 3 | 420.0 | 36.01 | 38.40 | 138.3 | 263.7 | 29.83, 29.83, 29.83 |
 | 4 | 420.0 | 44.62 | 43.73 | 154.7 | 297.7 | 29.84, 29.84, 29.84, 29.84 |
 
-这些数据来自正在使用的工作站；期间其他应用、用户手测以及隔离候选的编译/验证可能并发，CPU 不应被解释为严格单调的实例增量定律。1→2 实例 CPU 下降说明时段/模型差异与系统调度噪声不可忽略；内存增量则约为首次 +32.6 MiB resident / +156.4 MiB footprint，随后分别 +20.1/+48.3、+29.6/+38.2、+16.4/+34.0 MiB。没有用不同数量/资源的数据宣称胜过其他播放器。
+本机其他应用、用户手测和隔离候选构建/验证可能并发，CPU 不严格单调；不能把 1→2 的下降解释为新增实例减少固定 CPU。首个实例 footprint 增量约 156.4 MiB，后续约 48.3 / 38.2 / 34.0 MiB；首个开销包括框架、JIT、窗口、纹理和驱动缓存。首次资源未共享 GPU 纹理，以状态隔离优先。
 
-长时基线使用已固定并记录 SHA 的早期稳定构建；后续候选保留相同旧版模型渲染路径，增加原生更新顺序修正、边界和诊断。正式产物已重建（Exit 0），后续 profiling 针对当前产物。
+基线用 SHA 记录的早期稳定构建，`.local/verification/performance/build-receipt.json`；后续绑定版本保留同一旧版渲染路径。没有在中途替换基线二进制，也不把这些数据声称为当前所有模型/环境的保证。
 
-### 最后回归
+隐藏补充：3 实例运行后隐藏 1 个，剩余两者约 29.83 FPS、隐藏者 0 draw；全部隐藏时三者均 0 draw，诊断采集期间 CPU 约 0.37%。内存保留模型资源以便恢复。记录 `hidden-one/`、`hidden-all/`，各 12 秒，不与 420 秒数据混为同一时长。
 
-`.local/verification/release-integration/`：152 项集成检查、17 项新进程恢复检查通过，约 30.00 / 59.52 FPS；新增记录整个实例生命周期中瞬时 GL error 计数，存活实例均为 0。离屏窗口经屏幕变化通知回到可见区域。缩放达到窗口最小/最大尺寸后仍保持一个共同缩放比例，避免反复放大缩小时纵横比漂移；几何边界单测通过。
+## GPU、Instruments 与官方对比
 
-### 压力之后的 Leaks 与工具附加问题
+- `GL_EXT_timer_query` 非阻塞区间计时，0–4 场景均无 GL error。各模型绘制区间均值 ms/frame：1 [0.981]，2 [0.732,0.388]，3 [1.221,0.436,0.354]，4 [0.765,0.285,0.373,0.428]。包含预热已收集查询；这是区间耗时，不能当作总 GPU 利用率或瓦特。
+- `.local/verification/profiling/launch-20261102-010506/`：Time Profiler / Allocations / Leaks 各独立启动 3 实例，以及 0–4 Activity Monitor，共 8 个记录，xctrace 和目标正常结束，应用自身 summary 存在，GL errorCount=0。Leaks 模板会降低采样帧率（约23 FPS），不用于常态性能结论。
+- 热附加 Allocations 的旧方式导致此主机 JSC/注入栈停顿，已弃用该结果；改为启动即记录，避免把工具热附加成功码误当应用完成。一次诊断清理过宽中止并行隐藏场景，已收窄 PID 范围，该被中止结果未计入。
+- Power Profiler 实际提示 macOS 不支持（要求 iOS/iPadOS）；Activity Monitor 导出的 schema 也没有 Energy Impact 字段，**未取得或估算 Energy Impact/瓦特**。已有 Idle Wakeups 差分仅为可用代理指标，不冒充能耗：
 
-- `python3 scripts/leaks_after_stress.py` Exit 0：先通过 152 项集成检查（含 30 次增删、20 次替换），在 30 秒的静止保留窗口扫描同一存活进程。`leaks` Exit 0，报告 `0 leaks for 0 total leaked bytes`，应用最终 Exit 0。记录 `.local/verification/post-stress-leaks/run-20261102-010319/`。该结果不代表能证明不存在任何未来模型或驱动泄漏。
-- 最初的串行热附加流程在 Allocations 后停止推进采样，整体看门狗退出，故不计为正常完成。单独复现的线程采样显示 JSC 调用与 Instruments 注入的 liboainject 栈。改用每个模板启动新进程：Allocations 已正常取得记录，目标约 29.60 FPS / GL errorCount=0，正常自动退出。
-- `scripts/profile_app.py` 已改为每模板独立 launch、检查应用自身 summary 与目标退出状态，并清理该次 Instruments 遗留的项目内停止占位进程；不以单独 xctrace Exit 0 作为应用成功证据。
-- Power Profiler 实际报错：`The Power Profiler instrument is not supported on macOS. Record on iOS or iPadOS instead.` 未把此工具输出当作有效能耗数据；正在使用 macOS Activity Monitor 模板核对可用指标。
+| 实例 | Activity Monitor CPU % | Physical footprint MiB | Idle Wakeups/s |
+|---:|---:|---:|---:|
+| 0 | 0.07 | 17.1 | 1.6 |
+| 1 | 13.79 | 180.7 | 230.1 |
+| 2 | 21.22 | 217.4 | 230.8 |
+| 3 | 26.57 | 259.2 | 229.7 |
+| 4 | 34.51 | 291.8 | 230.9 |
+
+Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长时基线。
+
+官方/AppKit 对比使用相同 Hiyori、360×480 points（720×960 pixels）、30 FPS，约30秒。官方约 30.03 FPS / 7.72% CPU，AppKit约 30.00 FPS / 10.31% CPU。官方不透明 GLFW 与 AppKit 透明合成、动画功能集及后台负载不同，**不据此宣称胜出**。原始记录 `official-comparison/`；临时上游插桩源已恢复，submodule 未改动。
+
+## 交付边界
+
+源码、README、BUILD、TEST_REPORT、第三方说明和生成脚本已交付；`doc/` 保持忽略，不提交个人模型/Core/专有旧运行库或 `.app`。`.app` 只作为本机产物保留于 dist。
+
+旧版兼容以首批22/33娘为验收对象，旧版专用物理/姿势/表情、音频和 ViewerEX 自定义控制器未实现；原生 `.moc3` 按官方 Framework 处理可用资源。OpenGL 已弃用；实际运行验证为 macOS 27.2 / M3 Pro，macOS 14 是部署目标而非额外实机验证。显示器 UUID 被系统重新分配时需显式重新绑定。没有公开发布许可或第三方模型再分发授权的声明。

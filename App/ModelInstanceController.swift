@@ -12,12 +12,12 @@ final class ModelRecord {
     init(_ settings: ModelInstanceSettings) { self.settings = settings }
 }
 
-final class ModelInstanceController: NSObject, NSWindowDelegate {
+final class ModelInstanceController: NSObject {
     unowned let record: ModelRecord
     let window: PetWindow
     let view: OpenGLModelView
-    var onChange: (() -> Void)?
-    private var closing = false
+    var onZoomRequested: ((Double) -> Void)?
+    var onUserMoved: ((NSRect) -> Void)?
 
     init(record: ModelRecord) throws {
         self.record = record
@@ -32,40 +32,30 @@ final class ModelInstanceController: NSObject, NSWindowDelegate {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.contentView = view
-        window.delegate = self
         do { try view.load() }
-        catch { view.shutdown(); window.delegate = nil; window.close(); throw error }
-        view.onZoom = { [weak self] factor in self?.zoom(by: factor) }
-        apply(visible: record.settings.isVisible)
+        catch { view.shutdown(); window.close(); throw error }
+        view.onZoom = { [weak self] factor in self?.onZoomRequested?(factor) }
+        view.onDragFinished = { [weak self] frame in self?.onUserMoved?(frame) }
+        // The manager decides visibility after resolving the bound display.
+        // A disconnected binding must never flash onto the primary screen.
     }
     func apply(visible: Bool, sleeping: Bool = false) {
+        let changedFPS = view.settings.targetFPS != record.settings.targetFPS
         view.settings = record.settings
-        view.applyFPS()
+        if changedFPS { view.applyFPS() }
         window.title = record.settings.displayName
         window.ignoresMouseEvents = record.settings.interactionMode != .edit
         view.setActive(visible && !sleeping)
-        if visible { window.orderFrontRegardless() } else { window.orderOut(nil) }
+        if visible {
+            if !window.isVisible { window.orderFrontRegardless() }
+        } else if window.isVisible { window.orderOut(nil) }
     }
-    func zoom(by factor: Double) {
-        let resized = ZoomGeometry.resize(frame: window.frame, currentScale: record.settings.scale, factor: factor)
-        record.settings.scale = resized.scale
-        window.setFrame(resized.frame, display: true)
-        record.settings.windowFrame = WindowFrame(window.frame)
-        view.settings = record.settings
-        onChange?()
-    }
-    func windowDidMove(_ notification: Notification) { saveFrame() }
-    func windowDidResize(_ notification: Notification) { saveFrame() }
-    private func saveFrame() {
-        guard !closing else { return }
-        record.settings.windowFrame = WindowFrame(window.frame)
-        onChange?()
+    func setLayoutFrame(_ frame: NSRect) {
+        if window.frame != frame { window.setFrame(frame, display: false) }
     }
     func shutdown() {
-        closing = true
         view.shutdown()
-        window.delegate = nil
         window.orderOut(nil); window.contentView = nil; window.close()
-        onChange = nil
+        onZoomRequested = nil; onUserMoved = nil
     }
 }

@@ -36,15 +36,15 @@ cmake --build build/official-minimum --parallel 6
 
 上述命令已执行，configure/build 均 Exit 0。可使用 `python3 scripts/probe_official_demo.py` 进行 90 帧的程序内 GPU readback 验证；运行正常退出，模型可见且帧内容变化。该脚本临时插入采样，构建后恢复上游源文件，不操作桌面输入或捕获桌面。
 
-`python3 scripts/prepare_test_models.py` 将选定工坊模型读取到忽略的 `.local/models/`，保留来源收据，不改动 Steam 资源。`xcrun swift Tests/LegacyCPUProbe.swift` 验证已有 Cubism 2 JS 运行库在进程内 JavaScriptCore 中加载模型，不使用 Pixi 或 WebView。GPU 适配仍待实现。
-## AppKit 原型构建
+`python3 scripts/prepare_test_models.py` 将选定工坊模型读取到忽略的 `.local/models/`，保留来源收据，不改动 Steam 资源。`xcrun swift Tests/LegacyCPUProbe.swift` 验证已有 Cubism 2 JS 运行库在进程内 JavaScriptCore 中加载模型，不使用 Pixi 或 WebView。GPU 适配已完成，实际结果见 TEST_REPORT。
+## AppKit 构建
 
 ```sh
 sh scripts/build.sh
 python3 scripts/probe_app.py vendor/CubismNativeSamples/Samples/Resources/Hiyori/Hiyori.model3.json --name native-app
 ```
 
-构建和程序内 GPU 验证均 Exit 0。产物 `dist/Lite2D.app` 为 ARM64，使用 ad-hoc 签名。当前仅为基础渲染里程碑，功能进度见 TEST_REPORT。CMake 生成原生项目；GL 资源隔离补丁在构建目录生成，固定上游源码保持原样。
+构建和程序内 GPU 验证均 Exit 0。产物 `dist/Lite2D.app` 为 ARM64，使用 ad-hoc 签名。多实例和显示器绑定已完成，验收范围见 TEST_REPORT。CMake 生成原生项目；GL 资源隔离补丁在构建目录生成，固定上游源码保持原样。
 
 ## 旧版模型兼容依赖
 
@@ -56,13 +56,13 @@ python3 scripts/probe_app.py .local/models/bilibili-22/model.json --name legacy-
 python3 scripts/probe_app.py .local/models/bilibili-33/model.json --name legacy-33
 ```
 
-运行库安装器默认读取本机已有 RimeLive2D 中的 `live2d.min.js`，也可传入已有合法文件路径。没有从第三方下载 Core，不提交运行库或模型。宿主适配脚本 `Resources/legacy-host.js` 为本项目代码。兼容路径使用进程内 JavaScriptCore 加原生 OpenGL，既不启动浏览器，也不启动额外常驻服务；实际性能须后续测量。
+运行库安装器默认读取本机已有 RimeLive2D 中的 `live2d.min.js`，也可传入已有合法文件路径。没有从第三方下载 Core，不提交运行库或模型。宿主适配脚本 `Resources/legacy-host.js` 为本项目代码。兼容路径使用进程内 JavaScriptCore 加原生 OpenGL，既不启动浏览器，也不启动额外常驻服务；实际性能与工具限制见 TEST_REPORT。
 
 ## 多实例验证
 
 ```sh
 python3 scripts/run_integration.py
-xcrun swiftc -parse-as-library App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
 ```
 
@@ -89,3 +89,20 @@ xcodebuild -project build/xcode/Lite2D.xcodeproj -scheme Lite2D -configuration R
 已在 `build/xcode-verification` 实际验证 Xcode 构建，Exit 0。Xcode 的产物默认在 `dist/Release/Lite2D.app`；Ninja 的产物为 `dist/Lite2D.app`。可用 `-DLITE2D_OUTPUT_ROOT=/absolute/output` 在独立 CMake build 目录隔离候选产物，避免覆盖运行中的基线。显式使用 Swift 5 语言模式，macOS 14 deployment target；本机用 ad-hoc 签名，无需开发证书。
 
 运行独立单元测试前先执行 `python3 scripts/create_test_fixtures.py`，以准备本地原生无可选资源、缺必要资源的夹具；不提交模型数据。集成脚本会自动准备这些夹具。
+
+## 最终构建与绑定迁移
+
+当前产物 `dist/Lite2D.app` 已构建、ad-hoc 签名并运行验证。配置为 schemaVersion 3，包含每实例 `displayUUID`、`boundDisplayName`、`displayPosition`（屏内 point 坐标）；旧配置只迁移一次，离线显示器不会回落到主屏。显示器绑定回归采用应用内拓扑替换，不操作系统显示设置。
+
+最终单元测试命令：
+
+```sh
+python3 scripts/create_test_fixtures.py
+mkdir -p .local/verification/unit
+xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+.local/verification/unit/settings-tests
+```
+
+已收取的验证、长时基线、GPU 区间计时、Instruments 及压力之后的 Leaks 结果见 TEST_REPORT。用户已要求停止新增/重复压测，交付不再依赖补测。Stage Manager / 跨 DPI 跳过，物理插拔由用户后续验证。
+
+原始诊断与测量文件仅保留于忽略的 `.local/verification/`，可能含本机路径和 Instruments 环境元数据，不随源码或 `.app` 公开发布。

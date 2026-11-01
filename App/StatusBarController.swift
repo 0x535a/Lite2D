@@ -45,6 +45,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 let label = NSMenuItem(title: "加载失败：\(error)", action: nil, keyEquivalent: "")
                 label.isEnabled = false; model.addItem(label)
             }
+            let connected = manager.isDisplayConnected(record)
+            let bindingName = settings.boundDisplayName ?? settings.displayUUID.map { String($0.prefix(8)) } ?? "未绑定"
+            let displayMenu = submenu("绑定显示器：\(bindingName)\(connected ? "" : "（离线 / 隐藏）")", into: model)
+            for display in manager.displayRegistry.displays {
+                displayMenu.addItem(item("\(display.name) · \(display.id.prefix(4))", checked: display.id == settings.displayUUID) { [weak self] in
+                    self?.manager.bind(id, to: display.id)
+                })
+            }
             model.addItem(item("显示", checked: settings.isVisible) { [weak self] in self?.manager.mutate(id) { $0.isVisible.toggle() } })
             model.addItem(item(settings.interactionMode == .edit ? "完成编辑（点击穿透）" : "编辑（拖动 / 滚轮缩放）") { [weak self] in self?.manager.edit(id) })
             model.addItem(item("视线追踪", checked: settings.trackingEnabled) { [weak self] in self?.manager.mutate(id) { $0.trackingEnabled.toggle() } })
@@ -81,7 +89,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             model.addItem(item("放大") { [weak self] in self?.manager.zoom(id, factor: 1.15) })
             model.addItem(item("缩小") { [weak self] in self?.manager.zoom(id, factor: 1 / 1.15) })
             model.addItem(item("置于前面") { [weak self] in self?.manager.bringForward(id) })
-            model.addItem(item("重置位置") { [weak self] in self?.manager.resetPosition(id) })
+            model.addItem(item("重置在绑定屏内的位置") { [weak self] in self?.manager.resetPosition(id) })
             model.addItem(item("重命名…") { [weak self] in self?.rename(id) })
             model.addItem(item("更换模型…") { [weak self] in self?.chooseReplacement(id) })
             model.addItem(item("复制实例") { [weak self] in self?.attempt { _ = try self?.manager.duplicate(id) } })
@@ -89,9 +97,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(item(manager.allHidden ? "恢复各实例显示状态" : "全部隐藏") { [weak self] in self?.manager.toggleAllHidden() })
-        menu.addItem(item("恢复全部窗口到可见区域") { [weak self] in
+        menu.addItem(item("重置各实例在绑定屏的位置") { [weak self] in
             guard let self else { return }; for record in manager.records { manager.resetPosition(record.settings.id) }
         })
+        menu.addItem(item("刷新显示器连接状态") { [weak self] in self?.manager.refreshDisplayBindings() })
         menu.addItem(item("撤销上次移除", enabled: manager.removedSettings != nil) { [weak self] in self?.manager.undoRemove() })
         menu.addItem(.separator())
         let quit = item("退出 Lite2D") { NSApp.terminate(nil) }; quit.keyEquivalent = "q"; menu.addItem(quit)
