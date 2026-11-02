@@ -9,6 +9,7 @@ final class ModelRecord {
     var settings: ModelInstanceSettings
     var controller: ModelInstanceController?
     var error: String?
+    var outfits: [ModelOutfit] = []
     init(_ settings: ModelInstanceSettings) { self.settings = settings }
 }
 
@@ -24,6 +25,7 @@ final class ModelInstanceController: NSObject {
         guard let view = OpenGLModelView(settings: record.settings) else {
             throw NSError(domain: "Lite2D", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建 OpenGL context。"])
         }
+        record.outfits = (try? ModelOutfitCatalog.load(URL(fileURLWithPath: record.settings.modelPath))) ?? []
         self.view = view
         window = PetWindow(contentRect: record.settings.windowFrame.rect, styleMask: [.borderless], backing: .buffered, defer: false)
         super.init()

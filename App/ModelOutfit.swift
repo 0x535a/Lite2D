@@ -1,0 +1,85 @@
+import Foundation
+
+struct ModelOutfit: Equatable {
+    // Empty ID selects the original entry. Other IDs are relative to its directory.
+    let id: String
+    let name: String
+}
+
+enum ModelOutfitCatalog {
+    static func resolve(_ id: String, relativeTo entry: URL) throws -> URL {
+        let root = entry.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+        guard !id.isEmpty, !id.hasPrefix("/"), URL(string: id)?.scheme == nil else {
+            throw invalid("服装引用必须是模型目录内的相对路径。")
+        }
+        let target = root.appendingPathComponent(id).standardizedFileURL.resolvingSymlinksInPath()
+        guard target.path.hasPrefix(root.path + "/") else { throw invalid("服装资源超出模型目录。") }
+        return target
+    }
+
+    static func load(_ entry: URL) throws -> [ModelOutfit] {
+        let json = try object(entry)
+        let groups = json["motions"] as? [String: [[String: Any]]] ?? [:]
+        var names: [String: String] = [:]
+        // ViewerEX choice labels carry the author's outfit names and ordering.
+        var orderedGroups: [String] = []
+        for group in groups.keys.sorted() {
+            for motion in groups[group] ?? [] {
+                for choice in motion["choices"] as? [[String: Any]] ?? [] {
+                    if let next = choice["next_mtn"] as? String, let title = choice["text"] as? String,
+                       names[next] == nil {
+                        names[next] = title; orderedGroups.append(next)
+                    }
+                }
+            }
+        }
+        orderedGroups += groups.keys.filter { !orderedGroups.contains($0) }.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        var result = [ModelOutfit(id: "", name: "默认")]
+        var seen = Set<String>()
+        for group in orderedGroups {
+            for motion in groups[group] ?? [] {
+                guard let command = motion["command"] as? String else { continue }
+                let tokens = command.split(whereSeparator: { $0.isWhitespace })
+                // Interpret only this declarative reference; never execute commands/scripts.
+                guard tokens.count == 2, tokens[0] == "change_cos" else { continue }
+                var target = try resolve(String(tokens[1]), relativeTo: entry)
+                // Older prepared caches renamed .bin JSONs but left command strings intact.
+                if !FileManager.default.fileExists(atPath: target.path), target.pathExtension == "bin" || target.pathExtension == "bin3" {
+                    target = try resolve((String(tokens[1]) as NSString).deletingPathExtension + ".json", relativeTo: entry)
+                }
+                guard let costume = try? object(target),
+                      costume["model"] is String || costume["FileReferences"] is [String: Any] else { continue }
+                let root = entry.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+                let relative = String(target.path.dropFirst(root.path.count + 1))
+                let name = names[group] ?? (costume["options"] as? [String: Any])?["name"] as? String ?? group
+                let sameModel = (costume["model"] as? String) == (json["model"] as? String)
+                let sameTextures = (costume["textures"] as? [String]) == (json["textures"] as? [String])
+                let isOriginal = target == entry.standardizedFileURL.resolvingSymlinksInPath() ||
+                    (json["model"] is String && sameModel && sameTextures)
+                if isOriginal { result[0] = ModelOutfit(id: "", name: name); continue }
+                if seen.insert(relative).inserted { result.append(ModelOutfit(id: relative, name: name)) }
+            }
+        }
+        return result
+    }
+
+    static func selectedURL(entry: URL, outfitID: String?, outfits: [ModelOutfit]) throws -> URL {
+        guard let id = outfitID, !id.isEmpty else { return entry }
+        guard outfits.contains(where: { $0.id == id }) else { throw invalid("已保存的服装不存在，请重新选择服装或默认服装。") }
+        return try resolve(id, relativeTo: entry)
+    }
+
+    private static func object(_ url: URL) throws -> [String: Any] {
+        let data = try Data(contentsOf: url)
+        guard data.count < 8 * 1024 * 1024,
+              let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw invalid("服装描述不是有效的 JSON 对象。")
+        }
+        return value
+    }
+    private static func invalid(_ message: String) -> NSError {
+        NSError(domain: "Lite2D.Outfit", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+}

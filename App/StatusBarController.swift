@@ -64,6 +64,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 smoothing.addItem(item(title, checked: abs(settings.trackingSmoothingSeconds - seconds) < 0.001) { [weak self] in self?.manager.mutate(id) { $0.trackingSmoothingSeconds = seconds } })
             }
             model.addItem(item("暂停动作", checked: settings.animationPaused) { [weak self] in self?.manager.mutate(id) { $0.animationPaused.toggle() } })
+            if record.outfits.count > 1 || settings.outfitID != nil {
+                let outfits = submenu("服装", into: model)
+                let options = record.outfits.isEmpty ? [ModelOutfit(id: "", name: "默认")] : record.outfits
+                for outfit in options {
+                    outfits.addItem(item(outfit.name, checked: (settings.outfitID ?? "") == outfit.id) { [weak self] in
+                        self?.attempt { try self?.manager.setOutfit(id, outfitID: outfit.id) }
+                    })
+                }
+            }
             let groups = record.controller?.view.bridge.motionGroups ?? [:]
             if !groups.isEmpty {
                 let idle = submenu("循环动作组", into: model)

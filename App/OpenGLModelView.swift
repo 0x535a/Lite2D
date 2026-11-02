@@ -57,17 +57,27 @@ final class OpenGLModelView: NSOpenGLView {
     }
     func load() throws {
         configureSurface()
-        let validated = try ModelFileValidator.validate(URL(fileURLWithPath: settings.modelPath))
-        for warning in validated.warnings { NSLog("%@", warning) }
-        let pixels = convertToBacking(bounds)
-        try bridge.load(path: validated.url.path, width: Int32(max(pixels.width, 1)), height: Int32(max(pixels.height, 1)))
-        if let idle = settings.idleMotionGroup { bridge.setIdleGroup(idle) }
-        if let expression = settings.expressionId { _ = bridge.selectExpression(expression) }
+        let entry = URL(fileURLWithPath: settings.modelPath)
+        let outfits = try ModelOutfitCatalog.load(entry)
+        let selected = try ModelOutfitCatalog.selectedURL(entry: entry, outfitID: settings.outfitID, outfits: outfits)
+        try loadEntry(selected)
         loaded = true
         displayLink = self.displayLink(target: self, selector: #selector(tick(_:)))
         applyFPS()
         displayLink?.isPaused = true
         displayLink?.add(to: .main, forMode: .common)
+    }
+    func loadEntry(_ url: URL) throws {
+        openGLContext?.makeCurrentContext()
+        let validated = try ModelFileValidator.validate(url)
+        for warning in validated.warnings { NSLog("%@", warning) }
+        let pixels = convertToBacking(bounds)
+        try bridge.load(path: validated.url.path, width: Int32(max(pixels.width, 1)), height: Int32(max(pixels.height, 1)))
+        if let idle = settings.idleMotionGroup { bridge.setIdleGroup(idle) }
+        if let expression = settings.expressionId { _ = bridge.selectExpression(expression) }
+        lastTime = nil
+        renderRequested = true
+        needsDisplay = true
     }
     func applyFPS() {
         let fps = Float(settings.targetFPS)

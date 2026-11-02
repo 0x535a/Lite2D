@@ -160,7 +160,7 @@ final class ModelInstanceManager {
         let valid = try ModelFileValidator.validate(url)
         var settings = old.settings
         settings.modelPath = valid.url.path
-        settings.idleMotionGroup = nil; settings.expressionId = nil
+        settings.idleMotionGroup = nil; settings.expressionId = nil; settings.outfitID = nil
         let replacement = ModelRecord(settings)
         let controller = try ModelInstanceController(record: replacement)
         replacement.controller = controller
@@ -195,6 +195,29 @@ final class ModelInstanceManager {
         guard let record = record(id) else { return }
         record.settings.idleMotionGroup = group
         record.controller?.view.bridge.setIdleGroup(group); changed()
+    }
+    func setOutfit(_ id: UUID, outfitID: String) throws {
+        guard let record = record(id) else { return }
+        let entry = URL(fileURLWithPath: record.settings.modelPath)
+        let outfits = try ModelOutfitCatalog.load(entry)
+        let selected = try ModelOutfitCatalog.selectedURL(entry: entry, outfitID: outfitID, outfits: outfits)
+        if let controller = record.controller {
+            // Bridge loading is transactional: failed validation/decoding keeps the old engine.
+            try controller.view.loadEntry(selected)
+            record.settings.outfitID = outfitID.isEmpty ? nil : outfitID
+            record.outfits = outfits
+            apply(record)
+        } else {
+            var settings = record.settings
+            settings.outfitID = outfitID.isEmpty ? nil : outfitID
+            let replacement = ModelRecord(settings)
+            replacement.controller = try ModelInstanceController(record: replacement)
+            guard let index = records.firstIndex(where: { $0.settings.id == id }) else {
+                replacement.controller?.shutdown(); return
+            }
+            records[index] = replacement; configure(replacement); apply(replacement)
+        }
+        changed()
     }
     func setExpression(_ id: UUID, expression: String) {
         guard let record = record(id), let controller = record.controller else { return }
