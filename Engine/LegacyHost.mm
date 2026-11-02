@@ -275,7 +275,12 @@ failed:
 - (void)setIdleGroup:(NSString*)group {_context[@"idleGroup"]=group;}
 - (NSDictionary<NSString*,NSNumber*>*)motionGroups {
  NSMutableDictionary* result=[NSMutableDictionary dictionary];NSDictionary* motions=_settings[@"motions"];
- for(NSString* group in motions)result[group]=@([motions[group]count]);return result;
+ for(NSString* group in motions) {
+  NSArray* list=motions[group];BOOL playable=NO;
+  for(NSDictionary* motion in list)if([motion[@"file"] isKindOfClass:NSString.class]){playable=YES;break;}
+  if(playable)result[group]=@(list.count);
+ }
+ return result;
 }
 - (NSArray<NSString*>*)expressionNames {return @[];}
 - (float)canvasAspect {return [[_context evaluateScript:@"model.getCanvasWidth()/model.getCanvasHeight()"]toDouble];}

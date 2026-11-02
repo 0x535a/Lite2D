@@ -96,6 +96,7 @@ final class SelfTestRunner {
             _ = try capture(native, label: "native-after-failed-adds")
             let twin = try manager.duplicate(a)!
             duplicate = twin.settings.id
+            try testOutfits()
             try check(twin.settings.id != a && twin.settings.modelPath == manager.record(a)!.settings.modelPath, "Duplicate asset has a new UUID")
             try check(twin.controller!.view.bridge !== manager.record(a)!.controller!.view.bridge, "Duplicate asset has an independent engine bridge")
             later(0.35) { try self.beginTracking() }
@@ -110,6 +111,74 @@ final class SelfTestRunner {
             let window = manager.record(b)!.controller!.window
             SharedMouseTracker.shared.testPoint = NSPoint(x: window.frame.minX - 400, y: window.frame.maxY + 200)
             later(1) { try self.leftLook() }
+    }
+    private func testOutfits() throws {
+        guard let record = manager.record(a), record.outfits.count > 1 else {
+            throw NSError(domain: "Lite2D.SelfTest", code: 4, userInfo: [NSLocalizedDescriptionKey: "Outfit fixture required"])
+        }
+        let originalSettings = record.settings
+        manager.mutate(a) { $0.animationPaused = true; $0.trackingEnabled = false }
+        try manager.setOutfit(a, outfitID: "")
+        let original = try capture(a, label: "outfit-default")
+        let otherController = manager.record(b)!.controller!
+        let duplicateController = manager.record(duplicate)!.controller!
+        let otherSettings = manager.record(b)!.settings
+        var frames = Set<Data>()
+        for outfit in record.outfits {
+            try manager.setOutfit(a, outfitID: outfit.id)
+            let frame = try capture(a, label: "outfit-\(outfit.name.replacingOccurrences(of: "/", with: "-"))")
+            frames.insert(frame)
+            try check(manager.record(a)!.settings.outfitID == (outfit.id.isEmpty ? nil : outfit.id), "Outfit selection commits only to selected instance")
+        }
+        try check(frames.count == record.outfits.count, "All 19 outfits render distinct textured frames")
+        try check(manager.record(b)!.controller === otherController && manager.record(b)!.settings == otherSettings && manager.record(duplicate)!.controller === duplicateController, "Outfit switching preserves other instance controllers and settings")
+        try manager.setOutfit(a, outfitID: "")
+        try check(try capture(a, label: "outfit-return-default") == original, "Returning to default restores original pixels while paused")
+        let beforeFailure = manager.record(a)!.settings
+        var rejected = false
+        do { try manager.setOutfit(a, outfitID: "../invalid.json") } catch { rejected = true }
+        try check(rejected && manager.record(a)!.settings == beforeFailure, "Invalid outfit leaves saved settings untouched")
+        try check(try capture(a, label: "outfit-after-failure") == original, "Invalid outfit preserves current renderer")
+        // A readable but corrupt texture reaches the engine decoder, beyond validation.
+        let fixtureRoot = output.appendingPathComponent("outfit-failure-fixture")
+        try? FileManager.default.removeItem(at: fixtureRoot)
+        let sourceRoot = URL(fileURLWithPath: record.settings.modelPath).deletingLastPathComponent()
+        try FileManager.default.copyItem(at: sourceRoot, to: fixtureRoot)
+        defer { try? FileManager.default.removeItem(at: fixtureRoot) }
+        let fixtureEntry = fixtureRoot.appendingPathComponent(URL(fileURLWithPath: record.settings.modelPath).lastPathComponent)
+        let fixtureRecord = try manager.add(fixtureEntry, name: "outfit decode failure")
+        let fixtureID = fixtureRecord.settings.id
+        defer { manager.remove(fixtureID) }
+        manager.mutate(fixtureID) { $0.animationPaused = true; $0.trackingEnabled = false }
+        try manager.setOutfit(fixtureID, outfitID: "")
+        fixtureRecord.controller!.window.display()
+        let fixtureBefore = try capture(fixtureID, label: "outfit-decode-before")
+        let brokenOutfit = fixtureRecord.outfits[1]
+        let brokenURL = try ModelOutfitCatalog.resolve(brokenOutfit.id, relativeTo: fixtureEntry)
+        let baseJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureEntry)) as! [String: Any]
+        let costumeJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: brokenURL)) as! [String: Any]
+        let baseTextures = baseJSON["textures"] as! [String]
+        let alternateTexture = (costumeJSON["textures"] as! [String]).first { !baseTextures.contains($0) }!
+        try Data("invalid PNG".utf8).write(to: fixtureRoot.appendingPathComponent(alternateTexture))
+        let beforeDecodeFailure = fixtureRecord.settings
+        rejected = false
+        do { try manager.setOutfit(fixtureID, outfitID: brokenOutfit.id) } catch { rejected = true }
+        try check(rejected && fixtureRecord.settings == beforeDecodeFailure, "Texture decode failure leaves outfit settings unchanged")
+        try check(try capture(fixtureID, label: "outfit-decode-after") == fixtureBefore, "Texture decode failure preserves the live engine and pixels")
+        let selected = record.outfits[1]
+        try manager.setOutfit(a, outfitID: selected.id)
+        let copy = try manager.duplicate(a)!
+        try check(copy.settings.outfitID == selected.id, "Duplicate preserves selected outfit independently")
+        manager.remove(copy.settings.id)
+        manager.save()
+        try check(manager.store.load().instances.first { $0.id == a }?.outfitID == selected.id, "Selected outfit persists to disk")
+        try manager.setOutfit(a, outfitID: "")
+        manager.mutate(a) { $0.animationPaused = originalSettings.animationPaused; $0.trackingEnabled = originalSettings.trackingEnabled }
+        status.rebuild()
+        let instanceMenu = status.menu.item(at: 1)?.submenu?.item(at: 0)?.submenu
+        let outfitMenu = instanceMenu?.items.first { $0.title == "服装" }?.submenu
+        try check(outfitMenu?.items.count == 19 && outfitMenu?.items.first?.state == .on, "Status menu shows 19 named outfits and selected checkmark")
+        try check(try view(a).bridge.motionGroups["1"] == nil, "Costume commands are excluded from playable motion groups")
     }
     private func leftLook() throws {
         try check(abs(try view(a).filteredLook.x) < 0.02, "Tracking disabled instance smoothly returns to center")
@@ -300,6 +369,7 @@ final class SelfTestRunner {
         manager.mutate(a) { $0.displayName = "22 persistent A"; $0.trackingEnabled = false; $0.targetFPS = 30 }
         manager.mutate(b) { $0.displayName = "33 persistent B"; $0.trackingEnabled = true; $0.targetFPS = 60; $0.animationPaused = true }
         manager.mutate(duplicate) { $0.displayName = "22 hidden duplicate"; $0.isVisible = false; $0.trackingSmoothingSeconds = 0.3 }
+        if let outfit = manager.record(duplicate)?.outfits.dropFirst().first { try manager.setOutfit(duplicate, outfitID: outfit.id) }
         manager.save()
         try JSONEncoder().encode(manager.snapshot()).write(to: output.appendingPathComponent("expected-settings.json"))
         let toRemove = try manager.duplicate(a)!

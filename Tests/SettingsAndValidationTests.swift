@@ -32,6 +32,33 @@ import CoreGraphics
             let validated = try ModelFileValidator.validate(root.appendingPathComponent(".local/models/\(name)/model.json"))
             precondition(validated.legacy)
         }
+        let outfitEntry = root.appendingPathComponent(".local/models/legacy-a/model.json")
+        let outfits = try ModelOutfitCatalog.load(outfitEntry)
+        precondition(outfits.count == 19 && outfits[0].id == "" && outfits[1].name == "2016圣诞节1")
+        for outfit in outfits {
+            let url = try ModelOutfitCatalog.selectedURL(entry: outfitEntry, outfitID: outfit.id, outfits: outfits)
+            let validatedOutfit = try ModelFileValidator.validate(url)
+            precondition(validatedOutfit.legacy)
+        }
+        var dressed = settings.instances[0]
+        dressed.outfitID = outfits[1].id
+        let decodedOutfit = try JSONDecoder().decode(ModelInstanceSettings.self, from: JSONEncoder().encode(dressed))
+        precondition(decodedOutfit == dressed && settings.instances[0].outfitID == nil)
+        for bad in ["../escape.json", "/tmp/outfit.json", "https://example.com/outfit.json"] {
+            var rejected = false
+            do { _ = try ModelOutfitCatalog.resolve(bad, relativeTo: outfitEntry) } catch { rejected = true }
+            precondition(rejected)
+        }
+        var unknownRejected = false
+        do { _ = try ModelOutfitCatalog.selectedURL(entry: outfitEntry, outfitID: "unknown.json", outfits: outfits) }
+        catch { unknownRejected = true }
+        precondition(unknownRejected)
+        let linked = directory.appendingPathComponent("linked.json")
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: outfitEntry)
+        var symlinkRejected = false
+        do { _ = try ModelOutfitCatalog.resolve("linked.json", relativeTo: directory.appendingPathComponent("model.json")) }
+        catch { symlinkRejected = true }
+        precondition(symlinkRejected)
         let native = try ModelFileValidator.validate(root.appendingPathComponent("vendor/CubismNativeSamples/Samples/Resources/Hiyori/Hiyori.model3.json"))
         precondition(!native.legacy)
         let minimal = try ModelFileValidator.validate(root.appendingPathComponent(".local/verification/fixtures/native-minimal/model.model3.json"))

@@ -62,7 +62,7 @@ python3 scripts/probe_app.py .local/models/legacy-b/model.json --name legacy-33
 
 ```sh
 python3 scripts/run_integration.py
-xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
 ```
 
@@ -99,7 +99,7 @@ xcodebuild -project build/xcode/Lite2D.xcodeproj -scheme Lite2D -configuration R
 ```sh
 python3 scripts/create_test_fixtures.py
 mkdir -p .local/verification/unit
-xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
 ```
 

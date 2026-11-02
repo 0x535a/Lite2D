@@ -75,6 +75,9 @@ def prepare(source, ident, destination):
 
         def remap(value):
             if isinstance(value, str):
+                tokens = value.split()
+                if len(tokens) == 2 and tokens[0] == "change_cos" and tokens[1] in mapping:
+                    return "change_cos " + mapping[tokens[1]]
                 return mapping.get(value, value)
             if isinstance(value, list):
                 return [remap(item) for item in value]

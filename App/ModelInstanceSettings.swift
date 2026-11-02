@@ -47,6 +47,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     var animationPaused = false
     var idleMotionGroup: String?
     var expressionId: String?
+    var outfitID: String?
     var zOrder = 0
     var displayUUID: String?
     var boundDisplayName: String?
@@ -58,7 +59,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     }
     enum CodingKeys: String, CodingKey {
         case id, displayName, modelPath, windowFrame, scale, isVisible, trackingEnabled,
-             trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, expressionId, zOrder,
+             trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, expressionId, outfitID, zOrder,
              displayUUID, boundDisplayName, displayPosition, displayBindingVersion
     }
     init(from decoder: Decoder) throws {
@@ -76,6 +77,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         animationPaused = (try? c.decode(Bool.self, forKey: .animationPaused)) ?? false
         idleMotionGroup = try? c.decode(String.self, forKey: .idleMotionGroup)
         expressionId = try? c.decode(String.self, forKey: .expressionId)
+        outfitID = try? c.decode(String.self, forKey: .outfitID)
         zOrder = (try? c.decode(Int.self, forKey: .zOrder)) ?? 0
         displayUUID = try? c.decode(String.self, forKey: .displayUUID)
         boundDisplayName = try? c.decode(String.self, forKey: .boundDisplayName)
