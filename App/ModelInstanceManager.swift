@@ -9,6 +9,12 @@ final class ModelInstanceManager {
     private(set) var removedSettings: ModelInstanceSettings?
     var onChange: (() -> Void)?
     private var notifications: [NSObjectProtocol] = []
+    private var globalClickMonitor: Any?
+    private var localClickMonitor: Any?
+    private var clickStart: (id: UUID, point: NSPoint)?
+    var clickInteractionSuspended = false {
+        didSet { if clickInteractionSuspended { clickStart = nil } }
+    }
 
     init(store: SettingsStore = SettingsStore(), displayRegistry: DisplayRegistry = DisplayRegistry()) {
         self.store = store
@@ -17,6 +23,51 @@ final class ModelInstanceManager {
         notifications.append(workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.setSleeping(true) })
         notifications.append(workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.setSleeping(false) })
         notifications.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplayBindings() })
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseUp, .leftMouseDragged]
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] event in
+            self?.handleClickEvent(event)
+        }
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
+            // App menus and dialogs must not interact with models behind them.
+            if event.window != nil && !(event.window is PetWindow) { self?.clickStart = nil }
+            else { self?.handleClickEvent(event) }
+            return event
+        }
+    }
+    private func handleClickEvent(_ event: NSEvent) {
+        let point = event.window.map { $0.convertPoint(toScreen: event.locationInWindow) } ?? NSEvent.mouseLocation
+        handleClick(type: event.type, at: point)
+    }
+    // Shared by passive OS monitors and self-tests; never consumes or posts events.
+    func handleClick(type: NSEvent.EventType, at point: NSPoint) {
+        guard !clickInteractionSuspended, !sleeping, !allHidden, NSApp.modalWindow == nil else {
+            clickStart = nil; return
+        }
+        switch type {
+        case .leftMouseDown:
+            clickStart = nil
+            guard records.contains(where: { $0.controller?.view.canClickInteract == true }),
+                  let record = clickedModel(at: point), record.controller?.view.canClickInteract == true else { return }
+            clickStart = (record.settings.id, point)
+        case .leftMouseDragged:
+            if let start = clickStart, hypot(point.x - start.point.x, point.y - start.point.y) > 4 { clickStart = nil }
+        case .leftMouseUp:
+            let start = clickStart; clickStart = nil
+            guard let start, hypot(point.x - start.point.x, point.y - start.point.y) <= 4,
+                  let record = clickedModel(at: point), record.settings.id == start.id else { return }
+            record.controller?.view.playClickInteraction()
+        default: break
+        }
+    }
+    private func clickedModel(at point: NSPoint) -> ModelRecord? {
+        // Actual window order also covers edits and disabled models occluding
+        // an enabled model. Transparent pixels allow the next model to respond.
+        for window in NSApp.orderedWindows {
+            guard let record = records.first(where: { $0.controller?.window === window }),
+                  record.controller?.view.containsVisibleModel(at: point) == true else { continue }
+            return record
+        }
+        return nil
     }
     func restore() {
         for var settings in store.load().instances {
@@ -162,6 +213,7 @@ final class ModelInstanceManager {
         settings.modelPath = valid.url.path
         settings.motionWeightOverrides = [:]
         settings.idleMotionGroup = nil; settings.expressionId = nil; settings.outfitID = nil
+        settings.clickInteractionEnabled = false; settings.clickMotionGroup = nil
         let replacement = ModelRecord(settings)
         let controller = try ModelInstanceController(record: replacement)
         replacement.controller = controller
@@ -288,6 +340,9 @@ final class ModelInstanceManager {
     func changed() { store.schedule(snapshot()); onChange?() }
     func save() { store.save(snapshot()) }
     func shutdown() {
+        if let globalClickMonitor { NSEvent.removeMonitor(globalClickMonitor) }
+        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        globalClickMonitor = nil; localClickMonitor = nil; clickStart = nil
         save()
         for record in records { record.controller?.shutdown(); record.controller = nil }
         for token in notifications { NotificationCenter.default.removeObserver(token); NSWorkspace.shared.notificationCenter.removeObserver(token) }

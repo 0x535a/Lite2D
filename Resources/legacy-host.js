@@ -46,7 +46,7 @@ gl.uniformMatrix4fv=function(location,transpose,data){
     glCommands.push(25,location,Number(transpose),data.length/16);
     for(var i=0;i<data.length;i++)glCommands.push(data[i]);
 };
-var motions={}, motionWeights={}, queue, idleGroup='', blinkTime=0;
+var motions={}, motionWeights={}, queue, idleGroup='', blinkTime=0, interactionActive=false;
 function registerMotion(group,index,settings){
     if(!motions[group]) motions[group]=[];
     var motion=Live2DMotion.loadMotion(motionBytes);
@@ -61,10 +61,11 @@ function initializeLegacy(){
 }
 function playLegacy(group,index){
     if(!motions[group]||!motions[group][index])return false;
+    interactionActive=false;
     queue.startMotion(motions[group][index],false);return true;
 }
-function playLegacyIdle(){
-    var entries=motions[idleGroup]||[], weights=motionWeights[idleGroup]||[];
+function playLegacyRandom(group){
+    var entries=motions[group]||[], weights=motionWeights[group]||[];
     var values=[], maximum=0;
     for(var i=0;i<entries.length;i++){
         var weight=weights[i]==null?1:Number(weights[i]);
@@ -78,17 +79,25 @@ function playLegacyIdle(){
     for(var i=0;i<values.length;i++){
         if(!values[i])continue;
         last=i;draw-=values[i];
-        if(draw<0)return playLegacy(idleGroup,i);
+        if(draw<0)return playLegacy(group,i);
     }
-    return last>=0&&playLegacy(idleGroup,last);
+    return last>=0&&playLegacy(group,last);
+}
+function playLegacyIdle(){return playLegacyRandom(idleGroup);}
+function isLegacyInteractionPlaying(){return interactionActive&&!queue.isFinished();}
+function playLegacyInteraction(group){
+    if(isLegacyInteractionPlaying()||!playLegacyRandom(group))return false;
+    interactionActive=true;return true;
 }
 function setLegacyIdle(group){
+    interactionActive=false;
     idleGroup=group;
     if(!playLegacyIdle())queue.stopAllMotions();
 }
 function stepLegacy(time,x,y){
     UtSystem.setUserTimeMSec(time*1000);
     model.loadParam();
+    if(queue.isFinished())interactionActive=false;
     if(queue.isFinished()&&idleGroup)playLegacyIdle();
     queue.updateParam(model);
     model.saveParam();

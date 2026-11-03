@@ -53,6 +53,20 @@ import JavaScriptCore
             assert(!playLegacyIdle(),'unloaded action cannot be selected');
             motionWeights={idle:[Number.MAX_VALUE,Number.MAX_VALUE,Number.MAX_VALUE]};
             assert(playLegacyIdle(),'large weights stay finite');
+            motions.custom=motions.idle.slice(); motionWeights.custom=[0,0,1];
+            assert(playLegacyInteraction('custom'),'arbitrary interaction group starts');
+            assert(history.pop()===2,'interaction respects zero weights');
+            assert(isLegacyInteractionPlaying(),'interaction marked active immediately');
+            assert(!playLegacyInteraction('idle'),'repeated clicks cannot interrupt interaction');
+            history=[];
+            for(var i=600;i<1800;i++)stepLegacy(i/30,0,0);
+            assert(!isLegacyInteractionPlaying()&&history.length>1,'interaction completes and idle resumes');
+            assert(playLegacyInteraction('idle'),'idle may also be selected for interaction');
+            playLegacy('idle',0);
+            assert(!isLegacyInteractionPlaying(),'manual action clears interaction lock');
+            motionWeights.custom=[0,0,0];
+            assert(!playLegacyInteraction('custom'),'all zero interaction does nothing');
+            assert(!playLegacyInteraction('missing'),'missing group does nothing');
             """)
         print("Weighted playback passed: intervals, repeats, zero weights, manual completion, missing motions, large weights")
     }

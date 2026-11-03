@@ -7,6 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)step:(double)dt lookX:(float)x lookY:(float)y NS_SWIFT_NAME(step(deltaTime:lookX:lookY:));
 - (void)renderWidth:(int)width height:(int)height scale:(float)scale NS_SWIFT_NAME(render(width:height:scale:));
 - (BOOL)playGroup:(NSString *)group index:(int)index NS_SWIFT_NAME(play(group:index:));
+- (BOOL)playInteraction:(NSString *)group;
+@property(nonatomic, readonly) BOOL interactionPlaying;
 - (BOOL)selectExpression:(NSString *)name;
 - (void)setMotionWeights:(NSDictionary<NSString *, NSArray<NSNumber *> *> *)weights;
 - (void)setIdleGroup:(NSString *)group;

@@ -23,6 +23,8 @@ final class OpenGLModelView: NSOpenGLView {
     private var captureRequested = false
     private var renderRequested = false
     private var captured: RenderedFrame?
+    private var hitSamplePoint: NSPoint?
+    private var hitSampleVisible = false
     private(set) var loaded = false
     private(set) var active = false
     private(set) var frames: UInt64 = 0
@@ -33,6 +35,14 @@ final class OpenGLModelView: NSOpenGLView {
     private(set) var lastGLError: UInt32 = 0
     private(set) var glErrorCount: UInt64 = 0
     override var isOpaque: Bool { false }
+    var clickMotionGroup: String? {
+        settings.clickMotionGroup ?? bridge.motionGroups.keys.sorted().first { $0.lowercased() == "tap" }
+    }
+    var canClickInteract: Bool {
+        guard loaded, active, settings.clickInteractionEnabled, !settings.animationPaused,
+              settings.interactionMode != .edit, let group = clickMotionGroup else { return false }
+        return (bridge.motionGroups[group]?.intValue ?? 0) > 0
+    }
 
     init?(settings: ModelInstanceSettings) {
         self.settings = settings
@@ -152,6 +162,12 @@ final class OpenGLModelView: NSOpenGLView {
         if measureGPU { bridge.beginGPUMeasurement() }
         bridge.render(width: w, height: h, scale: 1)
         if measureGPU { bridge.endGPUMeasurement() }
+        if let point = hitSamplePoint {
+            var pixel = [UInt8](repeating: 0, count: 4)
+            glReadPixels(GLint(point.x), GLint(point.y), 1, 1, GLenum(GL_RGBA), GLenum(GL_UNSIGNED_BYTE), &pixel)
+            hitSampleVisible = pixel[3] > 8
+            hitSamplePoint = nil
+        }
         lastGLError = glGetError()
         if lastGLError != 0 { glErrorCount += 1 }
         frames += 1
@@ -175,6 +191,25 @@ final class OpenGLModelView: NSOpenGLView {
         let result = captured
         captured = nil
         return result
+    }
+    // Read only on a click, from a freshly drawn back buffer before swapping.
+    // The rendered alpha includes animation, clipping masks and outfit changes.
+    func containsVisibleModel(at screenPoint: NSPoint) -> Bool {
+        guard loaded, active, let window, window.isVisible else { return false }
+        let local = convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        guard bounds.contains(local) else { return false }
+        hitSampleVisible = false
+        hitSamplePoint = convertToBacking(local)
+        renderRequested = true
+        needsDisplay = true
+        display()
+        hitSamplePoint = nil
+        return hitSampleVisible && lastGLError == 0
+    }
+    @discardableResult func playClickInteraction() -> Bool {
+        guard canClickInteract, let group = clickMotionGroup else { return false }
+        openGLContext?.makeCurrentContext()
+        return bridge.playInteraction(group)
     }
     override func mouseDown(with event: NSEvent) {
         guard settings.interactionMode == .edit, let window else { return }

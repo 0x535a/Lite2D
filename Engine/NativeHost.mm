@@ -85,6 +85,7 @@ public:
  std::map<std::string,std::vector<ACubismMotion*>> motions;
  std::map<std::string,ACubismMotion*> expressionMap;
  std::string idleGroup;
+ bool interactionActive=false;
  std::map<std::string,std::vector<double>> motionWeights;
  std::mt19937 random{std::random_device{}()};
  int renderWidth=0,renderHeight=0;
@@ -172,11 +173,12 @@ public:
  bool play(const std::string& group,int index){
   auto found=motions.find(group);
   if(found==motions.end()||index<0||index>=found->second.size()||!found->second[index])return false;
+  interactionActive=false;
   _motionManager->SetReservePriority(3);_motionManager->StartMotionPriority(found->second[index],false,3);return true;
  }
- bool playIdle() {
-  auto found=motions.find(idleGroup);if(found==motions.end())return false;
-  auto weights=motionWeights.find(idleGroup);
+ bool playRandom(const std::string& group) {
+  auto found=motions.find(group);if(found==motions.end())return false;
+  auto weights=motionWeights.find(group);
   std::vector<double> values;
   double maximum=0;
   for(size_t i=0;i<found->second.size();++i){
@@ -188,14 +190,23 @@ public:
   // Normalize first so large, finite user weights cannot overflow the sum.
   for(auto& weight:values)weight/=maximum;
   std::discrete_distribution<int> choose(values.begin(),values.end());
-  return play(idleGroup,choose(random));
+  return play(group,choose(random));
+ }
+ bool playIdle(){return playRandom(idleGroup);}
+ bool interactionPlaying() const {return interactionActive&&!_motionManager->IsFinished();}
+ bool playInteraction(const std::string& group) {
+  if(interactionPlaying())return false;
+  if(!playRandom(group))return false;
+  interactionActive=true;return true;
  }
  void idle(const std::string& group){
+  interactionActive=false;
   idleGroup=group;
   if(!playIdle())_motionManager->StopAllMotions();
  }
  void update(double dt,float x,float y) {
   _model->LoadParameters();
+  if(_motionManager->IsFinished())interactionActive=false;
   if(dt>0&&_motionManager->IsFinished()&&!idleGroup.empty())playIdle();
   bool moved=_motionManager->UpdateMotion(_model,(float)dt);_model->SaveParameters();
   if(!moved&&_eyeBlink)_eyeBlink->UpdateParameters(_model,(float)dt);
@@ -224,6 +235,8 @@ void NativeHost::load(const std::string& p,int w,int h){impl->load(p,w,h);}
 void NativeHost::update(double dt,float x,float y){impl->update(dt,x,y);}
 void NativeHost::render(int w,int h,float s){impl->render(w,h,s);}
 bool NativeHost::play(const std::string& g,int i){return impl->play(g,i);}
+bool NativeHost::playInteraction(const std::string& g){return impl->playInteraction(g);}
+bool NativeHost::interactionPlaying() const{return impl->interactionPlaying();}
 bool NativeHost::expression(const std::string& n){return impl->expression(n);}
 void NativeHost::weights(const std::map<std::string,std::vector<double>>& w){impl->motionWeights=w;}
 void NativeHost::idle(const std::string& g){impl->idle(g);}

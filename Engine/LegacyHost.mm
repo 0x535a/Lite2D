@@ -271,6 +271,8 @@ failed:
  [_context[@"drawLegacy"]callWithArguments:@[@(width),@(height),@(scale)]];
 }
 - (BOOL)playGroup:(NSString*)group index:(int)index{return [[_context[@"playLegacy"]callWithArguments:@[group,@(index)]]toBool];}
+- (BOOL)playInteraction:(NSString*)group{return [[_context[@"playLegacyInteraction"]callWithArguments:@[group]]toBool];}
+- (BOOL)interactionPlaying{return [[_context[@"isLegacyInteractionPlaying"]callWithArguments:@[]]toBool];}
 - (BOOL)selectExpression:(NSString*)name {return [name isEqual:@""];}
 - (void)setMotionWeights:(NSDictionary<NSString*,NSArray<NSNumber*>*>*)weights {_context[@"motionWeights"]=weights;}
 - (void)setIdleGroup:(NSString*)group {[_context[@"setLegacyIdle"]callWithArguments:@[group]];}
