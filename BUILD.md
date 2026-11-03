@@ -162,9 +162,14 @@ python3 scripts/test_localization.py
 
 ## v1.0.0 发布构建（2026-11-03）
 
-`sh scripts/build.sh` 生成 `dist/Lite2D.app`，版本 1.0.0（build 5），ARM64 / macOS 14+，ad-hoc 签名。分发附件为 `Lite2D-1.0.0-macOS-arm64.zip`、`Lite2D-1.0.0-source.zip` 和 `SHA256SUMS.txt`；源码包是 Git 提交快照，构建前仍需准备 submodule 和专有运行库。发布记录见 `docs/releases/v1.0.0.md`，本次没有更新 `/Applications` 中的安装版。
+`sh scripts/build.sh` 生成 `dist/Lite2D.app`，版本 1.0.0（build 6），ARM64 / macOS 14+，ad-hoc 签名。分发附件为 `Lite2D-1.0.0-macOS-arm64.zip`、`Lite2D-1.0.0-source.zip` 和 `SHA256SUMS.txt`；源码包是 Git 提交快照，构建前仍需准备 submodule 和专有运行库。发布记录见 `docs/releases/v1.0.0.md`，本次没有更新 `/Applications` 中的安装版。
 
 
 ## v1.0.0 动作状态修订（2026-11-03）
 
 保持版本号 1.0.0，构建号更新为 5。旧版动作退出队列后恢复不再被任何活动动作控制的参数与部件状态，避免点击动作的眼部变形残留在 idle 上；撤回先前的眨眼逻辑调整。对应回归为 `Tests/LegacyMotionLifecycleTests.swift`，权重测试继续保留。修订包沿用原有发布附件名称并更新 SHA-256；源码附件从本次提交生成，两边 v1.0.0 标签同步到本次提交。未重复完整压力/性能测试。
+
+
+## v1.0.0 导入与动作开关修订（2026-11-04）
+
+基于 `613bb23` 更新发布元数据，版本保持 1.0.0，构建号更新为 6。包含文件夹选择恢复、带角色标签的共享模型纹理服装归组，以及设置页正向动作开关与四语文案。重新构建应用，沿用附件名称并更新校验值、发布日志及两边 v1.0.0 标签；源码附件为本次发布提交快照。

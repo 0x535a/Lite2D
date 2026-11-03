@@ -205,3 +205,13 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 针对相同动作序列生成修复前后真实 GPU 帧，确认眼部残影消失；探针均为 31 帧、OpenGL error 0，保留透明背景和纹理像素。测试产物仅留在忽略的 `.local/verification/motion-lifecycle-*`。
 - 已安装旧版应用仅更新动作脚本并重签名，保留其界面版本与配置；安装版短探针和严格签名校验通过。此次 1.0.0 修订发布包包含当前 1.0 界面与完整修复，未将本地模型、配置或诊断脚本打入附件。
 - 本次仅执行针对性回归及渲染检查，未重复完整压力/性能套件；原有实机显示器与公证限制不变。
+
+
+## v1.0.0 最新修订发布验证（2026-11-04，build 6）
+
+- 基于 `613bb23` 的代码更新发布元数据，版本 1.0.0 / build 6；`sh scripts/build.sh` Release 构建通过，产物为 ARM64 / macOS 14+。
+- `python3 scripts/test_model_import.py` 通过：归档、文件夹与 JSON 导入、角色选择、服装归组、去重、源删除和异常输入。
+- `python3 scripts/test_localization.py` 通过：211 key × 4，key、占位符与原生错误身份一致；语言切换、持久化、回退及名称兼容回归通过。
+- 构建产物、分发暂存副本和 ZIP 解压后的应用均通过 `codesign --verify --deep --strict`；版本与 ZIP 完整性检查通过，应用附件无模型、个人配置、日志或 Finder 元数据。
+- 发布日志与应用 README 同步为 build 6；源码附件使用发布提交的 Git 快照生成，应用包与源码包重新计算 SHA-256。日志与暂存产物保留于忽略目录 `.local/release-1.0.0-build6/`。
+- 本次未重复完整集成、压力或性能测试，未覆盖 `/Applications` 安装版和日常角色配置。
