@@ -177,3 +177,13 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 四语设置页 16 张截图已生成并检查；另验证已打开的导入选择窗口切换后更新标题、保留选择。
 - 本地截图：`.local/verification/integration/localization-*.png`；拼图：`.local/verification/localization/settings-contact-sheet.png`。
 - 系统弹窗允许重启后生效；本轮未逐个验证 macOS 系统弹窗的语言缓存行为。
+
+
+## v1.0.0 发布验证（2026-11-03）
+
+- `App/Info.plist` 更新为 1.0.0 / build 4；`sh scripts/build.sh` Release 构建通过，产物为 ARM64，部署目标 macOS 14+。
+- `python3 scripts/test_localization.py`、`python3 scripts/test_model_import.py`、重新编译的 `SettingsAndValidationTests.swift` 均通过；四语 210 key 集合、占位符及错误身份一致。
+- 对本次产物运行 `scripts/run_integration.py`，使用隔离设置和偏好：应用内 350 项、新进程恢复 19 项通过，30/60 FPS 短采样约 29.84/59.69。不是新的全面性能或实机显示器验收。
+- 原始日志位于忽略目录 `.local/release-1.0.0-*.log`，集成结果位于 `.local/verification/release-1.0.0/`。
+- dist 和分发暂存应用均通过 `codesign --verify --deep --strict`。发布应用包检查版本、资源白名单及无模型、个人配置、Finder 元数据；附带 MIT、第三方说明、许可文本和 release log。源码包使用 Git 提交快照生成，不打包本机工作目录。
+- 本次发布不覆盖 `/Applications` 安装版，不修改日常角色配置；ad-hoc 签名、未公证及既有实机验收限制不变。

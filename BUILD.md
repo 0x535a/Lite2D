@@ -158,3 +158,8 @@ python3 scripts/test_localization.py
 ```
 
 资源、即时切换和模型名称兼容规则见 [docs/I18N.md](docs/I18N.md)。应用内集成测试同时输出四语设置页截图。
+
+
+## v1.0.0 发布构建（2026-11-03）
+
+`sh scripts/build.sh` 生成 `dist/Lite2D.app`，版本 1.0.0（build 4），ARM64 / macOS 14+，ad-hoc 签名。分发附件为 `Lite2D-1.0.0-macOS-arm64.zip`、`Lite2D-1.0.0-source.zip` 和 `SHA256SUMS.txt`；源码包是 Git 提交快照，构建前仍需准备 submodule 和专有运行库。发布记录见 `docs/releases/v1.0.0.md`，本次没有更新 `/Applications` 中的安装版。
