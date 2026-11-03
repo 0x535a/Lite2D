@@ -34,6 +34,7 @@
 "placement.section" = "Placement";
 "placement.edit_help" = "Adjusting: drag the character to move it and scroll to resize it. Click Finish Adjusting when done.";
 "placement.help" = "In adjustment mode, drag to move and scroll to resize one character at a time. Characters hide when their display disconnects and return when it reconnects.";
+"motion.enabled" = "Motion";
 "motion.pause" = "Pause Motion";
 "motion.idle_group" = "Autoplay motion group";
 "common.none" = "None";

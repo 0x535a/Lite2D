@@ -265,7 +265,10 @@ private struct RoleSettingsView: View {
     }
     @ViewBuilder private var interaction: some View {
         Section {
-            Toggle(L10n.text("motion.pause"), isOn: model.binding(record, \.animationPaused))
+            Toggle(L10n.text("motion.enabled"), isOn: Binding(
+                get: { !settings.animationPaused },
+                set: { enabled in manager.mutate(id) { $0.animationPaused = !enabled } }
+            ))
             if !groups.isEmpty {
                 Picker(L10n.text("motion.idle_group"), selection: Binding(get: { settings.idleMotionGroup ?? groups.first(where: { $0.lowercased() == "idle" }) ?? "" }, set: { manager.setIdle(id, group: $0) })) {
                     Text(L10n.text("common.none")).tag("")

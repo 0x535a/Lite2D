@@ -34,6 +34,7 @@
 "placement.section" = "擺放";
 "placement.edit_help" = "正在調整：拖曳角色移動，捲動以縮放。完成後按一下「完成調整」。";
 "placement.help" = "進入調整模式後，可拖曳角色、捲動以縮放；每次只調整一個角色。螢幕中斷連接時角色會隱藏，重新連接後恢復。";
+"motion.enabled" = "動作";
 "motion.pause" = "暫停動作";
 "motion.idle_group" = "自動播放動作組";
 "common.none" = "無";
