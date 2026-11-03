@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-cmake -S . -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build/app-lite2d -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-cmake --build build/app --parallel 6
+cmake --build build/app-lite2d --parallel 6

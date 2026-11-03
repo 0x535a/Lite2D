@@ -131,6 +131,11 @@ xcrun swiftc -parse-as-library Tests/LegacyEyeBlinkTests.swift -o .local/verific
 
 ## 本机安装
 
-本机安装产物位于 `/Applications/Lite2D.app`，版本 0.1.1（build 2）；`dist/Lite2D.app` 同步更新。此版本使用新的构建目录重新编译、在签名前生成图标资源，并对安装路径单独刷新 LaunchServices 注册，未清除全局图标缓存。
+本机安装产物位于 `/Applications/Lite2D.app`，版本 0.1.1（build 3）；`dist/Lite2D.app` 同步更新。此版本使用新的构建目录重新编译、在签名前生成图标资源，并对安装路径单独刷新 LaunchServices 注册，未清除全局图标缓存。
 
 模型应存放在稳定的数据目录，例如 `~/Library/Application Support/Lite2D/Models/`，不依赖项目目录。部署时备份现有设置，按现有 schema 追加模型实例并绑定显示器，不把私人资产或配置加入 git。登录启动沿用系统设置，不因安装而自动开启。
+
+
+## 设置窗口与快捷菜单（2026-11-03）
+
+本机预览构建为 0.1.1（build 3），新增 SwiftUI 分组设置窗口，保留逐角色快捷菜单与换装。`--show-settings` 可在启动后直接打开设置；再次打开应用会显示现有设置窗口。配置 schema 不变，沿用现有角色及显示偏好。构建脚本改用当前仓库路径的 `build/app-lite2d`，避开迁移前 `build/app` 中的旧绝对路径缓存。

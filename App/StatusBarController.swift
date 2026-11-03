@@ -17,8 +17,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     let manager: ModelInstanceManager
     let statusItem: NSStatusItem
     let menu = NSMenu()
-    private let launchAtLogin = LaunchAtLogin()
-    private var updatingLoginItem = false
+    lazy var settingsWindow = SettingsWindowController(status: self)
     init(manager: ModelInstanceManager) {
         self.manager = manager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -41,31 +40,23 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
     func rebuild() {
         menu.removeAllItems()
-        menu.addItem(item("添加模型…") { [weak self] in self?.chooseModels() })
-        let list = submenu("模型实例 (\(manager.records.count))", into: menu)
+        if manager.records.isEmpty {
+            let empty = NSMenuItem(title: "还没有角色", action: nil, keyEquivalent: "")
+            empty.isEnabled = false; menu.addItem(empty)
+        }
         for record in manager.records {
             let settings = record.settings, id = settings.id
-            let model = submenu("\(settings.displayName) · \(id.uuidString.prefix(4))", into: list)
-            if let error = record.error {
-                let label = NSMenuItem(title: "加载失败：\(error)", action: nil, keyEquivalent: "")
-                label.isEnabled = false; model.addItem(label)
-            }
-            let connected = manager.isDisplayConnected(record)
-            let bindingName = settings.boundDisplayName ?? settings.displayUUID.map { String($0.prefix(8)) } ?? "未绑定"
-            let displayMenu = submenu("绑定显示器：\(bindingName)\(connected ? "" : "（离线 / 隐藏）")", into: model)
-            for display in manager.displayRegistry.displays {
-                displayMenu.addItem(item("\(display.name) · \(display.id.prefix(4))", checked: display.id == settings.displayUUID) { [weak self] in
-                    self?.manager.bind(id, to: display.id)
-                })
-            }
-            model.addItem(item("显示", checked: settings.isVisible) { [weak self] in self?.manager.mutate(id) { $0.isVisible.toggle() } })
-            model.addItem(item(settings.interactionMode == .edit ? "完成编辑（点击穿透）" : "编辑（拖动 / 滚轮缩放）") { [weak self] in self?.manager.edit(id) })
-            model.addItem(item("视线追踪", checked: settings.trackingEnabled) { [weak self] in self?.manager.mutate(id) { $0.trackingEnabled.toggle() } })
-            let smoothing = submenu("追踪平滑", into: model)
-            for (title, seconds) in [("灵敏 · 0.06 秒", 0.06), ("标准 · 0.14 秒", 0.14), ("柔和 · 0.30 秒", 0.30)] {
-                smoothing.addItem(item(title, checked: abs(settings.trackingSmoothingSeconds - seconds) < 0.001) { [weak self] in self?.manager.mutate(id) { $0.trackingSmoothingSeconds = seconds } })
-            }
-            model.addItem(item("暂停动作", checked: settings.animationPaused) { [weak self] in self?.manager.mutate(id) { $0.animationPaused.toggle() } })
+            let state = roleStatus(record)
+            let title = roleName(record) + (state == "显示中" ? "" : " · \(state)")
+            let model = submenu(title, into: menu)
+            model.addItem(item(settings.isVisible ? "隐藏角色" : "显示角色", enabled: record.error == nil) { [weak self] in
+                self?.manager.mutate(id) { $0.isVisible.toggle() }
+            })
+            model.addItem(item(settings.interactionMode == .edit ? "完成调整" : "调整位置与大小",
+                               enabled: record.error == nil && manager.isDisplayConnected(record) && settings.isVisible && !manager.allHidden) { [weak self] in self?.manager.edit(id) })
+            model.addItem(item(settings.animationPaused ? "继续播放动作" : "暂停动作", enabled: record.error == nil) { [weak self] in
+                self?.manager.mutate(id) { $0.animationPaused.toggle() }
+            })
             if record.outfits.count > 1 || settings.outfitID != nil {
                 let outfits = submenu("服装", into: model)
                 let options = record.outfits.isEmpty ? [ModelOutfit(id: "", name: "默认")] : record.outfits
@@ -75,99 +66,31 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                     })
                 }
             }
-            let groups = record.controller?.view.bridge.motionGroups ?? [:]
-            let clickGroup = record.controller?.view.clickMotionGroup ?? settings.clickMotionGroup
-            let clickGroupAvailable = clickGroup.map { (groups[$0]?.intValue ?? 0) > 0 } ?? false
-            model.addItem(item("点击互动（保持穿透）", checked: settings.clickInteractionEnabled,
-                               enabled: settings.clickInteractionEnabled || clickGroupAvailable) { [weak self] in
-                self?.manager.mutate(id) { $0.clickInteractionEnabled.toggle() }
-            })
-            let clickTitle = groups.isEmpty ? "点击动作组：无可用动作" :
-                "点击动作组：\(clickGroup ?? "请选择")\(clickGroup != nil && !clickGroupAvailable ? "（当前服装不可用）" : "")"
-            let clickGroups = submenu(clickTitle, into: model)
-            for group in groups.keys.sorted() where (groups[group]?.intValue ?? 0) > 0 {
-                clickGroups.addItem(item(group, checked: clickGroup == group) { [weak self] in
-                    self?.manager.mutate(id) { $0.clickMotionGroup = group }
-                })
-            }
-            if !groups.isEmpty {
-                model.addItem(item("动作权重…") { [weak self] in self?.editMotionWeights(id) })
-                let idle = submenu("循环动作组", into: model)
-                idle.addItem(item("无", checked: settings.idleMotionGroup == "") { [weak self] in self?.manager.setIdle(id, group: "") })
-                let motions = submenu("播放动作", into: model)
-                for group in groups.keys.sorted() {
-                    let selected = settings.idleMotionGroup == group || (settings.idleMotionGroup == nil && group.lowercased() == "idle")
-                    idle.addItem(item(group, checked: selected) { [weak self] in self?.manager.setIdle(id, group: group) })
-                    let groupMenu = submenu(group, into: motions)
-                    for index in 0..<(groups[group]?.intValue ?? 0) {
-                        groupMenu.addItem(item("动作 \(index + 1)") { [weak self] in self?.manager.play(id, group: group, index: index) })
-                    }
-                }
-            }
-            let expressions = record.controller?.view.bridge.expressionNames ?? []
-            if !expressions.isEmpty {
-                let expressionMenu = submenu("表情", into: model)
-                expressionMenu.addItem(item("默认", checked: settings.expressionId == nil) { [weak self] in self?.manager.setExpression(id, expression: "") })
-                for expression in expressions {
-                    expressionMenu.addItem(item(expression, checked: settings.expressionId == expression) { [weak self] in self?.manager.setExpression(id, expression: expression) })
-                }
-            }
-            let fps = submenu("帧率", into: model)
-            for rate in [30, 60] { fps.addItem(item("\(rate) FPS", checked: settings.targetFPS == rate) { [weak self] in self?.manager.mutate(id) { $0.targetFPS = rate } }) }
             model.addItem(.separator())
-            model.addItem(item("放大") { [weak self] in self?.manager.zoom(id, factor: 1.15) })
-            model.addItem(item("缩小") { [weak self] in self?.manager.zoom(id, factor: 1 / 1.15) })
-            model.addItem(item("置于前面") { [weak self] in self?.manager.bringForward(id) })
-            model.addItem(item("重置在绑定屏内的位置") { [weak self] in self?.manager.resetPosition(id) })
-            model.addItem(item("重命名…") { [weak self] in self?.rename(id) })
-            model.addItem(item("更换模型…") { [weak self] in self?.chooseReplacement(id) })
-            model.addItem(item("复制实例") { [weak self] in self?.attempt { _ = try self?.manager.duplicate(id) } })
-            model.addItem(item("移除实例") { [weak self] in self?.manager.remove(id) })
+            model.addItem(item("角色设置…") { [weak self] in self?.settingsWindow.show(role: id) })
         }
         menu.addItem(.separator())
-        menu.addItem(item(manager.allHidden ? "恢复各实例显示状态" : "全部隐藏") { [weak self] in self?.manager.toggleAllHidden() })
-        menu.addItem(item("重置各实例在绑定屏的位置") { [weak self] in
-            guard let self else { return }; for record in manager.records { manager.resetPosition(record.settings.id) }
-        })
-        menu.addItem(item("刷新显示器连接状态") { [weak self] in self?.manager.refreshDisplayBindings() })
-        menu.addItem(item("撤销上次移除", enabled: manager.removedSettings != nil) { [weak self] in self?.manager.undoRemove() })
-        menu.addItem(.separator())
-        let loginStatus = launchAtLogin.status
-        let loginTitle = updatingLoginItem ? "正在更新登录启动…" :
-            loginStatus == .requiresApproval ? "登录时自动启动（等待系统允许）" : "登录时自动启动"
-        let loginItem = item(loginTitle, checked: loginStatus == .enabled, enabled: !updatingLoginItem) { [weak self] in
-            self?.toggleLaunchAtLogin()
-        }
-        if loginStatus == .requiresApproval { loginItem.state = .mixed }
-        menu.addItem(loginItem)
-        if loginStatus == .requiresApproval {
-            menu.addItem(item("在系统设置中允许登录启动…") { [weak self] in self?.launchAtLogin.openSystemSettings() })
-        }
+        menu.addItem(item(manager.allHidden ? "恢复显示" : "隐藏所有角色", enabled: !manager.records.isEmpty) { [weak self] in self?.manager.toggleAllHidden() })
+        menu.addItem(item("添加角色…") { [weak self] in self?.chooseModels() })
+        let preferences = item("设置…") { [weak self] in self?.settingsWindow.show() }
+        preferences.keyEquivalent = ","; menu.addItem(preferences)
         menu.addItem(.separator())
         let quit = item("退出 Lite2D") { NSApp.terminate(nil) }; quit.keyEquivalent = "q"; menu.addItem(quit)
     }
-    private func toggleLaunchAtLogin() {
-        guard !updatingLoginItem else { return }
-        let enabled = !launchAtLogin.isRegistered
-        updatingLoginItem = true
-        rebuild()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { updatingLoginItem = false; rebuild() }
-            do { try await launchAtLogin.setEnabled(enabled) }
-            catch {
-                // Registration can require consent rather than being active.
-                // Keep the menu truthful and let the user open System Settings.
-                if enabled && launchAtLogin.status == .requiresApproval { return }
-                let alert = NSAlert()
-                alert.messageText = enabled ? "无法开启登录启动" : "无法关闭登录启动"
-                alert.informativeText = error.localizedDescription
-                NSApp.activate(ignoringOtherApps: true)
-                alert.runModal()
-            }
-        }
+    func roleName(_ record: ModelRecord) -> String {
+        let matches = manager.records.filter { $0.settings.displayName == record.settings.displayName }
+        guard matches.count > 1, let index = matches.firstIndex(where: { $0.settings.id == record.settings.id }) else { return record.settings.displayName }
+        return "\(record.settings.displayName)（\(index + 1)）"
     }
-    private func attempt(_ body: () throws -> Void) {
+    func roleStatus(_ record: ModelRecord) -> String {
+        if record.error != nil { return "加载失败" }
+        if !manager.isDisplayConnected(record) { return record.settings.displayUUID == nil ? "未绑定屏幕" : "屏幕未连接" }
+        if !record.settings.isVisible { return "已隐藏" }
+        if manager.allHidden { return "全局隐藏中" }
+        if record.settings.interactionMode == .edit { return "调整中" }
+        return "显示中"
+    }
+    func attempt(_ body: () throws -> Void) {
         do { try body() }
         catch {
             let alert = NSAlert(); alert.messageText = "模型操作失败"; alert.informativeText = error.localizedDescription
@@ -180,9 +103,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         panel.message = "选择模型 JSON；文件夹中的模型会分别创建独立实例。"
         return panel
     }
-    private func chooseModels() {
+    func chooseModels() {
         let panel = panel(multiple: true); NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK else { return }
+        var lastAdded: UUID?
         for url in panel.urls {
             var isDirectory: ObjCBool = false
             _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
@@ -192,21 +116,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                     .filter { $0.lastPathComponent == "model.json" || $0.lastPathComponent.hasSuffix(".model3.json") || $0.lastPathComponent.hasSuffix(".model.json") }
                     .sorted { $0.path < $1.path }
             }
-            for candidate in candidates { attempt { _ = try manager.add(candidate) } }
+            for candidate in candidates { attempt { lastAdded = try manager.add(candidate).settings.id } }
         }
+        if let id = lastAdded { settingsWindow.show(role: id, resetPage: true) }
     }
-    private func chooseReplacement(_ id: UUID) {
+    func chooseReplacement(_ id: UUID) {
         let panel = panel(multiple: false); NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         attempt { try manager.replace(id, with: url) }
-    }
-    private func rename(_ id: UUID) {
-        guard let record = manager.record(id) else { return }
-        let alert = NSAlert(); alert.messageText = "重命名实例"
-        let input = NSTextField(string: record.settings.displayName); input.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        alert.accessoryView = input; alert.addButton(withTitle: "保存"); alert.addButton(withTitle: "取消")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn { manager.mutate(id) { $0.displayName = input.stringValue } }
     }
     func editMotionWeights(_ id: UUID) {
         guard let record = manager.record(id), let view = record.controller?.view, !view.motions.isEmpty else { return }
