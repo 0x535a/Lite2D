@@ -9,6 +9,11 @@ struct ModelMotion {
     // File identity preserves overrides when outfits reorder or share motions.
     var key: String { "\(group.utf8.count):\(group)\(file)" }
     func weight(overrides: [String: Double]) -> Double { overrides[key] ?? defaultWeight }
+    /// Whole weights print without a trailing ".0".
+    static func displayWeight(_ value: Double) -> String {
+        let text = String(value)
+        return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
+    }
 
     static func load(_ url: URL) throws -> [ModelMotion] {
         let json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] ?? [:]

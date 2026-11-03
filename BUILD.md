@@ -139,3 +139,14 @@ xcrun swiftc -parse-as-library Tests/LegacyEyeBlinkTests.swift -o .local/verific
 ## 设置窗口与快捷菜单（2026-11-03）
 
 本机预览构建为 0.1.1（build 3），新增 SwiftUI 分组设置窗口，保留逐角色快捷菜单与换装。`--show-settings` 可在启动后直接打开设置；再次打开应用会显示现有设置窗口。配置 schema 不变，沿用现有角色及显示偏好。构建脚本改用当前仓库路径的 `build/app-lite2d`，避开迁移前 `build/app` 中的旧绝对路径缓存。
+
+## 原生对话框整理（2026-11-03）
+
+导入流程里的“选择要添加 / 替换的角色”和“正在导入”原先用 `NSAlert` 与手摆坐标的 `NSPanel` 拼成，现统一为 SwiftUI 分组表单（`App/ImportDialogs.swift`）：多角色为复选列表并带全选与已选计数，替换为单选组，打包警告在“注意”分组中列出，底部固定取消与确认按钮；进度窗口使用系统环形进度。设置窗口修正了打开时角色名输入框自动全选、窗口未激活时名称显示为空的问题，大小与动作权重改用步进器，模型文件与角色管理按“标签 + 控件”排列。原先独立的动作权重窗口已无入口（权重在设置窗口中编辑），已移除。`--self-test` 会驱动这些窗口并保存 `character-picker-multi.png`、`character-picker-single.png`、`import-progress.png` 到集成输出目录。
+
+## 模型包导入（2026-11-03）
+
+新增 LPK/WPK/ZIP、目录和 JSON 的统一导入与模型库保存。ZIP 桥接链接 macOS 系统 `libarchive`，不依赖 Homebrew 动态库或 Python 运行时；新 SDK 缺少 libarchive 头文件时，桥接文件声明所需的稳定公开 C ABI。Swift 侧使用系统 CryptoKit。构建仍执行 `sh scripts/build.sh`，产物为 `dist/Lite2D.app`。
+
+运行 `python3 scripts/test_model_import.py` 验证导入。可选 `--workshop /path/to/616720` 只读验证显式指定的本机工坊资源。测试会重建 `.local/verification/model-import/`；日常配置和原资源不变。GUI 验证可分别设置 `LITE2D_SETTINGS_PATH` 和 `LITE2D_MODEL_LIBRARY_PATH` 隔离设置、模型库。
+

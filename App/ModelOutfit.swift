@@ -1,12 +1,13 @@
 import Foundation
 
-struct ModelOutfit: Equatable {
+struct ModelOutfit: Equatable, Codable {
     // Empty ID selects the original entry. Other IDs are relative to its directory.
     let id: String
     let name: String
 }
 
 enum ModelOutfitCatalog {
+    static func sidecar(_ entry: URL) -> URL { entry.appendingPathExtension("lite2d-outfits.json") }
     static func resolve(_ id: String, relativeTo entry: URL) throws -> URL {
         let root = entry.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
         guard !id.isEmpty, !id.hasPrefix("/"), URL(string: id)?.scheme == nil else {
@@ -18,6 +19,14 @@ enum ModelOutfitCatalog {
     }
 
     static func load(_ entry: URL) throws -> [ModelOutfit] {
+        if FileManager.default.fileExists(atPath: sidecar(entry).path) {
+            let data = try Data(contentsOf: sidecar(entry))
+            guard data.count < 8 * 1024 * 1024 else { throw invalid("服装清单过大。") }
+            let outfits = try JSONDecoder().decode([ModelOutfit].self, from: data)
+            guard outfits.first?.id == "", Set(outfits.map(\.id)).count == outfits.count else { throw invalid("服装清单无效。") }
+            for outfit in outfits where !outfit.id.isEmpty { _ = try resolve(outfit.id, relativeTo: entry) }
+            return outfits
+        }
         let json = try object(entry)
         let groups = json["motions"] as? [String: [[String: Any]]] ?? [:]
         var names: [String: String] = [:]

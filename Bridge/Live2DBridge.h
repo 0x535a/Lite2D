@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "ModelArchive.h"
 NS_ASSUME_NONNULL_BEGIN
 @interface L2DBridge : NSObject
 + (BOOL)startRuntimeAt:(NSString *)path error:(NSError **)error NS_SWIFT_NAME(startRuntime(at:));

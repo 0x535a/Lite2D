@@ -155,3 +155,12 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 安装版窗口实际显示已有角色、原服装与显示器绑定，应用二进制与构建产物 SHA-256 一致。
 
 旧集成测试的菜单断言已跟随新入口调整，本次未重跑完整压力/性能套件。
+
+## 模型包导入验证（2026-11-03）
+
+- `sh scripts/build.sh`：通过，产物 `dist/Lite2D.app`，ad-hoc 签名。未覆盖 `/Applications` 安装版。
+- `python3 scripts/test_model_import.py --workshop <本机明确指定的工坊目录>`：通过；11 个真实 Cubism 工坊包导入并验证全部已识别服装（最多 19 套），2 个非 Cubism 包被拒绝。
+- 构造的普通 ZIP、多角色/多服装 LPK、嵌套 LPK 的 WPK、JSON、目录、选择结果、重复准备后的摘要复用、取消提交、源文件删除后读取、损坏/越界/链接/冲突条目与缺必要资源等回归通过。测试目录隔离于 `.local/verification/model-import/`。
+- 原生普通模型、包内原生角色、真实工坊 Cubism 3+ 与 Cubism 2 导入副本分别通过 `probe_app.py` 新进程 GPU 验证：31 帧、GL error 0、存在可见及透明像素。结果位于 `.local/verification/import-native`、`import-outfit`、`import-real-native`、`import-real-legacy`。
+- 实测发现固定 Cubism R5 解析器拒绝部分紧凑数字 JSON，已在原生加载边界统一格式化并加入 SDK 解析有效性检查；修复后包内角色 GPU 验证通过。
+- 既有 `SettingsAndValidationTests.swift` 通过。GUI 确认文件选择提示、多角色/服装数量、取消后未创建实例；使用隔离设置，未改日常角色。拖入、真实 EX 界面导出的 WPK 变体、全量 EX 控制器不属于本次已验证结果。
