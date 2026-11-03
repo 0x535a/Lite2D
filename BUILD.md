@@ -66,8 +66,8 @@ xcrun swiftc -parse-as-library App/Localization.swift App/DisplayLayout.swift Ap
 .local/verification/unit/settings-tests
 xcrun swiftc -parse-as-library Tests/WeightedMotionTests.swift -o .local/verification/unit/weighted-motion-tests
 .local/verification/unit/weighted-motion-tests
-xcrun swiftc -parse-as-library Tests/LegacyEyeBlinkTests.swift -o .local/verification/unit/legacy-eye-blink-tests
-.local/verification/unit/legacy-eye-blink-tests
+xcrun swiftc -parse-as-library Tests/LegacyMotionLifecycleTests.swift -o .local/verification/unit/legacy-motion-lifecycle-tests
+.local/verification/unit/legacy-motion-lifecycle-tests
 ```
 
 集成测试通过独立 `LITE2D_SETTINGS_PATH` 隔离设置；运行旧版测试夹具 A/B、官方原生示例和重复模型，进行 30 增删、20 替换与新进程恢复。内部帧捕获和 JSON 结果保存在 `.local/verification/integration/`，程序正常退出；不依赖 Computer Use。`scripts/probe_app.py` 可继续单模型诊断。
@@ -107,8 +107,8 @@ xcrun swiftc -parse-as-library App/Localization.swift App/DisplayLayout.swift Ap
 .local/verification/unit/settings-tests
 xcrun swiftc -parse-as-library Tests/WeightedMotionTests.swift -o .local/verification/unit/weighted-motion-tests
 .local/verification/unit/weighted-motion-tests
-xcrun swiftc -parse-as-library Tests/LegacyEyeBlinkTests.swift -o .local/verification/unit/legacy-eye-blink-tests
-.local/verification/unit/legacy-eye-blink-tests
+xcrun swiftc -parse-as-library Tests/LegacyMotionLifecycleTests.swift -o .local/verification/unit/legacy-motion-lifecycle-tests
+.local/verification/unit/legacy-motion-lifecycle-tests
 ```
 
 已收取的验证、长时基线、GPU 区间计时、Instruments 及压力之后的 Leaks 结果见 TEST_REPORT。用户已要求停止新增/重复压测，交付不再依赖补测。Stage Manager / 跨 DPI 跳过，物理插拔由用户后续验证。
@@ -162,4 +162,9 @@ python3 scripts/test_localization.py
 
 ## v1.0.0 发布构建（2026-11-03）
 
-`sh scripts/build.sh` 生成 `dist/Lite2D.app`，版本 1.0.0（build 4），ARM64 / macOS 14+，ad-hoc 签名。分发附件为 `Lite2D-1.0.0-macOS-arm64.zip`、`Lite2D-1.0.0-source.zip` 和 `SHA256SUMS.txt`；源码包是 Git 提交快照，构建前仍需准备 submodule 和专有运行库。发布记录见 `docs/releases/v1.0.0.md`，本次没有更新 `/Applications` 中的安装版。
+`sh scripts/build.sh` 生成 `dist/Lite2D.app`，版本 1.0.0（build 5），ARM64 / macOS 14+，ad-hoc 签名。分发附件为 `Lite2D-1.0.0-macOS-arm64.zip`、`Lite2D-1.0.0-source.zip` 和 `SHA256SUMS.txt`；源码包是 Git 提交快照，构建前仍需准备 submodule 和专有运行库。发布记录见 `docs/releases/v1.0.0.md`，本次没有更新 `/Applications` 中的安装版。
+
+
+## v1.0.0 动作状态修订（2026-11-03）
+
+保持版本号 1.0.0，构建号更新为 5。旧版动作退出队列后恢复不再被任何活动动作控制的参数与部件状态，避免点击动作的眼部变形残留在 idle 上；撤回先前的眨眼逻辑调整。对应回归为 `Tests/LegacyMotionLifecycleTests.swift`，权重测试继续保留。修订包沿用原有发布附件名称并更新 SHA-256；源码附件从本次提交生成，两边 v1.0.0 标签同步到本次提交。未重复完整压力/性能测试。
