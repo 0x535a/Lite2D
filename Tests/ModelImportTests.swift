@@ -46,6 +46,28 @@ import Foundation
         check(legacy.characters.count == 1 && legacy.characters[0].outfitCount == 2, "Explicit change_cos graph must group costumes: \(legacy.characters.map { ($0.name, $0.outfitCount, $0.entry.path) })")
         let unrelated = try importer.prepare(root.appendingPathComponent("unrelated"))
         check(unrelated.characters.count == 2, "Unrelated entries must stay separate")
+        let differentLabels = try importer.prepare(root.appendingPathComponent("different-labels"))
+        check(differentLabels.characters.count == 2, "Same binary with different character labels must stay separate")
+        let differentBinaries = try importer.prepare(root.appendingPathComponent("different-binaries"))
+        check(differentBinaries.characters.count == 2, "Same label with different binary paths must stay separate")
+        if let path = ProcessInfo.processInfo.environment["LITE2D_TEST_COSTUME_FOLDER"] {
+            let source = URL(fileURLWithPath: path)
+            let wardrobe = try importer.prepare(source)
+            check(wardrobe.characters.count == 1, "Shared binary and label must produce one character")
+            check(wardrobe.characters[0].name == "33" && wardrobe.characters[0].outfitCount == 19, "33 must have 19 costumes")
+            check(wardrobe.characters[0].entry.lastPathComponent == "model.default.json", "Prefer default costume")
+            let saved = try importer.commit(wardrobe, indices: [0])
+            for outfit in try ModelOutfitCatalog.load(saved[0].entry) where !outfit.id.isEmpty {
+                _ = try ModelFileValidator.validate(ModelOutfitCatalog.resolve(outfit.id, relativeTo: saved[0].entry))
+            }
+            let explicit = try importer.prepare(source.appendingPathComponent("model.2016.xmas.1.json"))
+            check(explicit.characters.count == 1 && explicit.characters[0].outfitCount == 19, "Selecting one JSON must retain wardrobe")
+            let repeated = try importer.prepare(source)
+            let repeatedSaved = try importer.commit(repeated, indices: [0])
+            check(saved[0].entry == repeatedSaved[0].entry, "Inferred catalogs must be deterministic")
+            try Data(saved[0].entry.path.utf8).write(to: root.appendingPathComponent("saved-wardrobe-entry.txt"))
+            print("Real wardrobe: one character, 19 validated costumes, default selection, explicit JSON and dedup passed")
+        }
         let partial = try importer.prepare(root.appendingPathComponent("partial"))
         check(partial.characters.count == 1 && !partial.warnings.isEmpty, "One broken model must not discard valid sibling")
         try rejected("traversal.zip", containing: "error.archive_path")

@@ -72,7 +72,11 @@ final class ModelLibraryImporter {
             guard stagedSize <= Self.limit else { throw ModelImportError.invalid(.key("error.staged_size", [])) }
             let entries: [(String, URL, GeneratedName?)]
             if !packaged.isEmpty { entries = packaged }
-            else if let explicitEntry { entries = [(source.deletingLastPathComponent().lastPathComponent, explicitEntry, nil)] }
+            else if let explicitEntry {
+                _ = try discover(in: stage, rootName: source.deletingLastPathComponent().lastPathComponent)
+                let label = (try? Self.object(explicitEntry))?["label"] as? String
+                entries = [(label ?? source.deletingLastPathComponent().lastPathComponent, explicitEntry, nil)]
+            }
             else { entries = try discover(in: stage, rootName: values.isDirectory == true ? source.lastPathComponent : source.deletingPathExtension().lastPathComponent) }
             var characters: [ImportedCharacter] = [], warnings: [LocalizedMessage] = []
             for (name, entry, generatedName) in entries {
@@ -153,6 +157,42 @@ final class ModelLibraryImporter {
                   let object = try? Self.object(file), object["model"] is String || object["FileReferences"] is [String: Any] else { continue }
             entries.append(file)
         }
+        // Exported texture costumes may have no EX commands. Only group siblings
+        // sharing the exact binary and an explicit nonempty character label.
+        // Never merge separate directories or unrelated models by filename.
+        var labeled: [String: [URL]] = [:]
+        for entry in entries where !fm.fileExists(atPath: ModelOutfitCatalog.sidecar(entry).path) {
+            guard let object = try? Self.object(entry),
+                  let label = object["label"] as? String, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let binary = object["model"] as? String ?? (object["FileReferences"] as? [String: Any])?["Moc"] as? String,
+                  let target = try? ModelOutfitCatalog.resolve(binary, relativeTo: entry) else { continue }
+            if ((try? ModelOutfitCatalog.load(entry))?.count ?? 0) > 1 { continue }
+            let key = entry.deletingLastPathComponent().path + "\u{0}" + target.path + "\u{0}" + label
+            labeled[key, default: []].append(entry)
+        }
+        var inferredNames: [URL: String] = [:]
+        for siblings in labeled.values where siblings.count > 1 {
+            let sorted = siblings.sorted {
+                let leftDefault = ["model.default.json", "model.json"].contains($0.lastPathComponent)
+                let rightDefault = ["model.default.json", "model.json"].contains($1.lastPathComponent)
+                if leftDefault != rightDefault { return leftDefault }
+                return $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+            }
+            guard let first = sorted.first, let object = try? Self.object(first), let label = object["label"] as? String else { continue }
+            // Write catalogs for every entry so explicitly selecting any costume
+            // later still retains the same complete wardrobe.
+            for selected in sorted {
+                let outfits = try ([selected] + sorted.filter { $0 != selected }).map { target -> ModelOutfit in
+                    let json = try Self.object(target)
+                    let fallback = target.deletingPathExtension().lastPathComponent
+                    let name = (json["options"] as? [String: Any])?["name"] as? String ?? json["name"] as? String ?? fallback
+                    return ModelOutfit(id: target == selected ? "" : target.lastPathComponent, name: name)
+                }
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                try encoder.encode(outfits).write(to: ModelOutfitCatalog.sidecar(selected))
+            }
+            inferredNames[first] = label
+        }
         // Hide entries explicitly referenced as costumes; do not group by filename similarity.
         var referenced = Set<URL>(), edges: [URL: Set<URL>] = [:]
         for entry in entries {
@@ -186,7 +226,7 @@ final class ModelLibraryImporter {
             visited.formUnion(component)
             if !roots.contains(where: { component.contains($0) }) {
                 let sorted = component.sorted { $0.path < $1.path }
-                if let first = sorted.first(where: { $0.lastPathComponent == "model.json" }) ?? sorted.first { roots.append(first) }
+                if let first = sorted.first(where: { inferredNames[$0] != nil }) ?? sorted.first(where: { $0.lastPathComponent == "model.json" }) ?? sorted.first { roots.append(first) }
             }
         }
         roots.sort { $0.path < $1.path }
@@ -196,7 +236,7 @@ final class ModelLibraryImporter {
             let basename = entry.lastPathComponent.replacingOccurrences(of: ".model3.json", with: "").replacingOccurrences(of: ".model.json", with: "")
             let parentName = entry.deletingLastPathComponent().path == root.path ? rootName : entry.deletingLastPathComponent().lastPathComponent
             let fallback = entry.lastPathComponent == "model.json" || basename == "model" ? parentName : basename
-            return (options?["name"] as? String ?? fallback, entry, nil)
+            return (inferredNames[entry] ?? options?["name"] as? String ?? fallback, entry, nil)
         }
     }
 

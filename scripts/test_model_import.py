@@ -7,6 +7,7 @@ No personal settings or original model resources are modified.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import stat
@@ -16,6 +17,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--workshop', type=Path)
+parser.add_argument('--costume-folder', type=Path, help='read-only validation of a labeled shared-model wardrobe')
 args = parser.parse_args()
 target = ROOT / '.local/verification/model-import'
 if target.exists():
@@ -73,6 +75,17 @@ write_json(target / 'legacy/outfit.model.json', dict(legacy_entry, textures=['ot
 (target / 'legacy/other.png').write_bytes(b'fake alternate texture')
 for name in ['a', 'b']:
     shutil.copytree(fixture, target / 'unrelated' / name)
+# A shared binary alone is not enough: preserve separate labeled characters.
+shutil.copytree(fixture, target / 'different-labels')
+for name in ['a', 'b']:
+    write_json(target / f'different-labels/{name}.json', dict(native, label=name))
+(target / 'different-labels/model.model3.json').unlink()
+# A shared label alone is not enough: different binaries remain separate.
+shutil.copytree(fixture, target / 'different-binaries')
+shutil.copyfile(fixture / refs['Moc'], target / 'different-binaries/second.moc3')
+write_json(target / 'different-binaries/a.json', dict(native, label='same'))
+write_json(target / 'different-binaries/b.json', dict(native, label='same', FileReferences=dict(refs, Moc='second.moc3')))
+(target / 'different-binaries/model.model3.json').unlink()
 shutil.copytree(fixture, target / 'partial/good')
 write_json(target / 'partial/bad/model.model3.json', {'FileReferences': {'Moc': 'missing.moc3', 'Textures': ['missing.png']}})
 shutil.copytree(fixture, target / 'missing-texture')
@@ -103,4 +116,7 @@ subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-import-objc-header', s
 command = [str(binary), str(target)]
 if args.workshop:
     command.append(str(args.workshop.resolve()))
-subprocess.run(command, check=True)
+environment = dict(os.environ)
+if args.costume_folder:
+    environment['LITE2D_TEST_COSTUME_FOLDER'] = str(args.costume_folder.resolve())
+subprocess.run(command, check=True, env=environment)
