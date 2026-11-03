@@ -294,6 +294,19 @@ final class SelfTestRunner {
         } else { throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Native test model must have expressions"]) }
         manager.play(a, group: "tap", index: 0)
         manager.setIdle(a, group: "idle")
+        try testWeightEditor()
+        let motion = try view(a).motions.first { $0.group == "idle" }!
+        let otherWeights = manager.record(duplicate)!.settings.motionWeightOverrides
+        manager.setMotionWeights(a, overrides: [motion.key: 0])
+        try check(try view(a).settings.motionWeightOverrides[motion.key] == 0,
+                  "Weight edits immediately reach the live view")
+        try check(manager.record(duplicate)!.settings.motionWeightOverrides == otherWeights,
+                  "Weight overrides remain instance-local")
+        manager.save()
+        try check(manager.store.load().instances.first { $0.id == a }?.motionWeightOverrides[motion.key] == 0,
+                  "Zero weight override persists to disk")
+        try check(status.menu.item(at: 1)?.submenu?.item(at: 0)?.submenu?.items.contains { $0.title == "动作权重…" } == true,
+                  "Model menu exposes motion weight settings")
         // Measure the two requested rates on the same fixed-refresh display;
         // the built-in ProMotion panel may adapt its callback rate separately.
         if let display = manager.displayRegistry.primary { manager.bind(b, to: display.id) }
@@ -304,6 +317,36 @@ final class SelfTestRunner {
             callbackCounters = [try view(a).displayCallbacks, try view(b).displayCallbacks, try view(a).scheduledFrames, try view(b).scheduledFrames]
             later(3) { try self.measureFPS() }
         }
+    }
+    private func testWeightEditor() throws {
+        var rowCount = 0
+        var imageSaved = false
+        let timer = Timer(timeInterval: 0.8, repeats: false) { [self] _ in
+            if let model = MotionWeightEditor.current, let content = MotionWeightEditor.window?.contentView {
+                rowCount = model.rows.count
+                // cacheDisplay renders SwiftUI incompletely; capture the real window instead.
+                let png = output.appendingPathComponent("motion-weight-editor.png")
+                let capture = Process()
+                capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                capture.arguments = ["-x", "-o", "-l", String(MotionWeightEditor.window!.windowNumber), png.path]
+                try? capture.run(); capture.waitUntilExit()
+                imageSaved = FileManager.default.fileExists(atPath: png.path)
+                model.rows[0].text = "2.5"
+                model.finish(.save(model.savedOverrides()))
+            } else { NSApp.stopModal() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        status.editMotionWeights(a)
+        try check(rowCount == (try view(a)).motions.count && imageSaved,
+                  "Weight editor lists every motion and renders a preview")
+        let first = try view(a).motions[0]
+        try check(manager.record(a)!.settings.motionWeightOverrides[first.key] == 2.5,
+                  "Weight editor saves a fractional weight")
+        let restore = Timer(timeInterval: 0.4, repeats: false) { _ in MotionWeightEditor.current?.finish(.reset) }
+        RunLoop.main.add(restore, forMode: .common)
+        status.editMotionWeights(a)
+        try check(manager.record(a)!.settings.motionWeightOverrides.isEmpty,
+                  "Weight editor restores model defaults")
     }
     private func measureFPS() throws {
         let duration = ProcessInfo.processInfo.systemUptime - fpsStart

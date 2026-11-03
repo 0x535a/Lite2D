@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)renderWidth:(int)width height:(int)height scale:(float)scale NS_SWIFT_NAME(render(width:height:scale:));
 - (BOOL)playGroup:(NSString *)group index:(int)index NS_SWIFT_NAME(play(group:index:));
 - (BOOL)selectExpression:(NSString *)name;
+- (void)setMotionWeights:(NSDictionary<NSString *, NSArray<NSNumber *> *> *)weights;
 - (void)setIdleGroup:(NSString *)group;
 - (void)unload;
 - (void)beginGPUMeasurement;

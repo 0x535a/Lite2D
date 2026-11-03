@@ -46,6 +46,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     var targetFPS = 30
     var animationPaused = false
     var idleMotionGroup: String?
+    var motionWeightOverrides: [String: Double] = [:]
     var expressionId: String?
     var outfitID: String?
     var zOrder = 0
@@ -59,7 +60,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     }
     enum CodingKeys: String, CodingKey {
         case id, displayName, modelPath, windowFrame, scale, isVisible, trackingEnabled,
-             trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, expressionId, outfitID, zOrder,
+             trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, motionWeightOverrides, expressionId, outfitID, zOrder,
              displayUUID, boundDisplayName, displayPosition, displayBindingVersion
     }
     init(from decoder: Decoder) throws {
@@ -76,6 +77,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         targetFPS = (try? c.decode(Int.self, forKey: .targetFPS)) ?? 30
         animationPaused = (try? c.decode(Bool.self, forKey: .animationPaused)) ?? false
         idleMotionGroup = try? c.decode(String.self, forKey: .idleMotionGroup)
+        motionWeightOverrides = (try? c.decode([String: Double].self, forKey: .motionWeightOverrides)) ?? [:]
         expressionId = try? c.decode(String.self, forKey: .expressionId)
         outfitID = try? c.decode(String.self, forKey: .outfitID)
         zOrder = (try? c.decode(Int.self, forKey: .zOrder)) ?? 0
@@ -87,6 +89,7 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     }
     mutating func sanitize() {
         if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { displayName = "模型" }
+        motionWeightOverrides = motionWeightOverrides.filter { $0.value.isFinite && $0.value >= 0 }
         windowFrame.sanitize()
         scale = scale.isFinite ? min(max(scale, 0.25), 3) : 1
         trackingSmoothingSeconds = trackingSmoothingSeconds.isFinite ? min(max(trackingSmoothingSeconds, 0.03), 1) : 0.14

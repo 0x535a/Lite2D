@@ -46,7 +46,7 @@ gl.uniformMatrix4fv=function(location,transpose,data){
     glCommands.push(25,location,Number(transpose),data.length/16);
     for(var i=0;i<data.length;i++)glCommands.push(data[i]);
 };
-var motions={}, queue, idleGroup='', blinkTime=0;
+var motions={}, motionWeights={}, queue, idleGroup='', blinkTime=0;
 function registerMotion(group,index,settings){
     if(!motions[group]) motions[group]=[];
     var motion=Live2DMotion.loadMotion(motionBytes);
@@ -63,10 +63,33 @@ function playLegacy(group,index){
     if(!motions[group]||!motions[group][index])return false;
     queue.startMotion(motions[group][index],false);return true;
 }
+function playLegacyIdle(){
+    var entries=motions[idleGroup]||[], weights=motionWeights[idleGroup]||[];
+    var values=[], maximum=0;
+    for(var i=0;i<entries.length;i++){
+        var weight=weights[i]==null?1:Number(weights[i]);
+        if(!entries[i]||!isFinite(weight)||weight<0)weight=0;
+        values.push(weight);maximum=Math.max(maximum,weight);
+    }
+    if(!maximum)return false;
+    var total=0;
+    for(var i=0;i<values.length;i++){values[i]/=maximum;total+=values[i];}
+    var draw=Math.random()*total, last=-1;
+    for(var i=0;i<values.length;i++){
+        if(!values[i])continue;
+        last=i;draw-=values[i];
+        if(draw<0)return playLegacy(idleGroup,i);
+    }
+    return last>=0&&playLegacy(idleGroup,last);
+}
+function setLegacyIdle(group){
+    idleGroup=group;
+    if(!playLegacyIdle())queue.stopAllMotions();
+}
 function stepLegacy(time,x,y){
     UtSystem.setUserTimeMSec(time*1000);
     model.loadParam();
-    if(queue.isFinished()&&idleGroup)playLegacy(idleGroup,0);
+    if(queue.isFinished()&&idleGroup)playLegacyIdle();
     queue.updateParam(model);
     model.saveParam();
     // The legacy SDK creates harmless virtual parameters for IDs absent from

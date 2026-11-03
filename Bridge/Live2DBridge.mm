@@ -40,6 +40,14 @@ static void fail(NSError** error,const char* message) {
 - (void)renderWidth:(int)width height:(int)height scale:(float)scale {if(_native)_native->render(width,height,scale);else [_legacy renderWidth:width height:height scale:scale];}
 - (BOOL)playGroup:(NSString*)group index:(int)index {return _native?_native->play(group.UTF8String,index):[_legacy playGroup:group index:index];}
 - (BOOL)selectExpression:(NSString*)name {return _native?_native->expression(name.UTF8String):[_legacy selectExpression:name];}
+- (void)setMotionWeights:(NSDictionary<NSString*,NSArray<NSNumber*>*>*)weights {
+ if(_legacy){[_legacy setMotionWeights:weights];return;}
+ if(_native){
+  std::map<std::string,std::vector<double>> values;
+  for(NSString* group in weights)for(NSNumber* weight in weights[group])values[group.UTF8String].push_back(weight.doubleValue);
+  _native->weights(values);
+ }
+}
 - (void)setIdleGroup:(NSString*)group {if(_native)_native->idle(group.UTF8String);else [_legacy setIdleGroup:group];}
 - (void)unload {
  if(_queryActive){glEndQuery(GL_TIME_ELAPSED_EXT);_queryActive=false;}

@@ -62,8 +62,10 @@ python3 scripts/probe_app.py .local/models/legacy-b/model.json --name legacy-33
 
 ```sh
 python3 scripts/run_integration.py
-xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift App/ModelMotion.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library Tests/WeightedMotionTests.swift -o .local/verification/unit/weighted-motion-tests
+.local/verification/unit/weighted-motion-tests
 ```
 
 集成测试通过独立 `LITE2D_SETTINGS_PATH` 隔离设置；运行旧版测试夹具 A/B、官方原生示例和重复模型，进行 30 增删、20 替换与新进程恢复。内部帧捕获和 JSON 结果保存在 `.local/verification/integration/`，程序正常退出；不依赖 Computer Use。`scripts/probe_app.py` 可继续单模型诊断。
@@ -99,8 +101,10 @@ xcodebuild -project build/xcode/Lite2D.xcodeproj -scheme Lite2D -configuration R
 ```sh
 python3 scripts/create_test_fixtures.py
 mkdir -p .local/verification/unit
-xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift App/ModelMotion.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library Tests/WeightedMotionTests.swift -o .local/verification/unit/weighted-motion-tests
+.local/verification/unit/weighted-motion-tests
 ```
 
 已收取的验证、长时基线、GPU 区间计时、Instruments 及压力之后的 Leaks 结果见 TEST_REPORT。用户已要求停止新增/重复压测，交付不再依赖补测。Stage Manager / 跨 DPI 跳过，物理插拔由用户后续验证。

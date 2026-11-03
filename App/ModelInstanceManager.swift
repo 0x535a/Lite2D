@@ -160,6 +160,7 @@ final class ModelInstanceManager {
         let valid = try ModelFileValidator.validate(url)
         var settings = old.settings
         settings.modelPath = valid.url.path
+        settings.motionWeightOverrides = [:]
         settings.idleMotionGroup = nil; settings.expressionId = nil; settings.outfitID = nil
         let replacement = ModelRecord(settings)
         let controller = try ModelInstanceController(record: replacement)
@@ -194,7 +195,12 @@ final class ModelInstanceManager {
     func setIdle(_ id: UUID, group: String) {
         guard let record = record(id) else { return }
         record.settings.idleMotionGroup = group
+        apply(record)
         record.controller?.view.bridge.setIdleGroup(group); changed()
+    }
+    func setMotionWeights(_ id: UUID, overrides: [String: Double]) {
+        mutate(id) { $0.motionWeightOverrides = overrides }
+        record(id)?.controller?.view.applyMotionWeights()
     }
     func setOutfit(_ id: UUID, outfitID: String) throws {
         guard let record = record(id) else { return }

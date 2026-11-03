@@ -5,6 +5,7 @@
 - (void)renderWidth:(int)width height:(int)height scale:(float)scale;
 - (BOOL)playGroup:(NSString*)group index:(int)index;
 - (BOOL)selectExpression:(NSString*)name;
+- (void)setMotionWeights:(NSDictionary<NSString *, NSArray<NSNumber *> *> *)weights;
 - (void)setIdleGroup:(NSString*)group;
 @property(nonatomic,readonly) NSDictionary<NSString*,NSNumber*>* motionGroups;
 @property(nonatomic,readonly) NSArray<NSString*>* expressionNames;
