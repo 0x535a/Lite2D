@@ -16,6 +16,7 @@ public:
     void render(int width, int height, float scale);
     bool play(const std::string& group, int index);
     bool expression(const std::string& name);
+    void weights(const std::map<std::string,std::vector<double>>& weights);
     void idle(const std::string& group);
     std::map<std::string,int> groups() const;
     std::vector<std::string> expressions() const;

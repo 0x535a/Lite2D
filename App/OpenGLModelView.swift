@@ -16,6 +16,7 @@ final class OpenGLModelView: NSOpenGLView {
     var onZoom: ((Double) -> Void)?
     var onDragFinished: ((NSRect) -> Void)?
     var onFrame: ((OpenGLModelView) -> Void)?
+    private(set) var motions: [ModelMotion] = []
     private var displayLink: CADisplayLink?
     private let measureGPU = ProcessInfo.processInfo.environment["LITE2D_GPU_TIMING"] == "1"
     private var lastTime: Double?
@@ -72,12 +73,25 @@ final class OpenGLModelView: NSOpenGLView {
         let validated = try ModelFileValidator.validate(url)
         for warning in validated.warnings { NSLog("%@", warning) }
         let pixels = convertToBacking(bounds)
+        let nextMotions = try ModelMotion.load(validated.url)
         try bridge.load(path: validated.url.path, width: Int32(max(pixels.width, 1)), height: Int32(max(pixels.height, 1)))
+        motions = nextMotions
+        applyMotionWeights()
         if let idle = settings.idleMotionGroup { bridge.setIdleGroup(idle) }
         if let expression = settings.expressionId { _ = bridge.selectExpression(expression) }
         lastTime = nil
         renderRequested = true
         needsDisplay = true
+    }
+    func applyMotionWeights() {
+        var weights: [String: [NSNumber]] = [:]
+        for motion in motions {
+            var entries = weights[motion.group] ?? []
+            while entries.count <= motion.index { entries.append(0) }
+            entries[motion.index] = NSNumber(value: motion.weight(overrides: settings.motionWeightOverrides))
+            weights[motion.group] = entries
+        }
+        bridge.setMotionWeights(weights)
     }
     func applyFPS() {
         let fps = Float(settings.targetFPS)

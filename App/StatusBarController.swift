@@ -75,6 +75,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             }
             let groups = record.controller?.view.bridge.motionGroups ?? [:]
             if !groups.isEmpty {
+                model.addItem(item("动作权重…") { [weak self] in self?.editMotionWeights(id) })
                 let idle = submenu("循环动作组", into: model)
                 idle.addItem(item("无", checked: settings.idleMotionGroup == "") { [weak self] in self?.manager.setIdle(id, group: "") })
                 let motions = submenu("播放动作", into: model)
@@ -190,5 +191,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         alert.accessoryView = input; alert.addButton(withTitle: "保存"); alert.addButton(withTitle: "取消")
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn { manager.mutate(id) { $0.displayName = input.stringValue } }
+    }
+    func editMotionWeights(_ id: UUID) {
+        guard let record = manager.record(id), let view = record.controller?.view, !view.motions.isEmpty else { return }
+        let motions = view.motions
+        switch MotionWeightEditor.run(title: "\(record.settings.displayName) · 动作权重", motions: motions,
+                                      overrides: record.settings.motionWeightOverrides) {
+        case .save(let overrides):
+            manager.setMotionWeights(id, overrides: overrides)
+        case .reset:
+            // Only clear the displayed motions; other outfits retain their overrides.
+            var overrides = record.settings.motionWeightOverrides
+            for motion in motions { overrides.removeValue(forKey: motion.key) }
+            manager.setMotionWeights(id, overrides: overrides)
+        case .cancel:
+            break
+        }
     }
 }

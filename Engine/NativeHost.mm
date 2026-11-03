@@ -20,6 +20,8 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <algorithm>
+#include <random>
+#include <cmath>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -83,6 +85,8 @@ public:
  std::map<std::string,std::vector<ACubismMotion*>> motions;
  std::map<std::string,ACubismMotion*> expressionMap;
  std::string idleGroup;
+ std::map<std::string,std::vector<double>> motionWeights;
+ std::mt19937 random{std::random_device{}()};
  int renderWidth=0,renderHeight=0;
  float lookX=0,lookY=0;
  ~Impl() override {
@@ -124,7 +128,7 @@ public:
     ACubismMotion* motion=nullptr;
     optional(settings->GetMotionFileName(group.c_str(),i),[&](auto& b){
      motion=LoadMotion(b.data(),(int)b.size(),nullptr,nullptr,nullptr,settings.get(),group.c_str(),i);
-     if(motion)static_cast<CubismMotion*>(motion)->SetEffectIds(blinkIds,lipSyncIds);
+     if(motion){motion->SetLoop(false);static_cast<CubismMotion*>(motion)->SetEffectIds(blinkIds,lipSyncIds);}
     });entries.push_back(motion);
    }
    if(group=="Idle"||group=="idle")idleGroup=group;
@@ -170,9 +174,29 @@ public:
   if(found==motions.end()||index<0||index>=found->second.size()||!found->second[index])return false;
   _motionManager->SetReservePriority(3);_motionManager->StartMotionPriority(found->second[index],false,3);return true;
  }
+ bool playIdle() {
+  auto found=motions.find(idleGroup);if(found==motions.end())return false;
+  auto weights=motionWeights.find(idleGroup);
+  std::vector<double> values;
+  double maximum=0;
+  for(size_t i=0;i<found->second.size();++i){
+   double weight=weights!=motionWeights.end()&&i<weights->second.size()?weights->second[i]:1;
+   if(!found->second[i]||!std::isfinite(weight)||weight<0)weight=0;
+   values.push_back(weight);maximum=std::max(maximum,weight);
+  }
+  if(maximum==0)return false;
+  // Normalize first so large, finite user weights cannot overflow the sum.
+  for(auto& weight:values)weight/=maximum;
+  std::discrete_distribution<int> choose(values.begin(),values.end());
+  return play(idleGroup,choose(random));
+ }
+ void idle(const std::string& group){
+  idleGroup=group;
+  if(!playIdle())_motionManager->StopAllMotions();
+ }
  void update(double dt,float x,float y) {
   _model->LoadParameters();
-  if(_motionManager->IsFinished()&&!idleGroup.empty())play(idleGroup,0);
+  if(dt>0&&_motionManager->IsFinished()&&!idleGroup.empty())playIdle();
   bool moved=_motionManager->UpdateMotion(_model,(float)dt);_model->SaveParameters();
   if(!moved&&_eyeBlink)_eyeBlink->UpdateParameters(_model,(float)dt);
   lookX=x;lookY=y;
@@ -201,7 +225,8 @@ void NativeHost::update(double dt,float x,float y){impl->update(dt,x,y);}
 void NativeHost::render(int w,int h,float s){impl->render(w,h,s);}
 bool NativeHost::play(const std::string& g,int i){return impl->play(g,i);}
 bool NativeHost::expression(const std::string& n){return impl->expression(n);}
-void NativeHost::idle(const std::string& g){impl->idleGroup=g;}
+void NativeHost::weights(const std::map<std::string,std::vector<double>>& w){impl->motionWeights=w;}
+void NativeHost::idle(const std::string& g){impl->idle(g);}
 std::map<std::string,int> NativeHost::groups() const{std::map<std::string,int> result;for(auto& g:impl->motions)result[g.first]=(int)g.second.size();return result;}
 std::vector<std::string> NativeHost::expressions() const{std::vector<std::string> result;for(auto& e:impl->expressionMap)result.push_back(e.first);return result;}
 float NativeHost::canvasAspect() const{return impl->GetModel()->GetCanvasWidth()/impl->GetModel()->GetCanvasHeight();}

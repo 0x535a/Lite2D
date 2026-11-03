@@ -272,7 +272,8 @@ failed:
 }
 - (BOOL)playGroup:(NSString*)group index:(int)index{return [[_context[@"playLegacy"]callWithArguments:@[group,@(index)]]toBool];}
 - (BOOL)selectExpression:(NSString*)name {return [name isEqual:@""];}
-- (void)setIdleGroup:(NSString*)group {_context[@"idleGroup"]=group;}
+- (void)setMotionWeights:(NSDictionary<NSString*,NSArray<NSNumber*>*>*)weights {_context[@"motionWeights"]=weights;}
+- (void)setIdleGroup:(NSString*)group {[_context[@"setLegacyIdle"]callWithArguments:@[group]];}
 - (NSDictionary<NSString*,NSNumber*>*)motionGroups {
  NSMutableDictionary* result=[NSMutableDictionary dictionary];NSDictionary* motions=_settings[@"motions"];
  for(NSString* group in motions) {
