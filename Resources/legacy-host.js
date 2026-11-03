@@ -99,7 +99,7 @@ function stepLegacy(time,x,y){
     model.loadParam();
     if(queue.isFinished())interactionActive=false;
     if(queue.isFinished()&&idleGroup)playLegacyIdle();
-    queue.updateParam(model);
+    var motionUpdated=queue.updateParam(model);
     model.saveParam();
     // The legacy SDK creates harmless virtual parameters for IDs absent from
     // the model. Such IDs do not affect drawable geometry.
@@ -109,8 +109,13 @@ function stepLegacy(time,x,y){
     add('PARAM_ANGLE_Z',-x*y*20);add('PARAM_BODY_ANGLE_X',x*10);
     set('PARAM_EYE_BALL_X',x);set('PARAM_EYE_BALL_Y',y);
     set('PARAM_BREATH',(Math.sin(time*2)+1)*0.5);
-    var phase=time%4.3, openness=phase<0.18?Math.abs(phase-0.09)/0.09:1;
-    set('PARAM_EYE_L_OPEN',openness);set('PARAM_EYE_R_OPEN',openness);
+    // Motions can coordinate eyelid openness with smile-eye/deform parameters.
+    // Reopening their eyes here mixes incompatible shapes, even during idle.
+    // Match the native host: procedural blinking only fills motion-free frames.
+    if(!motionUpdated){
+        var phase=time%4.3, openness=phase<0.18?Math.abs(phase-0.09)/0.09:1;
+        set('PARAM_EYE_L_OPEN',openness);set('PARAM_EYE_R_OPEN',openness);
+    }
     model.update();
 }
 var matrix=new Float32Array(16);
