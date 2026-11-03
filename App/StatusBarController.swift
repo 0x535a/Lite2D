@@ -29,6 +29,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         rebuild()
     }
     func menuNeedsUpdate(_ menu: NSMenu) { rebuild() }
+    func menuWillOpen(_ menu: NSMenu) { manager.clickInteractionSuspended = true }
+    func menuDidClose(_ menu: NSMenu) { manager.clickInteractionSuspended = false }
     private func item(_ title: String, checked: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> ActionMenuItem {
         ActionMenuItem(title, checked: checked, enabled: enabled, handler: action)
     }
@@ -74,6 +76,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 }
             }
             let groups = record.controller?.view.bridge.motionGroups ?? [:]
+            let clickGroup = record.controller?.view.clickMotionGroup ?? settings.clickMotionGroup
+            let clickGroupAvailable = clickGroup.map { (groups[$0]?.intValue ?? 0) > 0 } ?? false
+            model.addItem(item("点击互动（保持穿透）", checked: settings.clickInteractionEnabled,
+                               enabled: settings.clickInteractionEnabled || clickGroupAvailable) { [weak self] in
+                self?.manager.mutate(id) { $0.clickInteractionEnabled.toggle() }
+            })
+            let clickTitle = groups.isEmpty ? "点击动作组：无可用动作" :
+                "点击动作组：\(clickGroup ?? "请选择")\(clickGroup != nil && !clickGroupAvailable ? "（当前服装不可用）" : "")"
+            let clickGroups = submenu(clickTitle, into: model)
+            for group in groups.keys.sorted() where (groups[group]?.intValue ?? 0) > 0 {
+                clickGroups.addItem(item(group, checked: clickGroup == group) { [weak self] in
+                    self?.manager.mutate(id) { $0.clickMotionGroup = group }
+                })
+            }
             if !groups.isEmpty {
                 model.addItem(item("动作权重…") { [weak self] in self?.editMotionWeights(id) })
                 let idle = submenu("循环动作组", into: model)

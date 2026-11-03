@@ -25,7 +25,10 @@ import CoreGraphics
         let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"modelPath":"/old"}"#.utf8))
         precondition(old.schemaVersion == 3 && old.instances.count == 1)
         precondition(old.instances[0].motionWeightOverrides.isEmpty, "Older settings use model weights")
+        precondition(!old.instances[0].clickInteractionEnabled && old.instances[0].clickMotionGroup == nil)
         var weighted = settings.instances[0]
+        weighted.clickInteractionEnabled = true
+        weighted.clickMotionGroup = "custom"
         weighted.motionWeightOverrides = ["idle-a": 0, "idle-b": 2.5, "negative": -1, "invalid": .infinity]
         weighted.sanitize()
         precondition(weighted.motionWeightOverrides == ["idle-a": 0, "idle-b": 2.5])

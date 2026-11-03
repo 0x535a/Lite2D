@@ -39,6 +39,8 @@ static void fail(NSError** error,const char* message) {
 - (void)step:(double)dt lookX:(float)x lookY:(float)y {if(_native)_native->update(dt,x,y);else [_legacy step:dt lookX:x lookY:y];}
 - (void)renderWidth:(int)width height:(int)height scale:(float)scale {if(_native)_native->render(width,height,scale);else [_legacy renderWidth:width height:height scale:scale];}
 - (BOOL)playGroup:(NSString*)group index:(int)index {return _native?_native->play(group.UTF8String,index):[_legacy playGroup:group index:index];}
+- (BOOL)playInteraction:(NSString*)group {return _native?_native->playInteraction(group.UTF8String):[_legacy playInteraction:group];}
+- (BOOL)interactionPlaying {return _native?_native->interactionPlaying():_legacy.interactionPlaying;}
 - (BOOL)selectExpression:(NSString*)name {return _native?_native->expression(name.UTF8String):[_legacy selectExpression:name];}
 - (void)setMotionWeights:(NSDictionary<NSString*,NSArray<NSNumber*>*>*)weights {
  if(_legacy){[_legacy setMotionWeights:weights];return;}

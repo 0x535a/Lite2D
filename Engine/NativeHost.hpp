@@ -15,6 +15,8 @@ public:
     void update(double dt, float x, float y);
     void render(int width, int height, float scale);
     bool play(const std::string& group, int index);
+    bool playInteraction(const std::string& group);
+    bool interactionPlaying() const;
     bool expression(const std::string& name);
     void weights(const std::map<std::string,std::vector<double>>& weights);
     void idle(const std::string& group);

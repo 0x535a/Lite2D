@@ -295,6 +295,7 @@ final class SelfTestRunner {
         manager.play(a, group: "tap", index: 0)
         manager.setIdle(a, group: "idle")
         try testWeightEditor()
+        try testClickInteraction()
         let motion = try view(a).motions.first { $0.group == "idle" }!
         let otherWeights = manager.record(duplicate)!.settings.motionWeightOverrides
         manager.setMotionWeights(a, overrides: [motion.key: 0])
@@ -347,6 +348,93 @@ final class SelfTestRunner {
         status.editMotionWeights(a)
         try check(manager.record(a)!.settings.motionWeightOverrides.isEmpty,
                   "Weight editor restores model defaults")
+    }
+    private func testClickInteraction() throws {
+        let record = manager.record(a)!, other = manager.record(duplicate)!
+        let original = record.settings, otherOriginal = other.settings
+        let nativeOriginal = manager.record(native)!.settings
+        defer {
+            manager.mutate(a) { $0 = original }; manager.mutate(duplicate) { $0 = otherOriginal }
+            manager.mutate(native) { $0 = nativeOriginal }
+            manager.setIdle(a, group: original.idleMotionGroup ?? "idle")
+            manager.setIdle(duplicate, group: otherOriginal.idleMotionGroup ?? "idle")
+        }
+        manager.mutate(a) {
+            $0.interactionMode = .passthrough; $0.animationPaused = false
+            $0.clickInteractionEnabled = true; $0.clickMotionGroup = "idle"
+        }
+        manager.bringForward(a)
+        let model = try view(a), window = record.controller!.window
+        guard let frame = model.capture(), let opaque = stride(from: 3, to: frame.data.count, by: 4).filter({ frame.data[$0] == 255 }).min(by: { lhs, rhs in
+                  func distance(_ index: Int) -> Double {
+                      let x = Double((index / 4) % frame.width) - Double(frame.width) / 2
+                      let y = Double((index / 4) / frame.width) - Double(frame.height) / 2
+                      return x*x + y*y
+                  }
+                  return distance(lhs) < distance(rhs)
+              }),
+              let transparent = stride(from: 3, to: frame.data.count, by: 4).first(where: { frame.data[$0] == 0 }) else {
+            throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Hit-test frame needs opaque and transparent pixels"])
+        }
+        func screenPoint(_ alphaIndex: Int) -> NSPoint {
+            let pixel = alphaIndex / 4
+            let local = model.convertFromBacking(NSPoint(x: Double(pixel % frame.width) + 0.5, y: Double(pixel / frame.width) + 0.5))
+            return window.convertPoint(toScreen: model.convert(local, to: nil))
+        }
+        let hit = screenPoint(opaque), miss = screenPoint(transparent)
+        func click(_ point: NSPoint) {
+            manager.handleClick(type: .leftMouseDown, at: point)
+            manager.handleClick(type: .leftMouseUp, at: point)
+        }
+        try check(window.ignoresMouseEvents && model.canClickInteract, "Interaction stays enabled while window always passes clicks through")
+        try check(model.containsVisibleModel(at: hit) && !model.containsVisibleModel(at: miss), "Rendered alpha hit-test excludes transparent pixels at backing scale")
+        click(miss)
+        try check(!model.bridge.interactionPlaying, "Transparent click does not start interaction")
+        manager.handleClick(type: .leftMouseDown, at: hit)
+        manager.handleClick(type: .leftMouseDragged, at: NSPoint(x: hit.x + 20, y: hit.y))
+        manager.handleClick(type: .leftMouseUp, at: hit)
+        try check(!model.bridge.interactionPlaying, "Drag returning to original point does not count as click")
+        click(hit)
+        try check(model.bridge.interactionPlaying && !model.playClickInteraction(), "Arbitrary group plays and repeated interaction cannot interrupt it")
+        manager.setIdle(a, group: "idle")
+        manager.mutate(a) { $0.animationPaused = true }; click(hit)
+        try check(!model.bridge.interactionPlaying, "Paused model ignores clicks")
+        manager.mutate(a) { $0.animationPaused = false; $0.interactionMode = .edit }; click(hit)
+        try check(!model.bridge.interactionPlaying, "Edit mode ignores interaction")
+        manager.mutate(a) { $0.interactionMode = .passthrough; $0.clickMotionGroup = "missing-group" }; click(hit)
+        try check(!model.bridge.interactionPlaying && !model.canClickInteract && record.settings.clickMotionGroup == "missing-group", "Unavailable outfit group suspends interaction and preserves selection")
+        manager.mutate(a) { $0.clickMotionGroup = "idle" }
+        manager.clickInteractionSuspended = true; click(hit); manager.clickInteractionSuspended = false
+        try check(!model.bridge.interactionPlaying, "Open menu suppresses interaction")
+        manager.setSleeping(true); click(hit); manager.setSleeping(false)
+        try check(!model.bridge.interactionPlaying, "Sleeping model ignores clicks")
+        manager.toggleAllHidden(); click(hit); manager.toggleAllHidden()
+        try check(!model.bridge.interactionPlaying, "Globally hidden models ignore clicks")
+        manager.mutate(duplicate) {
+            $0.windowFrame = record.settings.windowFrame; $0.displayUUID = record.settings.displayUUID
+            $0.displayPosition = record.settings.displayPosition; $0.isVisible = true
+            $0.animationPaused = false; $0.interactionMode = .passthrough
+            $0.clickInteractionEnabled = true; $0.clickMotionGroup = "idle"
+        }
+        manager.bringForward(duplicate)
+        click(hit)
+        try check(try view(duplicate).bridge.interactionPlaying && !model.bridge.interactionPlaying, "Only topmost visible overlapping model responds")
+        manager.setIdle(duplicate, group: "idle")
+        manager.mutate(duplicate) { $0.clickInteractionEnabled = false }; click(hit)
+        try check(!model.bridge.interactionPlaying, "Disabled foreground model blocks interaction with covered model")
+        let nativeView = try view(native)
+        let group = nativeView.bridge.motionGroups.keys.sorted().first!
+        manager.mutate(native) { $0.clickInteractionEnabled = true; $0.clickMotionGroup = group; $0.animationPaused = false; $0.interactionMode = .passthrough }
+        try check(nativeView.playClickInteraction() && nativeView.bridge.interactionPlaying && !nativeView.playClickInteraction(), "Native engine supports selected interaction group and repeat suppression")
+        for _ in 0..<3000 { nativeView.bridge.step(deltaTime: 0.1, lookX: 0, lookY: 0) }
+        try check(!nativeView.bridge.interactionPlaying, "Native interaction finishes and releases lock while idle resumes")
+        manager.save()
+        try check(manager.store.load().instances.first { $0.id == a }?.clickMotionGroup == "idle", "Click interaction settings persist")
+        status.rebuild()
+        let menu = status.menu.item(at: 1)?.submenu?.item(at: 0)?.submenu
+        try check(menu?.items.contains { $0.title == "点击互动（保持穿透）" && $0.state == .on } == true &&
+                  menu?.items.first { $0.title == "点击动作组：idle" }?.submenu?.items.contains { $0.title == "tap" } == true,
+                  "Instance menu exposes independent interaction switch and arbitrary motion groups")
     }
     private func measureFPS() throws {
         let duration = ProcessInfo.processInfo.systemUptime - fpsStart
@@ -409,7 +497,10 @@ final class SelfTestRunner {
             try check(try view(record.settings.id).glErrorCount == 0, "No transient GL errors accumulated for surviving instance")
         }
         for record in manager.records { _ = try capture(record.settings.id, label: "final-\(record.settings.id.uuidString.prefix(4))") }
-        manager.mutate(a) { $0.displayName = "22 persistent A"; $0.trackingEnabled = false; $0.targetFPS = 30 }
+        manager.mutate(a) {
+            $0.displayName = "22 persistent A"; $0.trackingEnabled = false; $0.targetFPS = 30
+            $0.clickInteractionEnabled = true; $0.clickMotionGroup = "idle"
+        }
         manager.mutate(b) { $0.displayName = "33 persistent B"; $0.trackingEnabled = true; $0.targetFPS = 60; $0.animationPaused = true }
         manager.mutate(duplicate) { $0.displayName = "22 hidden duplicate"; $0.isVisible = false; $0.trackingSmoothingSeconds = 0.3 }
         if let outfit = manager.record(duplicate)?.outfits.dropFirst().first { try manager.setOutfit(duplicate, outfitID: outfit.id) }

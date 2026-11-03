@@ -4,6 +4,8 @@
 - (void)step:(double)dt lookX:(float)x lookY:(float)y;
 - (void)renderWidth:(int)width height:(int)height scale:(float)scale;
 - (BOOL)playGroup:(NSString*)group index:(int)index;
+- (BOOL)playInteraction:(NSString*)group;
+@property(nonatomic,readonly) BOOL interactionPlaying;
 - (BOOL)selectExpression:(NSString*)name;
 - (void)setMotionWeights:(NSDictionary<NSString *, NSArray<NSNumber *> *> *)weights;
 - (void)setIdleGroup:(NSString*)group;
