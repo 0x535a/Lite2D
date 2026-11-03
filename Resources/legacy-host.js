@@ -47,9 +47,55 @@ gl.uniformMatrix4fv=function(location,transpose,data){
     for(var i=0;i<data.length;i++)glCommands.push(data[i]);
 };
 var motions={}, motionWeights={}, queue, idleGroup='', blinkTime=0, interactionActive=false;
+var motionParameterDefaults=Object.create(null), motionPartDefaults=Object.create(null), activeMotions=[];
+function legacyMotionChannels(buffer){
+    // Read channel names from the public .mtn format, not SDK internals.
+    // Defaults are captured while loading, before any motion has run.
+    var bytes=new Uint8Array(buffer), text='', channels={parameters:[],parts:[]};
+    for(var offset=0;offset<bytes.length;offset+=8192)
+        text+=String.fromCharCode.apply(null,bytes.subarray(offset,offset+8192));
+    text.split(/[\r\n]+/).forEach(function(line){
+        var equals=line.indexOf('=');if(equals<0)return;
+        var name=line.slice(0,equals).trim();
+        if(!name||name[0]==='#'||name[0]==='$')return;
+        if(name.indexOf('VISIBLE:')===0){
+            var index=model.getPartsDataIndex(name.slice(8));
+            if(index>=0){
+                if(motionPartDefaults[index]==null)motionPartDefaults[index]=model.getPartsOpacity(index);
+                channels.parts.push(index);
+            }
+        }
+        // Cubism 2 also stores VISIBLE channels through its parameter API.
+        if(!/^(LAYOUT|FADEIN|FADEOUT):/.test(name)){
+            var index=model.getParamIndex(name);
+            if(index<0)return;
+            if(motionParameterDefaults[index]==null)motionParameterDefaults[index]=model.getParamFloat(index);
+            channels.parameters.push(index);
+        }
+    });
+    return channels;
+}
+function restoreUnownedMotionChannels(){
+    var parameters=Object.create(null), parts=Object.create(null);
+    activeMotions=activeMotions.filter(function(entry){return !queue.isFinished(entry.handle);});
+    activeMotions.forEach(function(entry){
+        entry.channels.parameters.forEach(function(index){parameters[index]=true;});
+        entry.channels.parts.forEach(function(index){parts[index]=true;});
+    });
+    // Preserve channels still owned by playing/fading motions. Only retired
+    // channels return to their model baseline; unrelated persistent state stays.
+    Object.keys(motionParameterDefaults).forEach(function(index){
+        if(!parameters[index])model.setParamFloat(Number(index),motionParameterDefaults[index]);
+    });
+    Object.keys(motionPartDefaults).forEach(function(index){
+        if(!parts[index])model.setPartsOpacity(Number(index),motionPartDefaults[index]);
+    });
+}
 function registerMotion(group,index,settings){
     if(!motions[group]) motions[group]=[];
+    var channels=legacyMotionChannels(motionBytes);
     var motion=Live2DMotion.loadMotion(motionBytes);
+    motion.lite2dChannels=channels;
     motionBytes=null;
     if(settings.fade_in!=null)motion.setFadeIn(settings.fade_in);
     if(settings.fade_out!=null)motion.setFadeOut(settings.fade_out);
@@ -57,12 +103,15 @@ function registerMotion(group,index,settings){
 }
 function initializeLegacy(){
     queue=new MotionQueueManager();
+    activeMotions=[];
     idleGroup=motions.idle?'idle':motions.Idle?'Idle':'';
 }
 function playLegacy(group,index){
     if(!motions[group]||!motions[group][index])return false;
     interactionActive=false;
-    queue.startMotion(motions[group][index],false);return true;
+    var motion=motions[group][index], handle=queue.startMotion(motion,false);
+    if(handle<0)return false;
+    activeMotions.push({handle:handle,channels:motion.lite2dChannels});return true;
 }
 function playLegacyRandom(group){
     var entries=motions[group]||[], weights=motionWeights[group]||[];
@@ -99,7 +148,8 @@ function stepLegacy(time,x,y){
     model.loadParam();
     if(queue.isFinished())interactionActive=false;
     if(queue.isFinished()&&idleGroup)playLegacyIdle();
-    var motionUpdated=queue.updateParam(model);
+    restoreUnownedMotionChannels();
+    queue.updateParam(model);
     model.saveParam();
     // The legacy SDK creates harmless virtual parameters for IDs absent from
     // the model. Such IDs do not affect drawable geometry.
@@ -109,13 +159,8 @@ function stepLegacy(time,x,y){
     add('PARAM_ANGLE_Z',-x*y*20);add('PARAM_BODY_ANGLE_X',x*10);
     set('PARAM_EYE_BALL_X',x);set('PARAM_EYE_BALL_Y',y);
     set('PARAM_BREATH',(Math.sin(time*2)+1)*0.5);
-    // Motions can coordinate eyelid openness with smile-eye/deform parameters.
-    // Reopening their eyes here mixes incompatible shapes, even during idle.
-    // Match the native host: procedural blinking only fills motion-free frames.
-    if(!motionUpdated){
-        var phase=time%4.3, openness=phase<0.18?Math.abs(phase-0.09)/0.09:1;
-        set('PARAM_EYE_L_OPEN',openness);set('PARAM_EYE_R_OPEN',openness);
-    }
+    var phase=time%4.3, openness=phase<0.18?Math.abs(phase-0.09)/0.09:1;
+    set('PARAM_EYE_L_OPEN',openness);set('PARAM_EYE_R_OPEN',openness);
     model.update();
 }
 var matrix=new Float32Array(16);
