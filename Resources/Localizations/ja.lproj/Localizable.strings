@@ -34,6 +34,7 @@
 "placement.section" = "配置";
 "placement.edit_help" = "調整中：ドラッグで移動、スクロールで拡大・縮小できます。終わったら「調整を完了」をクリックしてください。";
 "placement.help" = "調整モードでは、1体ずつドラッグで移動、スクロールで拡大・縮小できます。ディスプレイの接続が切れると非表示になり、再接続すると戻ります。";
+"motion.enabled" = "モーション";
 "motion.pause" = "モーションを一時停止";
 "motion.idle_group" = "自動再生グループ";
 "common.none" = "なし";

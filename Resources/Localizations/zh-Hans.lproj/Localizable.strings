@@ -34,6 +34,7 @@
 "placement.section" = "摆放";
 "placement.edit_help" = "正在调整：拖动角色移动，滚轮缩放。完成后点击“完成调整”。";
 "placement.help" = "进入调整模式后，可拖动角色、滚轮缩放；每次只调整一个角色。屏幕断开时角色会隐藏，重连后恢复。";
+"motion.enabled" = "动作";
 "motion.pause" = "暂停动作";
 "motion.idle_group" = "自动播放动作组";
 "common.none" = "无";
