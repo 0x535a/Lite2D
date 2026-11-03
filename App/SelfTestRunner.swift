@@ -104,7 +104,7 @@ final class SelfTestRunner {
     private func beginTracking() throws {
             _ = try capture(duplicate, label: "duplicate-22")
             status.rebuild()
-            try check(status.menu.item(at: 1)?.submenu?.items.count == 4, "Status menu lists all four instance submenus")
+            try check(status.menu.items.filter { $0.submenu != nil }.count == 4, "Status menu lists all four instance submenus")
             manager.mutate(a) { $0.animationPaused = true; $0.trackingEnabled = false; $0.targetFPS = 30 }
             manager.mutate(b) { $0.animationPaused = true; $0.trackingEnabled = true; $0.targetFPS = 60 }
             frozenTime = try view(a).animationTime; nativeTime = try view(native).animationTime
@@ -175,7 +175,7 @@ final class SelfTestRunner {
         try manager.setOutfit(a, outfitID: "")
         manager.mutate(a) { $0.animationPaused = originalSettings.animationPaused; $0.trackingEnabled = originalSettings.trackingEnabled }
         status.rebuild()
-        let instanceMenu = status.menu.item(at: 1)?.submenu?.item(at: 0)?.submenu
+        let instanceMenu = status.menu.item(at: 0)?.submenu
         let outfitMenu = instanceMenu?.items.first { $0.title == "服装" }?.submenu
         try check(outfitMenu?.items.count == 19 && outfitMenu?.items.first?.state == .on, "Status menu shows 19 named outfits and selected checkmark")
         try check(try view(a).bridge.motionGroups["1"] == nil, "Costume commands are excluded from playable motion groups")
@@ -306,8 +306,9 @@ final class SelfTestRunner {
         manager.save()
         try check(manager.store.load().instances.first { $0.id == a }?.motionWeightOverrides[motion.key] == 0,
                   "Zero weight override persists to disk")
-        try check(status.menu.item(at: 1)?.submenu?.item(at: 0)?.submenu?.items.contains { $0.title == "动作权重…" } == true,
-                  "Model menu exposes motion weight settings")
+        try check(status.menu.item(at: 0)?.submenu?.items.contains { $0.title == "角色设置…" } == true &&
+                  status.menu.item(at: 0)?.submenu?.items.contains { $0.title == "动作权重…" } == false,
+                  "Quick menu links to role settings without detailed motion configuration")
         // Measure the two requested rates on the same fixed-refresh display;
         // the built-in ProMotion panel may adapt its callback rate separately.
         if let display = manager.displayRegistry.primary { manager.bind(b, to: display.id) }
@@ -431,10 +432,10 @@ final class SelfTestRunner {
         manager.save()
         try check(manager.store.load().instances.first { $0.id == a }?.clickMotionGroup == "idle", "Click interaction settings persist")
         status.rebuild()
-        let menu = status.menu.item(at: 1)?.submenu?.item(at: 0)?.submenu
-        try check(menu?.items.contains { $0.title == "点击互动（保持穿透）" && $0.state == .on } == true &&
-                  menu?.items.first { $0.title == "点击动作组：idle" }?.submenu?.items.contains { $0.title == "tap" } == true,
-                  "Instance menu exposes independent interaction switch and arbitrary motion groups")
+        let menu = status.menu.item(at: 0)?.submenu
+        try check(menu?.items.contains { $0.title == "角色设置…" } == true &&
+                  menu?.items.contains { $0.title.hasPrefix("点击") } == false,
+                  "Interaction configuration lives in settings rather than the quick menu")
     }
     private func measureFPS() throws {
         let duration = ProcessInfo.processInfo.systemUptime - fpsStart

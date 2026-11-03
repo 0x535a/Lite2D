@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = probeDirectory.map { SettingsStore(url: URL(fileURLWithPath: $0).appendingPathComponent("settings.json")) } ?? SettingsStore()
         manager = ModelInstanceManager(store: store)
         status = StatusBarController(manager: manager)
+        installApplicationMenu()
         if probeDirectory == nil { manager.restore() }
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("--") }
         for path in paths {
@@ -68,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             benchmark = runner; runner.run(); return
         }
+        if CommandLine.arguments.contains("--show-settings") { status.settingsWindow.show() }
         if let directory = probeDirectory {
             guard let controller = manager.records.first?.controller else { exitCode = 2; NSApp.terminate(nil); return }
             controller.view.onFrame = { [weak self] view in
@@ -79,6 +81,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
             }
         }
+    }
+    @objc private func openSettings(_ sender: Any?) { status.settingsWindow.show() }
+    private func installApplicationMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem(); let appMenu = NSMenu(title: "Lite2D"); appItem.submenu = appMenu; main.addItem(appItem)
+        let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self; appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "退出 Lite2D", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let editItem = NSMenuItem(); let edit = NSMenu(title: "编辑"); editItem.submenu = edit; main.addItem(editItem)
+        for (title, selector, key) in [("撤销", Selector(("undo:")), "z"),
+                                      ("剪切", #selector(NSText.cut(_:)), "x"),
+                                      ("复制", #selector(NSText.copy(_:)), "c"),
+                                      ("粘贴", #selector(NSText.paste(_:)), "v"),
+                                      ("全选", #selector(NSText.selectAll(_:)), "a")] {
+            edit.addItem(NSMenuItem(title: title, action: selector, keyEquivalent: key))
+        }
+        let windowItem = NSMenuItem(); let window = NSMenu(title: "窗口"); windowItem.submenu = window; main.addItem(windowItem)
+        window.addItem(NSMenuItem(title: "关闭", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        window.addItem(NSMenuItem(title: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        NSApp.mainMenu = main; NSApp.windowsMenu = window
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        status?.settingsWindow.show()
+        return true
     }
     func applicationWillTerminate(_ notification: Notification) {
         guard !terminating else { return }; terminating = true
