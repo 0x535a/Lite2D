@@ -81,7 +81,7 @@ final class OpenGLModelView: NSOpenGLView {
     func loadEntry(_ url: URL) throws {
         openGLContext?.makeCurrentContext()
         let validated = try ModelFileValidator.validate(url)
-        for warning in validated.warnings { NSLog("%@", warning) }
+        for warning in validated.warnings { NSLog("%@", warning.text) }
         let pixels = convertToBacking(bounds)
         let nextMotions = try ModelMotion.load(validated.url)
         try bridge.load(path: validated.url.path, width: Int32(max(pixels.width, 1)), height: Int32(max(pixels.height, 1)))

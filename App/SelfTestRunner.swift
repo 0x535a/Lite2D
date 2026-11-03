@@ -71,9 +71,100 @@ final class SelfTestRunner {
             nativeDuplicate = copy.settings.id
             let contexts = manager.records.compactMap { $0.controller?.view.openGLContext }.map(ObjectIdentifier.init)
             try check(Set(contexts).count == 4, "Four distinct OpenGL context objects")
-            later(0.35) { try self.afterNativeDuplicate() }
+            testLocalization { try self.afterNativeDuplicate() }
         }
     }
+
+    /// Screenshots cover the minimum supported window width in every language.
+    /// Refresh the existing tree: replacing the root would discard editor state.
+    private func testLocalization(complete: @escaping () throws -> Void) {
+        let originalLanguage = L10n.language
+        let snapshots = manager.records.map(\.settings)
+        let controllers = manager.records.compactMap { $0.controller }.map(ObjectIdentifier.init)
+        let settings = status.settingsWindow
+        settings.show(role: a)
+        settings.window?.setContentSize(NSSize(width: 820, height: 640))
+        let languages: [AppLanguage] = [.english, .simplifiedChinese, .traditionalChinese, .japanese]
+        let steps = languages.flatMap { language in
+            ["general", "appearance", "interaction", "advanced"].map { (language, $0) }
+        }
+        func advance(_ index: Int) {
+            if index == steps.count {
+                later(0.1) { [self] in
+                    try check(manager.records.map(\.settings) == snapshots, "Language switching preserves all model settings")
+                    try check(manager.records.compactMap { $0.controller }.map(ObjectIdentifier.init) == controllers,
+                              "Language switching keeps the same live model controllers")
+                    testLocalizedInput {
+                        LanguageStore.shared.selection = originalLanguage
+                        settings.window?.orderOut(nil)
+                        try complete()
+                    }
+                }
+                return
+            }
+            let (language, page) = steps[index]
+            let expectedSelection = page == "general" ? "general" : a.uuidString
+            settings.model.selection = expectedSelection
+            if let rolePage = RoleSettingsPage(rawValue: page) { settings.model.page = rolePage }
+            let expectedPage = settings.model.page
+            LanguageStore.shared.selection = language
+            later(0.25) { [self] in
+                try check(settings.model.selection == expectedSelection && settings.model.page == expectedPage,
+                          "\(language.rawValue)/\(page): selected character and page survive language change")
+                try check(settings.window?.title == L10n.text("settings.title") &&
+                          status.menu.items.contains { $0.title == L10n.text("settings.open") },
+                          "\(language.rawValue)/\(page): open window title and AppKit menu update immediately")
+                if let window = settings.window {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    let path = output.appendingPathComponent("localization-\(language.rawValue)-\(page).png")
+                    process.arguments = ["-x", "-o", "-l", String(window.windowNumber), path.path]
+                    try process.run(); process.waitUntilExit()
+                    try check(process.terminationStatus == 0 && FileManager.default.fileExists(atPath: path.path),
+                              "\(language.rawValue)/\(page): settings screenshot saved")
+                }
+                advance(index + 1)
+            }
+        }
+        advance(0)
+    }
+
+
+    private func testLocalizedInput(complete: @escaping () throws -> Void) {
+        let settings = status.settingsWindow
+        settings.model.selection = a.uuidString; settings.model.page = .appearance
+        LanguageStore.shared.selection = .english
+        later(0.2) { [self] in
+            func fields(_ view: NSView) -> [NSTextField] {
+                (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(fields)
+            }
+            guard let window = settings.window, let content = window.contentView,
+                  let field = fields(content).first(where: { $0.isEditable }) else {
+                throw NSError(domain: "Lite2D.SelfTest", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing native role name editor"])
+            }
+            let storedName = manager.record(a)!.settings.displayName
+            window.makeFirstResponder(field)
+            guard let editor = field.currentEditor() as? NSTextView else {
+                throw NSError(domain: "Lite2D.SelfTest", code: 5, userInfo: [NSLocalizedDescriptionKey: "Could not focus role name editor"])
+            }
+            let draft = "Unsubmitted 名称"
+            editor.string = draft
+            field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+            editor.setSelectedRange(NSRange(location: 2, length: 3))
+            LanguageStore.shared.selection = .japanese
+            later(0.2) { [self] in
+                try check(editor.string == draft && editor.selectedRange() == NSRange(location: 2, length: 3),
+                          "Language switching preserves unsubmitted input and text selection")
+                try check(manager.record(a)!.settings.displayName == storedName,
+                          "Language switching does not submit a pending rename")
+                editor.string = storedName
+                field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+                window.makeFirstResponder(nil)
+                try complete()
+            }
+        }
+    }
+
     private func afterNativeDuplicate() throws {
             _ = try capture(nativeDuplicate, label: "duplicate-native")
             manager.remove(nativeDuplicate)
@@ -176,7 +267,7 @@ final class SelfTestRunner {
         manager.mutate(a) { $0.animationPaused = originalSettings.animationPaused; $0.trackingEnabled = originalSettings.trackingEnabled }
         status.rebuild()
         let instanceMenu = status.menu.item(at: 0)?.submenu
-        let outfitMenu = instanceMenu?.items.first { $0.title == "服装" }?.submenu
+        let outfitMenu = instanceMenu?.items.first { $0.title == L10n.text("outfit.section") }?.submenu
         try check(outfitMenu?.items.count == 19 && outfitMenu?.items.first?.state == .on, "Status menu shows 19 named outfits and selected checkmark")
         try check(try view(a).bridge.motionGroups["1"] == nil, "Costume commands are excluded from playable motion groups")
     }
@@ -306,8 +397,8 @@ final class SelfTestRunner {
         manager.save()
         try check(manager.store.load().instances.first { $0.id == a }?.motionWeightOverrides[motion.key] == 0,
                   "Zero weight override persists to disk")
-        try check(status.menu.item(at: 0)?.submenu?.items.contains { $0.title == "角色设置…" } == true &&
-                  status.menu.item(at: 0)?.submenu?.items.contains { $0.title == "动作权重…" } == false,
+        try check(status.menu.item(at: 0)?.submenu?.items.contains { $0.title == L10n.text("role.settings") } == true &&
+                  status.menu.item(at: 0)?.submenu?.items.contains { $0.title == L10n.text("motion.weights") + "…" } == false,
                   "Quick menu links to role settings without detailed motion configuration")
         // Measure the two requested rates on the same fixed-refresh display;
         // the built-in ProMotion panel may adapt its callback rate separately.
@@ -324,7 +415,13 @@ final class SelfTestRunner {
         let characters = ["角色甲", "角色乙"].enumerated().map {
             ImportedCharacter(name: $0.element, entry: output, outfitCount: $0.offset + 1)
         }
-        let warnings = ["已跳过 1 个无法识别的文件。"]
+        let originalLanguage = L10n.language
+        defer { LanguageStore.shared.selection = originalLanguage }
+        let warnings: [LocalizedMessage] = [.key("error.optional_asset", [.literal("作者资源.png")])]
+        let switchLanguage = Timer(timeInterval: 0.25, repeats: false) { _ in
+            LanguageStore.shared.selection = .english
+        }
+        RunLoop.main.add(switchLanguage, forMode: .common)
         func capture(_ name: String) -> Bool {
             guard let window = CharacterPicker.window else { return false }
             let png = output.appendingPathComponent(name)
@@ -342,11 +439,12 @@ final class SelfTestRunner {
             model.toggleAll()
             let emptyBlocked = !model.canConfirm
             model.toggleAll(); model.set(0, selected: false)
-            model.finish(emptyBlocked ? model.selection.sorted() : [-1])
+            let updated = CharacterPicker.window?.title == L10n.text("import.title") && model.title == L10n.text("import.select_add")
+            model.finish(emptyBlocked && updated ? model.selection.sorted() : [-1])
         }
         RunLoop.main.add(multi, forMode: .common)
         let chosen = CharacterPicker.run(sourceName: "multi.lpk", characters: characters, warnings: warnings, single: false)
-        try check(chosen == [1] && shotsSaved == 1, "Character picker multi-select defaults to all, blocks empty, and renders")
+        try check(chosen == [1] && shotsSaved == 1, "Open character picker updates language, preserves selection, blocks empty, and renders")
         // Single-select: exactly one row, first selected, choosing another replaces it.
         let single = Timer(timeInterval: 0.8, repeats: false) { _ in
             guard let model = CharacterPicker.current else { NSApp.stopModal(); return }
@@ -460,8 +558,8 @@ final class SelfTestRunner {
         try check(manager.store.load().instances.first { $0.id == a }?.clickMotionGroup == "idle", "Click interaction settings persist")
         status.rebuild()
         let menu = status.menu.item(at: 0)?.submenu
-        try check(menu?.items.contains { $0.title == "角色设置…" } == true &&
-                  menu?.items.contains { $0.title.hasPrefix("点击") } == false,
+        try check(menu?.items.contains { $0.title == L10n.text("role.settings") } == true &&
+                  menu?.items.contains { $0.title == L10n.text("click.section") } == false,
                   "Interaction configuration lives in settings rather than the quick menu")
     }
     private func measureFPS() throws {

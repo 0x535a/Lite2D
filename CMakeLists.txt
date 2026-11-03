@@ -45,6 +45,8 @@ set_target_properties(Lite2D PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
   RUNTIME_OUTPUT_DIRECTORY "${LITE2D_OUTPUT_ROOT}")
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js")
+file(GLOB_RECURSE LOCALIZATION_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Localizations/*")
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS ${LOCALIZATION_FILES})
 # Liquid Glass icon (macOS 26/27): actool emits Assets.car for the layered .icon
 # plus a flattened AppIcon.icns that macOS 14-25 fall back to. Must precede codesign.
 set(APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon.icon")
@@ -61,6 +63,7 @@ add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE:Lite2D>.d"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/FrameworkShaders"
   COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/legacy-host.js"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Localizations" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
   COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")
   set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")

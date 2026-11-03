@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run in-app integration tests and verify state in a second fresh process."""
+import atexit
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,10 @@ for name in ["passed.json", "failed.json"]:
 settings = output / "settings.json"
 if settings.exists():
     settings.rename(output / f"previous-settings-{uuid.uuid4().hex}.json")
-env = dict(os.environ, LITE2D_SETTINGS_PATH=str(settings), LITE2D_TEST_OUTPUT=str(output))
+preferences_suite = f"local.lite2d.tests.integration.{uuid.uuid4().hex}"
+atexit.register(lambda: subprocess.run(["defaults", "delete", preferences_suite], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+env = dict(os.environ, LITE2D_SETTINGS_PATH=str(settings), LITE2D_TEST_OUTPUT=str(output),
+           LITE2D_PREFERENCES_SUITE=preferences_suite)
 app = os.environ.get("LITE2D_APP_PATH", str(root / "dist/Lite2D.app/Contents/MacOS/Lite2D"))
 models = [root / ".local/models/legacy-a/model.json", root / ".local/models/legacy-b/model.json",
           root / "vendor/CubismNativeSamples/Samples/Resources/Haru/Haru.model3.json"]

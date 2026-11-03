@@ -12,7 +12,10 @@ import Foundation
                 _ = try importer.prepare(root.appendingPathComponent(path))
                 preconditionFailure("Unexpected import success: \(path)")
             } catch {
-                if let text { check(error.localizedDescription.contains(text), "Wrong error for \(path): \(error)") }
+                if let text {
+                    let keys = LocalizedMessage.failure(error).keys
+                    check(keys.contains(text), "Wrong error identity for \(path): \(keys)")
+                }
             }
         }
         let plain = try importer.prepare(root.appendingPathComponent("plain.zip"))
@@ -45,15 +48,15 @@ import Foundation
         check(unrelated.characters.count == 2, "Unrelated entries must stay separate")
         let partial = try importer.prepare(root.appendingPathComponent("partial"))
         check(partial.characters.count == 1 && !partial.warnings.isEmpty, "One broken model must not discard valid sibling")
-        try rejected("traversal.zip", containing: "路径")
-        try rejected("link.zip", containing: "路径")
-        try rejected("collision.zip", containing: "路径")
+        try rejected("traversal.zip", containing: "error.archive_path")
+        try rejected("link.zip", containing: "error.archive_path")
+        try rejected("collision.zip", containing: "error.archive_path")
         try rejected("corrupt.zip")
-        try rejected("spine.lpk", containing: "Spine")
-        try rejected("encrypted-without-config.lpk", containing: "config.json")
-        try rejected("missing-texture", containing: "纹理")
-        try rejected("linked-folder", containing: "符号链接")
-        try rejected("bad-sidecar", containing: "服装")
+        try rejected("spine.lpk", containing: "error.non_live2d")
+        try rejected("encrypted-without-config.lpk", containing: "error.lpk_config")
+        try rejected("missing-texture", containing: "error.missing_texture")
+        try rejected("linked-folder", containing: "error.directory_special")
+        try rejected("bad-sidecar", containing: "error.outfit_escape")
         try FileManager.default.removeItem(at: root.appendingPathComponent("plain"))
         try FileManager.default.removeItem(at: root.appendingPathComponent("plain.zip"))
         _ = try ModelFileValidator.validate(added[0].entry)

@@ -91,7 +91,7 @@ final class ModelInstanceManager {
             record.error = nil
             configure(record)
             apply(record)
-        } catch { record.error = error.localizedDescription; record.controller = nil; NSLog("模型载入失败：%@", error.localizedDescription) }
+        } catch { record.error = error; record.controller = nil; NSLog("模型载入失败：%@", error.localizedDescription) }
     }
     func record(_ id: UUID) -> ModelRecord? { records.first { $0.settings.id == id } }
     private func configure(_ record: ModelRecord) {
@@ -149,16 +149,24 @@ final class ModelInstanceManager {
         apply(record); changed()
     }
     private func uniqueName(_ base: String) -> String {
-        let names = Set(records.map { $0.settings.displayName })
+        let names = Set(records.map { $0.settings.localizedDisplayName })
         if !names.contains(base) { return base }
         var number = 2
         while names.contains("\(base) (\(number))") { number += 1 }
         return "\(base) (\(number))"
     }
-    @discardableResult func add(_ url: URL, name: String? = nil) throws -> ModelRecord {
+    @discardableResult func add(_ url: URL, name: String? = nil, generatedName: GeneratedName? = nil) throws -> ModelRecord {
         let checked = try ModelFileValidator.validate(url)
         let base = name ?? url.deletingLastPathComponent().lastPathComponent
         var settings = ModelInstanceSettings(displayName: uniqueName(base), modelPath: checked.url.path)
+        if var generatedName {
+            let localized = generatedName.text
+            let unique = uniqueName(localized)
+            let suffix = String(unique.dropFirst(localized.count))
+            settings.displayName = base + suffix
+            generatedName.suffix += suffix
+            settings.generatedName = generatedName
+        }
         let display = displayRegistry.primary
         let origin = display?.visibleFrame.origin ?? .zero
         let offset = Double(records.count % 6) * 55
@@ -179,7 +187,15 @@ final class ModelInstanceManager {
     @discardableResult func duplicate(_ id: UUID) throws -> ModelRecord? {
         guard let source = record(id) else { return nil }
         var settings = source.settings
-        settings.id = UUID(); settings.displayName = uniqueName(source.settings.displayName)
+        settings.id = UUID()
+        let localized = source.settings.localizedDisplayName
+        let unique = uniqueName(localized)
+        if var generatedName = source.settings.generatedName {
+            let suffix = String(unique.dropFirst(localized.count))
+            settings.displayName = source.settings.displayName + suffix
+            generatedName.suffix += suffix
+            settings.generatedName = generatedName
+        } else { settings.displayName = unique }
         settings.windowFrame.x += 45; settings.windowFrame.y += 35
         if let position = settings.displayPosition {
             settings.displayPosition = DisplayPosition(x: position.x + 45, y: position.y + 35)

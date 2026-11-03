@@ -4,6 +4,8 @@ struct ModelOutfit: Equatable, Codable {
     // Empty ID selects the original entry. Other IDs are relative to its directory.
     let id: String
     let name: String
+    var generatedName: GeneratedName?
+    var localizedName: String { generatedName?.text ?? name }
 }
 
 enum ModelOutfitCatalog {
@@ -11,19 +13,19 @@ enum ModelOutfitCatalog {
     static func resolve(_ id: String, relativeTo entry: URL) throws -> URL {
         let root = entry.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
         guard !id.isEmpty, !id.hasPrefix("/"), URL(string: id)?.scheme == nil else {
-            throw invalid("服装引用必须是模型目录内的相对路径。")
+            throw invalid(.key("error.outfit_reference", []))
         }
         let target = root.appendingPathComponent(id).standardizedFileURL.resolvingSymlinksInPath()
-        guard target.path.hasPrefix(root.path + "/") else { throw invalid("服装资源超出模型目录。") }
+        guard target.path.hasPrefix(root.path + "/") else { throw invalid(.key("error.outfit_escape", [])) }
         return target
     }
 
     static func load(_ entry: URL) throws -> [ModelOutfit] {
         if FileManager.default.fileExists(atPath: sidecar(entry).path) {
             let data = try Data(contentsOf: sidecar(entry))
-            guard data.count < 8 * 1024 * 1024 else { throw invalid("服装清单过大。") }
+            guard data.count < 8 * 1024 * 1024 else { throw invalid(.key("error.outfit_size", [])) }
             let outfits = try JSONDecoder().decode([ModelOutfit].self, from: data)
-            guard outfits.first?.id == "", Set(outfits.map(\.id)).count == outfits.count else { throw invalid("服装清单无效。") }
+            guard outfits.first?.id == "", Set(outfits.map(\.id)).count == outfits.count else { throw invalid(.key("error.outfit_catalog", [])) }
             for outfit in outfits where !outfit.id.isEmpty { _ = try resolve(outfit.id, relativeTo: entry) }
             return outfits
         }
@@ -45,7 +47,7 @@ enum ModelOutfitCatalog {
         orderedGroups += groups.keys.filter { !orderedGroups.contains($0) }.sorted {
             $0.localizedStandardCompare($1) == .orderedAscending
         }
-        var result = [ModelOutfit(id: "", name: "默认")]
+        var result = [ModelOutfit(id: "", name: "Default", generatedName: GeneratedName(key: "common.default"))]
         var seen = Set<String>()
         for group in orderedGroups {
             for motion in groups[group] ?? [] {
@@ -76,7 +78,7 @@ enum ModelOutfitCatalog {
 
     static func selectedURL(entry: URL, outfitID: String?, outfits: [ModelOutfit]) throws -> URL {
         guard let id = outfitID, !id.isEmpty else { return entry }
-        guard outfits.contains(where: { $0.id == id }) else { throw invalid("已保存的服装不存在，请重新选择服装或默认服装。") }
+        guard outfits.contains(where: { $0.id == id }) else { throw invalid(.key("error.outfit_missing", [])) }
         return try resolve(id, relativeTo: entry)
     }
 
@@ -84,11 +86,11 @@ enum ModelOutfitCatalog {
         let data = try Data(contentsOf: url)
         guard data.count < 8 * 1024 * 1024,
               let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw invalid("服装描述不是有效的 JSON 对象。")
+            throw invalid(.key("error.outfit_json", []))
         }
         return value
     }
-    private static func invalid(_ message: String) -> NSError {
-        NSError(domain: "Lite2D.Outfit", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    private static func invalid(_ message: LocalizedMessage) -> LocalizedFailure {
+        LocalizedFailure(message: message)
     }
 }

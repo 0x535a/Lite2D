@@ -5,21 +5,24 @@ struct ImportedCharacter {
     let name: String
     let entry: URL
     let outfitCount: Int
+    var generatedName: GeneratedName? = nil
+    var localizedName: String { generatedName?.text ?? name }
 }
 
 enum ModelImportError {
-    static func invalid(_ message: String) -> NSError {
-        NSError(domain: "Lite2D.Import", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    static func invalid(_ message: LocalizedMessage) -> LocalizedFailure {
+        LocalizedFailure(message: message)
     }
+    static func invalid(_ message: String) -> LocalizedFailure { invalid(.literal(message)) }
 }
 
 // A preparation is private and disposable. No model-library changes until commit.
 final class ModelImportPreparation {
     let directory: URL
     let characters: [ImportedCharacter]
-    let warnings: [String]
+    let warnings: [LocalizedMessage]
     let sourceName: String
-    init(directory: URL, characters: [ImportedCharacter], warnings: [String], sourceName: String) {
+    init(directory: URL, characters: [ImportedCharacter], warnings: [LocalizedMessage], sourceName: String) {
         self.directory = directory; self.characters = characters; self.warnings = warnings; self.sourceName = sourceName
     }
     deinit { try? FileManager.default.removeItem(at: directory) }
@@ -37,12 +40,12 @@ final class ModelLibraryImporter {
     }
 
     func prepare(_ source: URL) throws -> ModelImportPreparation {
-        guard source.isFileURL else { throw ModelImportError.invalid("请选择本机模型文件。") }
+        guard source.isFileURL else { throw ModelImportError.invalid(.key("error.local_file", [])) }
         let stage = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("Lite2D-import-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
         do {
             let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard values.isSymbolicLink != true else { throw ModelImportError.invalid("请选择实际模型文件或文件夹，不能导入符号链接。") }
+            guard values.isSymbolicLink != true else { throw ModelImportError.invalid(.key("error.import_symlink", [])) }
             var explicitEntry: URL?
             if values.isDirectory == true {
                 try copyDirectory(source, to: stage)
@@ -61,30 +64,31 @@ final class ModelLibraryImporter {
                 try copyDirectory(source.deletingLastPathComponent(), to: stage)
                 explicitEntry = stage.appendingPathComponent(source.lastPathComponent)
             } else {
-                throw ModelImportError.invalid("支持 LPK、WPK、ZIP、完整模型文件夹和模型入口 JSON。")
+                throw ModelImportError.invalid(.key("error.import_format", []))
             }
             let packaged = explicitEntry == nil ? try ModelPackageDecoder.decode(in: stage) : []
             let stagedFiles = try Self.files(in: stage)
             let stagedSize = try stagedFiles.reduce(0) { try $0 + ($1.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) }
-            guard stagedSize <= Self.limit else { throw ModelImportError.invalid("整理后的模型资源超过 512 MiB。") }
-            let entries: [(String, URL)]
+            guard stagedSize <= Self.limit else { throw ModelImportError.invalid(.key("error.staged_size", [])) }
+            let entries: [(String, URL, GeneratedName?)]
             if !packaged.isEmpty { entries = packaged }
-            else if let explicitEntry { entries = [(source.deletingLastPathComponent().lastPathComponent, explicitEntry)] }
+            else if let explicitEntry { entries = [(source.deletingLastPathComponent().lastPathComponent, explicitEntry, nil)] }
             else { entries = try discover(in: stage, rootName: values.isDirectory == true ? source.lastPathComponent : source.deletingPathExtension().lastPathComponent) }
-            var characters: [ImportedCharacter] = [], warnings: [String] = []
-            for (name, entry) in entries {
+            var characters: [ImportedCharacter] = [], warnings: [LocalizedMessage] = []
+            for (name, entry, generatedName) in entries {
                 do {
                     let valid = try ModelFileValidator.validate(entry)
                     let outfits = try ModelOutfitCatalog.load(entry)
                     for outfit in outfits where !outfit.id.isEmpty {
                         _ = try ModelFileValidator.validate(ModelOutfitCatalog.resolve(outfit.id, relativeTo: entry))
                     }
-                    warnings += valid.warnings.map { "\(name)：\($0)" }
-                    characters.append(ImportedCharacter(name: name, entry: entry, outfitCount: max(1, outfits.count)))
-                } catch { warnings.append("\(name)：\(error.localizedDescription)") }
+                    let label: LocalizedMessage = generatedName.map { .key($0.key, $0.arguments.map { .literal($0) }) } ?? .literal(name)
+                    warnings += valid.warnings.map { .key("format.named_detail", [label, $0]) }
+                    characters.append(ImportedCharacter(name: name, entry: entry, outfitCount: max(1, outfits.count), generatedName: generatedName))
+                } catch { warnings.append(.key("format.named_detail", [generatedName.map { .key($0.key, $0.arguments.map { .literal($0) }) } ?? .literal(name), .failure(error)])) }
             }
             guard !characters.isEmpty else {
-                throw ModelImportError.invalid(warnings.isEmpty ? "没有找到可播放的 Live2D 模型。Spine、场景包及编辑工程暂不支持。" : warnings.joined(separator: "\n"))
+                throw ModelImportError.invalid(warnings.isEmpty ? .key("error.no_models", []) : .joined(warnings, "\n"))
             }
             return ModelImportPreparation(directory: stage, characters: characters, warnings: warnings, sourceName: source.lastPathComponent)
         } catch { try? fm.removeItem(at: stage); throw error }
@@ -124,7 +128,7 @@ final class ModelLibraryImporter {
             let original = preparation.characters[$0]
             let entry = resources.appendingPathComponent(Self.relative(original.entry, to: preparation.directory))
             _ = try ModelFileValidator.validate(entry)
-            return ImportedCharacter(name: original.name, entry: entry, outfitCount: original.outfitCount)
+            return ImportedCharacter(name: original.name, entry: entry, outfitCount: original.outfitCount, generatedName: original.generatedName)
         }
     }
 
@@ -133,14 +137,14 @@ final class ModelLibraryImporter {
         for file in try Self.files(in: source) {
             let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             total += size
-            guard total <= Self.limit else { throw ModelImportError.invalid("模型目录超过 512 MiB，请选择更具体的模型目录。") }
+            guard total <= Self.limit else { throw ModelImportError.invalid(.key("error.directory_size", [])) }
             let target = stage.appendingPathComponent(Self.relative(file, to: source))
             try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.copyItem(at: file, to: target)
         }
     }
 
-    private func discover(in root: URL, rootName: String) throws -> [(String, URL)] {
+    private func discover(in root: URL, rootName: String) throws -> [(String, URL, GeneratedName?)] {
         var entries: [URL] = []
         for file in try Self.files(in: root) where file.pathExtension.lowercased() == "json" {
             if file.deletingLastPathComponent().lastPathComponent == ".lite2d-decoded",
@@ -192,7 +196,7 @@ final class ModelLibraryImporter {
             let basename = entry.lastPathComponent.replacingOccurrences(of: ".model3.json", with: "").replacingOccurrences(of: ".model.json", with: "")
             let parentName = entry.deletingLastPathComponent().path == root.path ? rootName : entry.deletingLastPathComponent().lastPathComponent
             let fallback = entry.lastPathComponent == "model.json" || basename == "model" ? parentName : basename
-            return (options?["name"] as? String ?? fallback, entry)
+            return (options?["name"] as? String ?? fallback, entry, nil)
         }
     }
 
@@ -200,7 +204,7 @@ final class ModelLibraryImporter {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size < 8 * 1024 * 1024,
               let result = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] else {
-            throw ModelImportError.invalid("配置不是有效的 JSON 对象，或超过 8 MiB。")
+            throw ModelImportError.invalid(.key("error.config_json", []))
         }
         return result
     }
@@ -216,15 +220,15 @@ final class ModelLibraryImporter {
         var result: [URL] = [], enumerationError: Error?
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, errorHandler: { _, error in enumerationError = error; return false }) else {
-            throw ModelImportError.invalid("无法读取模型目录。")
+            throw ModelImportError.invalid(.key("error.directory_read", []))
         }
         var count = 0
         for case let url as URL in enumerator {
             count += 1
-            guard count <= 20000 else { throw ModelImportError.invalid("模型目录超过 20,000 项。") }
+            guard count <= 20000 else { throw ModelImportError.invalid(.key("error.directory_count", [])) }
             let values = try url.resourceValues(forKeys: Set(keys))
             guard values.isSymbolicLink != true, values.isRegularFile == true || values.isDirectory == true else {
-                throw ModelImportError.invalid("模型目录包含符号链接或特殊文件，请使用完整的实际资源目录。")
+                throw ModelImportError.invalid(.key("error.directory_special", []))
             }
             if url.lastPathComponent == "__MACOSX" { enumerator.skipDescendants(); continue }
             if url.lastPathComponent == ".DS_Store" { continue }

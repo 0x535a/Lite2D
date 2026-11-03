@@ -3,50 +3,50 @@ import Foundation
 struct ValidatedModel {
     let url: URL
     let legacy: Bool
-    let warnings: [String]
+    let warnings: [LocalizedMessage]
 }
 
 enum ModelFileValidator {
     static func validate(_ url: URL) throws -> ValidatedModel {
         let entry = url.standardizedFileURL.resolvingSymlinksInPath()
         let root = entry.deletingLastPathComponent()
-        func invalid(_ message: String) -> NSError {
-            NSError(domain: "Lite2D.Model", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        func invalid(_ message: LocalizedMessage) -> LocalizedFailure {
+            LocalizedFailure(message: message)
         }
-        guard entry.isFileURL else { throw invalid("请选择本机模型 JSON 文件。") }
+        guard entry.isFileURL else { throw invalid(.key("error.local_json", [])) }
         let data = try Data(contentsOf: entry)
         guard data.count < 8 * 1024 * 1024,
               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw invalid("模型描述不是有效的 JSON 对象。")
+            throw invalid(.key("error.model_json", []))
         }
         let refs = json["FileReferences"] as? [String: Any]
         let legacy = refs == nil && json["model"] is String
-        guard legacy || refs != nil else { throw invalid("不支持的模型格式：需要 Cubism 2 或 Cubism 3+ 模型描述。") }
+        guard legacy || refs != nil else { throw invalid(.key("error.model_format", [])) }
         func resolve(_ name: String) throws -> URL {
             guard !name.isEmpty, !name.hasPrefix("/"), URL(string: name)?.scheme == nil else {
-                throw invalid("模型引用必须是本目录内的相对路径：\(name)")
+                throw invalid(.key("error.model_reference", [.literal(name)]))
             }
             let path = root.appendingPathComponent(name).standardizedFileURL.resolvingSymlinksInPath()
             guard path.path.hasPrefix(root.path + "/") else {
-                throw invalid("模型资源超出资产目录：\(name)")
+                throw invalid(.key("error.model_escape", [.literal(name)]))
             }
             return path
         }
         guard let model = (legacy ? json["model"] : refs?["Moc"]) as? String else {
-            throw invalid("模型描述中缺少 Moc 引用。")
+            throw invalid(.key("error.missing_moc", []))
         }
         let binary = try Data(contentsOf: resolve(model), options: .mappedIfSafe)
         let magic = Array(binary.prefix(4))
         guard binary.count > 32, legacy ? Array(magic.prefix(3)) == [109, 111, 99] : magic == [77, 79, 67, 51] else {
-            throw invalid("模型二进制与描述的 Cubism 版本不符或已损坏。")
+            throw invalid(.key("error.moc_version", []))
         }
         guard let textures = (legacy ? json["textures"] : refs?["Textures"]) as? [String], !textures.isEmpty else {
-            throw invalid("模型没有有效的纹理列表。")
+            throw invalid(.key("error.texture_list", []))
         }
         for name in textures {
             let texture = try resolve(name)
             guard FileManager.default.isReadableFile(atPath: texture.path) else {
-                throw invalid("缺少必要纹理：\(name)")
+                throw invalid(.key("error.missing_texture", [.literal(name)]))
             }
         }
         var optional: [String] = []
@@ -63,10 +63,10 @@ enum ModelFileValidator {
         for item in expressions {
             if let value = item[legacy ? "file" : "File"] as? String { optional.append(value) }
         }
-        var warnings: [String] = []
+        var warnings: [LocalizedMessage] = []
         for name in optional {
             let path = try resolve(name)
-            if !FileManager.default.isReadableFile(atPath: path.path) { warnings.append("可选资源缺失：\(name)") }
+            if !FileManager.default.isReadableFile(atPath: path.path) { warnings.append(.key("error.optional_asset", [.literal(name)])) }
         }
         return ValidatedModel(url: entry, legacy: legacy, warnings: warnings)
     }

@@ -1,10 +1,17 @@
 #pragma once
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <map>
 #include <vector>
 
 namespace Lite2D {
+class LocalizedEngineError : public std::runtime_error {
+public:
+    const std::string key;
+    LocalizedEngineError(const std::string& key, const std::string& detail)
+        : std::runtime_error(detail), key(key) {}
+};
 void startRuntime(const std::string& resources);
 void stopRuntime();
 class NativeHost {
