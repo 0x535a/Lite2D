@@ -73,9 +73,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if resetPage { model.page = .appearance }
         if model.selection == nil { model.selection = model.manager.records.first?.settings.id.uuidString ?? "general" }
         model.objectWillChange.send()
+        let wasVisible = window?.isVisible == true
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        // AppKit hands initial focus to the first text field, which would open the window with the title selected.
+        if !wasVisible { DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(nil) } }
     }
 }
 
@@ -105,10 +108,10 @@ private struct SettingsRootView: View {
                 }
                 Divider()
                 Button(action: { model.status.chooseModels() }) {
-                    Label("添加角色…", systemImage: "plus")
+                    Label(model.status.importInProgress ? "正在导入…" : "添加角色…", systemImage: "plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderless).padding(16)
+                .buttonStyle(.borderless).padding(16).disabled(model.status.importInProgress)
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
         } detail: {
@@ -119,6 +122,11 @@ private struct SettingsRootView: View {
             }
         }
         .frame(minWidth: 800, minHeight: 560)
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !model.status.importInProgress, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
+            model.status.importModels(urls)
+            return true
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in model.objectWillChange.send() }
     }
 }
@@ -126,11 +134,15 @@ private struct SettingsRootView: View {
 private struct RoleSettingsView: View {
     @ObservedObject var model: SettingsWindowModel
     let record: ModelRecord
-    @State private var name: String?
+    @State private var name: String
     @State private var removing = false
     @State private var previewGroup = ""
     @State private var previewIndex = 0
     @FocusState private var editingName: Bool
+    init(model: SettingsWindowModel, record: ModelRecord) {
+        self.model = model; self.record = record
+        _name = State(initialValue: record.settings.displayName)
+    }
     var manager: ModelInstanceManager { model.manager }
     var id: UUID { record.settings.id }
     var settings: ModelInstanceSettings { record.settings }
@@ -143,7 +155,7 @@ private struct RoleSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                TextField("角色名称", text: Binding(get: { name ?? settings.displayName }, set: { name = $0 }))
+                TextField("角色名称", text: $name)
                     .textFieldStyle(.plain).font(.system(size: 25, weight: .semibold))
                     .focused($editingName).onSubmit(commitName)
                     .accessibilityLabel("角色名称")
@@ -175,7 +187,7 @@ private struct RoleSettingsView: View {
         }
         .onChange(of: editingName) { _, focused in if !focused { commitName() } }
         .onChange(of: settings.outfitID) { _, _ in previewIndex = 0 }
-        .onChange(of: settings.displayName) { _, value in if !editingName { name = nil } }
+        .onChange(of: settings.displayName) { _, value in if !editingName { name = value } }
         .onDisappear { commitName() }
         .alert("移除“\(settings.displayName)”？", isPresented: $removing) {
             Button("取消", role: .cancel) {}
@@ -183,10 +195,11 @@ private struct RoleSettingsView: View {
         } message: { Text("不会删除模型文件。可在通用设置中撤销最近一次移除。") }
     }
     private func commitName() {
-        let cleaned = (name ?? settings.displayName).trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard manager.record(id) != nil else { return }
         if !cleaned.isEmpty && cleaned != settings.displayName { manager.mutate(id) { $0.displayName = cleaned } }
-        name = nil
+        // An empty or whitespace-only name reverts to the stored one.
+        name = cleaned.isEmpty ? settings.displayName : cleaned
     }
     private func notice(_ message: String, button: String, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -214,10 +227,12 @@ private struct RoleSettingsView: View {
                     ForEach(expressions, id: \.self) { Text($0).tag($0) }
                 }
             }
-            LabeledContent("大小", value: "\(Int((settings.scale * 100).rounded()))%")
-            HStack {
-                Button("缩小", systemImage: "minus.magnifyingglass") { manager.zoom(id, factor: 1 / 1.15) }
-                Button("放大", systemImage: "plus.magnifyingglass") { manager.zoom(id, factor: 1.15) }
+            LabeledContent("大小") {
+                HStack(spacing: 8) {
+                    Text("\(Int((settings.scale * 100).rounded()))%").monospacedDigit().foregroundStyle(.secondary)
+                    Stepper("大小", onIncrement: { manager.zoom(id, factor: 1.15) }, onDecrement: { manager.zoom(id, factor: 1 / 1.15) })
+                        .labelsHidden()
+                }
             }.disabled(record.error != nil)
         }
         Section {
@@ -314,21 +329,27 @@ private struct RoleSettingsView: View {
             Picker("帧率", selection: model.binding(record, \.targetFPS)) { Text("30 FPS").tag(30); Text("60 FPS").tag(60) }
             Text("较低帧率可减少资源消耗，每个角色独立保存。").font(.caption).foregroundStyle(.secondary)
         }
-        Section("模型文件") {
-            Text(settings.modelPath).textSelection(.enabled).font(.callout).foregroundStyle(.secondary).lineLimit(4)
-            HStack {
-                Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: settings.modelPath)]) }
-                Button("更换模型…") { model.status.chooseReplacement(id) }
+        Section {
+            LabeledContent("位置") {
+                Text((settings.modelPath as NSString).abbreviatingWithTildeInPath)
+                    .lineLimit(2).truncationMode(.middle).multilineTextAlignment(.trailing).textSelection(.enabled)
             }
-            Text("更换模型保留位置和显示设置，重置服装、表情及动作配置。").font(.caption).foregroundStyle(.secondary)
-        }
-        Section("角色管理") {
-            Button("复制角色") {
-                model.status.attempt {
-                    if let copy = try manager.duplicate(id) { model.selection = copy.settings.id.uuidString }
+            LabeledContent("文件") {
+                HStack {
+                    Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: settings.modelPath)]) }
+                    Button("更换模型…") { model.status.chooseReplacement(id) }
                 }
             }
-            Button("移除角色…", role: .destructive) { removing = true }
+        } header: { Text("模型文件") } footer: { Text("更换模型保留位置和显示设置，重置服装、表情及动作配置。") }
+        Section("角色管理") {
+            LabeledContent("复制角色") {
+                Button("复制") {
+                    model.status.attempt {
+                        if let copy = try manager.duplicate(id) { model.selection = copy.settings.id.uuidString }
+                    }
+                }
+            }
+            LabeledContent("移除角色") { Button("移除…", role: .destructive) { removing = true } }
         }
     }
 }
@@ -340,7 +361,7 @@ private struct MotionWeightSettingRow: View {
     @State private var text: String
     init(motion: ModelMotion, weight: Double, update: @escaping (Double) -> Void) {
         self.motion = motion; self.weight = weight; self.update = update
-        _text = State(initialValue: MotionWeightEditorModel.display(weight))
+        _text = State(initialValue: ModelMotion.displayWeight(weight))
     }
     @FocusState private var focused: Bool
     private var value: Double? { Double(text).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
@@ -348,21 +369,27 @@ private struct MotionWeightSettingRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text(motion.name)
-                Text("默认 \(MotionWeightEditorModel.display(motion.defaultWeight))").font(.caption).foregroundStyle(.secondary)
+                Text("默认 \(ModelMotion.displayWeight(motion.defaultWeight))").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 6) {
                 TextField("权重", text: $text).labelsHidden().textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing).frame(width: 90).focused($focused)
+                    .multilineTextAlignment(.trailing).monospacedDigit().frame(width: 72).focused($focused)
+                    .foregroundStyle(value == nil ? Color.red : Color.primary)
                     .accessibilityLabel("\(motion.group) · \(motion.name) 权重")
-                if value == nil { Text("请输入不小于 0 的数字").font(.caption).foregroundStyle(.red) }
+                Stepper("权重", onIncrement: { step(1) }, onDecrement: { step(-1) }).labelsHidden()
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
+        .help(value == nil ? "请输入不小于 0 的数字" : "")
         .onChange(of: text) { _, _ in if let value, value != weight { update(value) } }
-        .onChange(of: weight) { _, value in if !focused { text = MotionWeightEditorModel.display(value) } }
-        .onChange(of: focused) { _, value in if !value { text = MotionWeightEditorModel.display(weight) } }
+        .onChange(of: weight) { _, value in if !focused { text = ModelMotion.displayWeight(value) } }
+        .onChange(of: focused) { _, value in if !value { text = ModelMotion.displayWeight(weight) } }
+    }
+    private func step(_ delta: Double) {
+        let next = max(0, (value ?? weight) + delta)
+        text = ModelMotion.displayWeight(next)
     }
 }
 

@@ -32,10 +32,10 @@ set_property(TARGET Framework PROPERTY SOURCES "${FRAMEWORK_SOURCES}")
 target_include_directories(Framework PRIVATE "${SDK}/Framework/src/Rendering/OpenGL")
 target_link_libraries(Framework PUBLIC "${CORE}/lib/macos/arm64/libLive2DCubismCore.a" glew_s "-framework OpenGL")
 
-add_library(Lite2DEngine STATIC Engine/NativeHost.mm Engine/LegacyHost.mm Bridge/Live2DBridge.mm)
+add_library(Lite2DEngine STATIC Engine/NativeHost.mm Engine/LegacyHost.mm Bridge/Live2DBridge.mm Bridge/ModelArchive.mm)
 target_include_directories(Lite2DEngine PRIVATE Engine Bridge "${THIRD}/stb")
 target_compile_options(Lite2DEngine PRIVATE -fobjc-arc -Wno-deprecated-declarations)
-target_link_libraries(Lite2DEngine PUBLIC Framework "-framework Foundation" "-framework AppKit" "-framework JavaScriptCore")
+target_link_libraries(Lite2DEngine PUBLIC Framework "-framework Foundation" "-framework AppKit" "-framework JavaScriptCore" archive)
 
 file(GLOB APP_SOURCES CONFIGURE_DEPENDS "App/*.swift")
 add_executable(Lite2D MACOSX_BUNDLE ${APP_SOURCES})

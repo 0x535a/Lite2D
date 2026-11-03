@@ -18,6 +18,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     let statusItem: NSStatusItem
     let menu = NSMenu()
     lazy var settingsWindow = SettingsWindowController(status: self)
+    private(set) var importInProgress = false
+    private let importer = ModelLibraryImporter()
+    private var importPanel: NSPanel?
     init(manager: ModelInstanceManager) {
         self.manager = manager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -71,7 +74,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(item(manager.allHidden ? "恢复显示" : "隐藏所有角色", enabled: !manager.records.isEmpty) { [weak self] in self?.manager.toggleAllHidden() })
-        menu.addItem(item("添加角色…") { [weak self] in self?.chooseModels() })
+        menu.addItem(item(importInProgress ? "正在导入角色…" : "添加角色…", enabled: !importInProgress) { [weak self] in self?.chooseModels() })
         let preferences = item("设置…") { [weak self] in self?.settingsWindow.show() }
         preferences.keyEquivalent = ","; menu.addItem(preferences)
         menu.addItem(.separator())
@@ -90,55 +93,70 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if record.settings.interactionMode == .edit { return "调整中" }
         return "显示中"
     }
-    func attempt(_ body: () throws -> Void) {
+    func attempt(title: String = "模型操作失败", _ body: () throws -> Void) {
         do { try body() }
         catch {
-            let alert = NSAlert(); alert.messageText = "模型操作失败"; alert.informativeText = error.localizedDescription
+            let alert = NSAlert(); alert.messageText = title; alert.informativeText = error.localizedDescription
             NSApp.activate(ignoringOtherApps: true); alert.runModal()
         }
     }
     private func panel(multiple: Bool) -> NSOpenPanel {
-        let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = multiple
-        panel.allowsMultipleSelection = multiple; panel.allowedContentTypes = [.json]
-        panel.message = "选择模型 JSON；文件夹中的模型会分别创建独立实例。"
+        let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = multiple
+        panel.allowedContentTypes = [.json, .zip] + ["lpk", "wpk"].compactMap { UTType(filenameExtension: $0) }
+        panel.message = "选择 LPK、WPK、ZIP、模型文件夹或入口 JSON；资源将保存到 Lite2D 模型库。"
         return panel
     }
     func chooseModels() {
+        guard !importInProgress else { return }
         let panel = panel(multiple: true); NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK else { return }
-        var lastAdded: UUID?
-        for url in panel.urls {
-            var isDirectory: ObjCBool = false
-            _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-            var candidates = [url]
-            if isDirectory.boolValue {
-                candidates = (FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? [])
-                    .filter { $0.lastPathComponent == "model.json" || $0.lastPathComponent.hasSuffix(".model3.json") || $0.lastPathComponent.hasSuffix(".model.json") }
-                    .sorted { $0.path < $1.path }
-            }
-            for candidate in candidates { attempt { lastAdded = try manager.add(candidate).settings.id } }
-        }
-        if let id = lastAdded { settingsWindow.show(role: id, resetPage: true) }
+        importModels(panel.urls)
     }
     func chooseReplacement(_ id: UUID) {
+        guard !importInProgress else { return }
         let panel = panel(multiple: false); NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        attempt { try manager.replace(id, with: url) }
+        importModels([url], replacing: id)
     }
-    func editMotionWeights(_ id: UUID) {
-        guard let record = manager.record(id), let view = record.controller?.view, !view.motions.isEmpty else { return }
-        let motions = view.motions
-        switch MotionWeightEditor.run(title: "\(record.settings.displayName) · 动作权重", motions: motions,
-                                      overrides: record.settings.motionWeightOverrides) {
-        case .save(let overrides):
-            manager.setMotionWeights(id, overrides: overrides)
-        case .reset:
-            // Only clear the displayed motions; other outfits retain their overrides.
-            var overrides = record.settings.motionWeightOverrides
-            for motion in motions { overrides.removeValue(forKey: motion.key) }
-            manager.setMotionWeights(id, overrides: overrides)
-        case .cancel:
-            break
+    func importModels(_ urls: [URL], replacing id: UUID? = nil) {
+        guard !importInProgress, !urls.isEmpty else { return }
+        importInProgress = true
+        settingsWindow.model.objectWillChange.send()
+        let progressModel = ImportProgressModel()
+        let progress = ImportProgressPanel.make(model: progressModel)
+        progress.makeKeyAndOrderFront(nil); importPanel = progress
+        Task { @MainActor in
+            defer {
+                progress.orderOut(nil); importPanel = nil; importInProgress = false
+                settingsWindow.model.objectWillChange.send(); rebuild()
+            }
+            var lastAdded: UUID?, failures: [String] = []
+            for url in urls {
+                progressModel.detail = url.lastPathComponent
+                do {
+                    let preparation = try await Task.detached { [importer] in try importer.prepare(url) }.value
+                    progress.orderOut(nil)
+                    let selected = selectCharacters(preparation, single: id != nil)
+                    guard !selected.isEmpty else { progress.makeKeyAndOrderFront(nil); continue }
+                    progress.makeKeyAndOrderFront(nil)
+                    let characters = try await Task.detached { [importer] in try importer.commit(preparation, indices: selected) }.value
+                    for character in characters {
+                        do {
+                            if let id { try manager.replace(id, with: character.entry); lastAdded = id }
+                            else { lastAdded = try manager.add(character.entry, name: character.name).settings.id }
+                        } catch { failures.append("\(character.name)：\(error.localizedDescription)") }
+                    }
+                } catch { failures.append("\(url.lastPathComponent)：\(error.localizedDescription)") }
+            }
+            progress.orderOut(nil)
+            if let lastAdded { settingsWindow.show(role: lastAdded, resetPage: true) }
+            if !failures.isEmpty { attempt(title: failures.count == urls.count ? "导入失败" : "部分角色导入失败") { throw ModelImportError.invalid(failures.joined(separator: "\n\n")) } }
         }
+    }
+    private func selectCharacters(_ preparation: ModelImportPreparation, single: Bool) -> [Int] {
+        if preparation.characters.count == 1 && preparation.warnings.isEmpty { return [0] }
+        return CharacterPicker.run(sourceName: preparation.sourceName, characters: preparation.characters,
+                                   warnings: preparation.warnings, single: single) ?? []
     }
 }

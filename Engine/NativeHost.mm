@@ -1,4 +1,5 @@
 #include "NativeHost.hpp"
+#import <Foundation/Foundation.h>
 #include <GL/glew.h>
 #include <CubismFramework.hpp>
 #include <ICubismAllocator.hpp>
@@ -45,6 +46,18 @@ std::vector<unsigned char> readFile(const std::string& path) {
  std::ifstream f(path,std::ios::binary);
  if(!f) throw std::runtime_error("Cannot read: "+path);
  return {std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>()};
+}
+std::vector<unsigned char> readJsonFile(const std::string& path) {
+ // R5's numeric parser requires newlines/commas after numbers. Canonicalize
+ // valid compact JSON at the host boundary without altering users' files.
+ auto raw=readFile(path);
+ NSData* data=[NSData dataWithBytes:raw.data() length:raw.size()];
+ id object=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+ if(!object)throw std::runtime_error("Invalid model JSON: "+path);
+ NSData* formatted=[NSJSONSerialization dataWithJSONObject:object options:NSJSONWritingPrettyPrinted error:nil];
+ if(!formatted)throw std::runtime_error("Cannot normalize model JSON: "+path);
+ auto bytes=static_cast<const unsigned char*>(formatted.bytes);
+ return {bytes,bytes+formatted.length};
 }
 csmByte* shaderFile(const std::string path,csmSizeInt* size) {
  try {
@@ -100,7 +113,8 @@ public:
   CubismRenderer::StaticRelease();
  }
  std::vector<unsigned char> asset(const char* name) {
-  return readFile((directory/name).string());
+  auto path=directory/name;
+  return path.extension()==".json"?readJsonFile(path.string()):readFile(path.string());
  }
  bool has(const char* name){
   auto id=CubismFramework::GetIdManager()->GetId(name);
@@ -111,8 +125,9 @@ public:
   glewExperimental=GL_TRUE;
   if(glewInit()!=GLEW_OK)throw std::runtime_error("GLEW initialization failed");
   while(glGetError()!=GL_NO_ERROR){}
-  directory=std::filesystem::path(path).parent_path();auto json=readFile(path);
+  directory=std::filesystem::path(path).parent_path();auto json=readJsonFile(path);
   settings=std::make_unique<CubismModelSettingJson>(json.data(),(int)json.size());
+  if(!settings->IsValid())throw std::runtime_error("Model JSON is unsupported by Cubism parser");
   auto moc=asset(settings->GetModelFileName());LoadModel(moc.data(),(int)moc.size(),true);
   if(!_model)throw std::runtime_error("Invalid or unsupported moc3");
   auto optional=[&](const char* name,auto load){

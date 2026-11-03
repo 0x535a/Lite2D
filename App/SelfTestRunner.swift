@@ -294,7 +294,7 @@ final class SelfTestRunner {
         } else { throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Native test model must have expressions"]) }
         manager.play(a, group: "tap", index: 0)
         manager.setIdle(a, group: "idle")
-        try testWeightEditor()
+        try testCharacterPicker()
         try testClickInteraction()
         let motion = try view(a).motions.first { $0.group == "idle" }!
         let otherWeights = manager.record(duplicate)!.settings.motionWeightOverrides
@@ -320,35 +320,62 @@ final class SelfTestRunner {
             later(3) { try self.measureFPS() }
         }
     }
-    private func testWeightEditor() throws {
-        var rowCount = 0
-        var imageSaved = false
-        let timer = Timer(timeInterval: 0.8, repeats: false) { [self] _ in
-            if let model = MotionWeightEditor.current, let content = MotionWeightEditor.window?.contentView {
-                rowCount = model.rows.count
-                // cacheDisplay renders SwiftUI incompletely; capture the real window instead.
-                let png = output.appendingPathComponent("motion-weight-editor.png")
-                let capture = Process()
-                capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-                capture.arguments = ["-x", "-o", "-l", String(MotionWeightEditor.window!.windowNumber), png.path]
-                try? capture.run(); capture.waitUntilExit()
-                imageSaved = FileManager.default.fileExists(atPath: png.path)
-                model.rows[0].text = "2.5"
-                model.finish(.save(model.savedOverrides()))
-            } else { NSApp.stopModal() }
+    private func testCharacterPicker() throws {
+        let characters = ["角色甲", "角色乙"].enumerated().map {
+            ImportedCharacter(name: $0.element, entry: output, outfitCount: $0.offset + 1)
         }
-        RunLoop.main.add(timer, forMode: .common)
-        status.editMotionWeights(a)
-        try check(rowCount == (try view(a)).motions.count && imageSaved,
-                  "Weight editor lists every motion and renders a preview")
-        let first = try view(a).motions[0]
-        try check(manager.record(a)!.settings.motionWeightOverrides[first.key] == 2.5,
-                  "Weight editor saves a fractional weight")
-        let restore = Timer(timeInterval: 0.4, repeats: false) { _ in MotionWeightEditor.current?.finish(.reset) }
-        RunLoop.main.add(restore, forMode: .common)
-        status.editMotionWeights(a)
-        try check(manager.record(a)!.settings.motionWeightOverrides.isEmpty,
-                  "Weight editor restores model defaults")
+        let warnings = ["已跳过 1 个无法识别的文件。"]
+        func capture(_ name: String) -> Bool {
+            guard let window = CharacterPicker.window else { return false }
+            let png = output.appendingPathComponent(name)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-o", "-l", String(window.windowNumber), png.path]
+            try? process.run(); process.waitUntilExit()
+            return FileManager.default.fileExists(atPath: png.path)
+        }
+        var shotsSaved = 0
+        // Multi-select: everything starts selected; unchecking everything disables confirmation.
+        let multi = Timer(timeInterval: 0.8, repeats: false) { _ in
+            guard let model = CharacterPicker.current else { NSApp.stopModal(); return }
+            if capture("character-picker-multi.png") { shotsSaved += 1 }
+            model.toggleAll()
+            let emptyBlocked = !model.canConfirm
+            model.toggleAll(); model.set(0, selected: false)
+            model.finish(emptyBlocked ? model.selection.sorted() : [-1])
+        }
+        RunLoop.main.add(multi, forMode: .common)
+        let chosen = CharacterPicker.run(sourceName: "multi.lpk", characters: characters, warnings: warnings, single: false)
+        try check(chosen == [1] && shotsSaved == 1, "Character picker multi-select defaults to all, blocks empty, and renders")
+        // Single-select: exactly one row, first selected, choosing another replaces it.
+        let single = Timer(timeInterval: 0.8, repeats: false) { _ in
+            guard let model = CharacterPicker.current else { NSApp.stopModal(); return }
+            if capture("character-picker-single.png") { shotsSaved += 1 }
+            model.set(1, selected: true)
+            model.finish(model.canConfirm ? model.selection.sorted() : [-1])
+        }
+        RunLoop.main.add(single, forMode: .common)
+        let replaced = CharacterPicker.run(sourceName: "multi.lpk", characters: characters, warnings: [], single: true)
+        try check(replaced == [1] && shotsSaved == 2, "Character picker single-select keeps exactly one character")
+        let cancel = Timer(timeInterval: 0.4, repeats: false) { _ in CharacterPicker.current?.cancel() }
+        RunLoop.main.add(cancel, forMode: .common)
+        try check(CharacterPicker.run(sourceName: "multi.lpk", characters: characters, warnings: [], single: false) == nil,
+                  "Character picker cancel returns no selection")
+        // The import progress panel is non-modal: show it, capture it, and make sure it closes cleanly.
+        let progressModel = ImportProgressModel()
+        progressModel.detail = "multi.lpk"
+        let progress = ImportProgressPanel.make(model: progressModel)
+        progress.makeKeyAndOrderFront(nil)
+        later(0.8) { [self] in
+            let png = output.appendingPathComponent("import-progress.png")
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-o", "-l", String(progress.windowNumber), png.path]
+            try? process.run(); process.waitUntilExit()
+            let visible = progress.isVisible
+            progress.orderOut(nil)
+            try check(visible && FileManager.default.fileExists(atPath: png.path), "Import progress panel is visible and renders")
+        }
     }
     private func testClickInteraction() throws {
         let record = manager.record(a)!, other = manager.record(duplicate)!
