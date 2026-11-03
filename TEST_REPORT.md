@@ -164,3 +164,16 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 原生普通模型、包内原生角色、真实工坊 Cubism 3+ 与 Cubism 2 导入副本分别通过 `probe_app.py` 新进程 GPU 验证：31 帧、GL error 0、存在可见及透明像素。结果位于 `.local/verification/import-native`、`import-outfit`、`import-real-native`、`import-real-legacy`。
 - 实测发现固定 Cubism R5 解析器拒绝部分紧凑数字 JSON，已在原生加载边界统一格式化并加入 SDK 解析有效性检查；修复后包内角色 GPU 验证通过。
 - 既有 `SettingsAndValidationTests.swift` 通过。GUI 确认文件选择提示、多角色/服装数量、取消后未创建实例；使用隔离设置，未改日常角色。拖入、真实 EX 界面导出的 WPK 变体、全量 EX 控制器不属于本次已验证结果。
+
+
+## 四语 i18n 验证（2026-11-03）
+
+- 四语资源：`zh-Hans` / `zh-Hant` / `en` / `ja`，每种 210 个 key；key 集合、非空文案和动态占位符一致。
+- `python3 scripts/test_localization.py` 通过：语言匹配、偏好持久化、英语单复数与回退、缓存错误重译、作者/旧名称保留、生成名称序列化兼容。
+- `python3 scripts/test_model_import.py` 通过：归档/目录/JSON、角色与服装、去重、源文件删除、异常输入；断言使用稳定错误身份。
+- 设置与校验测试通过：旧格式迁移、往返保存、损坏备份、真实模型、路径校验、屏幕绑定。
+- Release 构建通过；既有 OpenGL 弃用警告仍存在。
+- 应用内集成：350 项通过；新进程恢复：19 项通过。语言切换保留页面/角色选择、模型设置和控制器；未提交输入及文字选区保持不变，切换不会提交改名。
+- 四语设置页 16 张截图已生成并检查；另验证已打开的导入选择窗口切换后更新标题、保留选择。
+- 本地截图：`.local/verification/integration/localization-*.png`；拼图：`.local/verification/localization/settings-contact-sheet.png`。
+- 系统弹窗允许重启后生效；本轮未逐个验证 macOS 系统弹窗的语言缓存行为。

@@ -3,7 +3,8 @@ import Foundation
 final class SettingsStore {
     let url: URL
     private var pending: DispatchWorkItem?
-    private(set) var lastError: String?
+    private var failure: LocalizedMessage?
+    var lastError: String? { failure?.text }
 
     init(url: URL? = nil) {
         if let url { self.url = url }
@@ -18,7 +19,7 @@ final class SettingsStore {
         guard FileManager.default.fileExists(atPath: url.path) else { return AppSettings() }
         do { return try JSONDecoder().decode(AppSettings.self, from: Data(contentsOf: url)) }
         catch {
-            lastError = "读取设置失败，已保留原文件：\(error.localizedDescription)"
+            failure = .key("error.settings_read", [.failure(error)])
             let backup = url.deletingPathExtension().appendingPathExtension("corrupt-\(UUID().uuidString).json")
             try? FileManager.default.copyItem(at: url, to: backup)
             return AppSettings()
@@ -36,7 +37,7 @@ final class SettingsStore {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(settings).write(to: url, options: .atomic)
-            lastError = nil
-        } catch { lastError = "保存设置失败：\(error.localizedDescription)"; NSLog("%@", lastError!) }
+            failure = nil
+        } catch { failure = .key("error.settings_write", [.failure(error)]); NSLog("%@", lastError!) }
     }
 }

@@ -21,15 +21,24 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private(set) var importInProgress = false
     private let importer = ModelLibraryImporter()
     private var importPanel: NSPanel?
+    private var languageObserver: NSObjectProtocol?
     init(manager: ModelInstanceManager) {
         self.manager = manager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         statusItem.button?.image = NSImage(systemSymbolName: "person.crop.square", accessibilityDescription: "Lite2D")
-        statusItem.button?.toolTip = "Lite2D · 独立模型实例"
+        statusItem.button?.toolTip = L10n.text("status.tooltip")
         menu.delegate = self; menu.autoenablesItems = false; statusItem.menu = menu
+        languageObserver = NotificationCenter.default.addObserver(forName: .appLanguageChanged, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            statusItem.button?.toolTip = L10n.text("status.tooltip")
+            importPanel?.title = L10n.text("import.title")
+            for record in manager.records { record.controller?.window.title = record.settings.localizedDisplayName }
+            rebuild()
+        }
         rebuild()
     }
+    deinit { if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) } }
     func menuNeedsUpdate(_ menu: NSMenu) { rebuild() }
     func menuWillOpen(_ menu: NSMenu) { manager.clickInteractionSuspended = true }
     func menuDidClose(_ menu: NSMenu) { manager.clickInteractionSuspended = false }
@@ -44,67 +53,67 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func rebuild() {
         menu.removeAllItems()
         if manager.records.isEmpty {
-            let empty = NSMenuItem(title: "还没有角色", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L10n.text("role.empty"), action: nil, keyEquivalent: "")
             empty.isEnabled = false; menu.addItem(empty)
         }
         for record in manager.records {
             let settings = record.settings, id = settings.id
-            let state = roleStatus(record)
-            let title = roleName(record) + (state == "显示中" ? "" : " · \(state)")
+            let state = roleState(record)
+            let title = roleName(record) + (state == .visible ? "" : " · \(state.title)")
             let model = submenu(title, into: menu)
-            model.addItem(item(settings.isVisible ? "隐藏角色" : "显示角色", enabled: record.error == nil) { [weak self] in
+            model.addItem(item(settings.isVisible ? L10n.text("role.hide") : L10n.text("role.show"), enabled: record.error == nil) { [weak self] in
                 self?.manager.mutate(id) { $0.isVisible.toggle() }
             })
-            model.addItem(item(settings.interactionMode == .edit ? "完成调整" : "调整位置与大小",
+            model.addItem(item(settings.interactionMode == .edit ? L10n.text("placement.done") : L10n.text("placement.adjust"),
                                enabled: record.error == nil && manager.isDisplayConnected(record) && settings.isVisible && !manager.allHidden) { [weak self] in self?.manager.edit(id) })
-            model.addItem(item(settings.animationPaused ? "继续播放动作" : "暂停动作", enabled: record.error == nil) { [weak self] in
+            model.addItem(item(settings.animationPaused ? L10n.text("motion.resume") : L10n.text("motion.pause"), enabled: record.error == nil) { [weak self] in
                 self?.manager.mutate(id) { $0.animationPaused.toggle() }
             })
             if record.outfits.count > 1 || settings.outfitID != nil {
-                let outfits = submenu("服装", into: model)
-                let options = record.outfits.isEmpty ? [ModelOutfit(id: "", name: "默认")] : record.outfits
+                let outfits = submenu(L10n.text("outfit.section"), into: model)
+                let options = record.outfits.isEmpty ? [ModelOutfit(id: "", name: "Default", generatedName: GeneratedName(key: "common.default"))] : record.outfits
                 for outfit in options {
-                    outfits.addItem(item(outfit.name, checked: (settings.outfitID ?? "") == outfit.id) { [weak self] in
+                    outfits.addItem(item(outfit.localizedName, checked: (settings.outfitID ?? "") == outfit.id) { [weak self] in
                         self?.attempt { try self?.manager.setOutfit(id, outfitID: outfit.id) }
                     })
                 }
             }
             model.addItem(.separator())
-            model.addItem(item("角色设置…") { [weak self] in self?.settingsWindow.show(role: id) })
+            model.addItem(item(L10n.text("role.settings")) { [weak self] in self?.settingsWindow.show(role: id) })
         }
         menu.addItem(.separator())
-        menu.addItem(item(manager.allHidden ? "恢复显示" : "隐藏所有角色", enabled: !manager.records.isEmpty) { [weak self] in self?.manager.toggleAllHidden() })
-        menu.addItem(item(importInProgress ? "正在导入角色…" : "添加角色…", enabled: !importInProgress) { [weak self] in self?.chooseModels() })
-        let preferences = item("设置…") { [weak self] in self?.settingsWindow.show() }
+        menu.addItem(item(manager.allHidden ? L10n.text("role.restore") : L10n.text("role.hide_all"), enabled: !manager.records.isEmpty) { [weak self] in self?.manager.toggleAllHidden() })
+        menu.addItem(item(importInProgress ? L10n.text("import.busy_menu") : L10n.text("role.add"), enabled: !importInProgress) { [weak self] in self?.chooseModels() })
+        let preferences = item(L10n.text("settings.open")) { [weak self] in self?.settingsWindow.show() }
         preferences.keyEquivalent = ","; menu.addItem(preferences)
         menu.addItem(.separator())
-        let quit = item("退出 Lite2D") { NSApp.terminate(nil) }; quit.keyEquivalent = "q"; menu.addItem(quit)
+        let quit = item(L10n.text("app.quit")) { NSApp.terminate(nil) }; quit.keyEquivalent = "q"; menu.addItem(quit)
     }
     func roleName(_ record: ModelRecord) -> String {
-        let matches = manager.records.filter { $0.settings.displayName == record.settings.displayName }
-        guard matches.count > 1, let index = matches.firstIndex(where: { $0.settings.id == record.settings.id }) else { return record.settings.displayName }
-        return "\(record.settings.displayName)（\(index + 1)）"
+        let matches = manager.records.filter { $0.settings.localizedDisplayName == record.settings.localizedDisplayName }
+        guard matches.count > 1, let index = matches.firstIndex(where: { $0.settings.id == record.settings.id }) else { return record.settings.localizedDisplayName }
+        return L10n.text("format.numbered", record.settings.localizedDisplayName, String(index + 1))
     }
-    func roleStatus(_ record: ModelRecord) -> String {
-        if record.error != nil { return "加载失败" }
-        if !manager.isDisplayConnected(record) { return record.settings.displayUUID == nil ? "未绑定屏幕" : "屏幕未连接" }
-        if !record.settings.isVisible { return "已隐藏" }
-        if manager.allHidden { return "全局隐藏中" }
-        if record.settings.interactionMode == .edit { return "调整中" }
-        return "显示中"
+    func roleStatus(_ record: ModelRecord) -> String { roleState(record).title }
+    func roleState(_ record: ModelRecord) -> RoleStatus {
+        if record.error != nil { return .failed }
+        if !manager.isDisplayConnected(record) { return record.settings.displayUUID == nil ? .unbound : .disconnected }
+        if !record.settings.isVisible { return .hidden }
+        if manager.allHidden { return .allHidden }
+        if record.settings.interactionMode == .edit { return .editing }
+        return .visible
     }
-    func attempt(title: String = "模型操作失败", _ body: () throws -> Void) {
+    func attempt(title: String = "error.operation", _ body: () throws -> Void) {
         do { try body() }
         catch {
-            let alert = NSAlert(); alert.messageText = title; alert.informativeText = error.localizedDescription
-            NSApp.activate(ignoringOtherApps: true); alert.runModal()
+            LocalizedErrorDialog.run(titleKey: title, message: .failure(error))
         }
     }
     private func panel(multiple: Bool) -> NSOpenPanel {
         let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = true
         panel.allowsMultipleSelection = multiple
         panel.allowedContentTypes = [.json, .zip] + ["lpk", "wpk"].compactMap { UTType(filenameExtension: $0) }
-        panel.message = "选择 LPK、WPK、ZIP、模型文件夹或入口 JSON；资源将保存到 Lite2D 模型库。"
+        panel.message = L10n.text("import.panel_help")
         return panel
     }
     func chooseModels() {
@@ -131,7 +140,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 progress.orderOut(nil); importPanel = nil; importInProgress = false
                 settingsWindow.model.objectWillChange.send(); rebuild()
             }
-            var lastAdded: UUID?, failures: [String] = []
+            var lastAdded: UUID?, failures: [LocalizedMessage] = []
             for url in urls {
                 progressModel.detail = url.lastPathComponent
                 do {
@@ -144,14 +153,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                     for character in characters {
                         do {
                             if let id { try manager.replace(id, with: character.entry); lastAdded = id }
-                            else { lastAdded = try manager.add(character.entry, name: character.name).settings.id }
-                        } catch { failures.append("\(character.name)：\(error.localizedDescription)") }
+                            else { lastAdded = try manager.add(character.entry, name: character.name, generatedName: character.generatedName).settings.id }
+                        } catch { failures.append(.key("format.named_detail", [character.generatedName.map { .key($0.key, $0.arguments.map { .literal($0) }) } ?? .literal(character.name), .failure(error)])) }
                     }
-                } catch { failures.append("\(url.lastPathComponent)：\(error.localizedDescription)") }
+                } catch { failures.append(.key("format.named_detail", [.literal(url.lastPathComponent), .failure(error)])) }
             }
             progress.orderOut(nil)
             if let lastAdded { settingsWindow.show(role: lastAdded, resetPage: true) }
-            if !failures.isEmpty { attempt(title: failures.count == urls.count ? "导入失败" : "部分角色导入失败") { throw ModelImportError.invalid(failures.joined(separator: "\n\n")) } }
+            if !failures.isEmpty { attempt(title: lastAdded == nil ? "import.failed" : "import.partial_failure") { throw ModelImportError.invalid(.joined(failures, "\n\n")) } }
         }
     }
     private func selectCharacters(_ preparation: ModelImportPreparation, single: Bool) -> [Int] {
@@ -159,4 +168,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         return CharacterPicker.run(sourceName: preparation.sourceName, characters: preparation.characters,
                                    warnings: preparation.warnings, single: single) ?? []
     }
+}
+
+enum RoleStatus: String {
+    case failed, unbound, disconnected, hidden, allHidden = "all_hidden", editing, visible
+    var title: String { L10n.text("role.status." + rawValue) }
 }

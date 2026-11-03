@@ -27,14 +27,12 @@ final class LaunchAtLogin {
         var registrationError: Error?
         do { try await setEnabled(true) } catch { registrationError = error }
         guard isRegistered else {
-            throw registrationError ?? NSError(domain: "Lite2D.LoginItem", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "系统未接受登录项登记。"])
+            throw registrationError ?? LocalizedFailure(message: .key("error.login_register", []))
         }
         let registered = statusName
         try await setEnabled(false)
         guard !isRegistered else {
-            throw NSError(domain: "Lite2D.LoginItem", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "登录项测试登记尚未撤销。"])
+            throw LocalizedFailure(message: .key("error.login_cleanup", []))
         }
         return ["before": original, "registered": registered, "after": statusName, "result": "registrationAndRemovalPassed"]
     }

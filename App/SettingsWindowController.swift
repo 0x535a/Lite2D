@@ -44,17 +44,19 @@ final class SettingsWindowModel: ObservableObject {
 }
 
 enum RoleSettingsPage: String, CaseIterable, Identifiable {
-    case appearance = "外观与摆放", interaction = "动作与互动", advanced = "高级"
+    case appearance, interaction, advanced
+    var title: String { L10n.text("settings." + rawValue) }
     var id: String { rawValue }
 }
 
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let model: SettingsWindowModel
+    private var languageObserver: NSObjectProtocol?
     init(status: StatusBarController) {
         model = SettingsWindowModel(status: status)
         let host = NSHostingController(rootView: SettingsRootView(model: model))
         let window = NSWindow(contentViewController: host)
-        window.title = "Lite2D 设置"
+        window.title = L10n.text("settings.title")
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 920, height: 700))
@@ -62,7 +64,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.delegate = self
+        languageObserver = NotificationCenter.default.addObserver(forName: .appLanguageChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.window?.title = L10n.text("settings.title")
+            self?.model.objectWillChange.send()
+        }
     }
+    deinit { if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) } }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.makeFirstResponder(nil)
         return true
@@ -83,12 +90,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 }
 
 private struct SettingsRootView: View {
+    @ObservedObject private var language = LanguageStore.shared
     @ObservedObject var model: SettingsWindowModel
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(selection: $model.selection) {
-                    Section("角色") {
+                    Section(L10n.text("role.section")) {
                         ForEach(model.manager.records, id: \.settings.id) { record in
                             HStack(spacing: 10) {
                                 Image(systemName: record.error == nil ? "person.crop.square" : "exclamationmark.triangle")
@@ -103,12 +111,12 @@ private struct SettingsRootView: View {
                         }
                     }
                     Section {
-                        Label("通用设置", systemImage: "gearshape").tag("general")
+                        Label(L10n.text("settings.general"), systemImage: "gearshape").tag("general")
                     }
                 }
                 Divider()
                 Button(action: { model.status.chooseModels() }) {
-                    Label(model.status.importInProgress ? "正在导入…" : "添加角色…", systemImage: "plus")
+                    Label(model.status.importInProgress ? L10n.text("import.busy") : L10n.text("role.add"), systemImage: "plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.borderless).padding(16).disabled(model.status.importInProgress)
@@ -135,13 +143,15 @@ private struct RoleSettingsView: View {
     @ObservedObject var model: SettingsWindowModel
     let record: ModelRecord
     @State private var name: String
+    @State private var originalName: String
     @State private var removing = false
     @State private var previewGroup = ""
     @State private var previewIndex = 0
     @FocusState private var editingName: Bool
     init(model: SettingsWindowModel, record: ModelRecord) {
         self.model = model; self.record = record
-        _name = State(initialValue: record.settings.displayName)
+        _name = State(initialValue: record.settings.localizedDisplayName)
+        _originalName = State(initialValue: record.settings.localizedDisplayName)
     }
     var manager: ModelInstanceManager { model.manager }
     var id: UUID { record.settings.id }
@@ -155,27 +165,27 @@ private struct RoleSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                TextField("角色名称", text: $name)
+                TextField(L10n.text("role.name"), text: $name)
                     .textFieldStyle(.plain).font(.system(size: 25, weight: .semibold))
                     .focused($editingName).onSubmit(commitName)
-                    .accessibilityLabel("角色名称")
+                    .accessibilityLabel(L10n.text("role.name"))
                 HStack(spacing: 6) {
                     Circle().fill(record.error != nil ? Color.orange : canAdjust ? .green : .secondary).frame(width: 7, height: 7)
                     Text(model.status.roleStatus(record))
                     if let screen = settings.boundDisplayName { Text("·"); Text(screen) }
                     Spacer()
-                    Text("自动保存").font(.caption)
+                    Text(L10n.text("settings.autosave")).font(.caption)
                 }.font(.callout).foregroundStyle(.secondary)
             }.padding(24)
-            Picker("设置分组", selection: $model.page) {
-                ForEach(RoleSettingsPage.allCases) { Text($0.rawValue).tag($0) }
+            Picker(L10n.text("settings.group"), selection: $model.page) {
+                ForEach(RoleSettingsPage.allCases) { Text($0.title).tag($0) }
             }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 16)
             if let error = record.error {
-                notice("模型加载失败：\(error)", button: "更换模型…") { model.status.chooseReplacement(id) }
+                notice(L10n.text("role.load_failure", L10n.error(error)), button: L10n.text("model.replace")) { model.status.chooseReplacement(id) }
             } else if !manager.isDisplayConnected(record) {
-                notice("绑定屏幕未连接或尚未绑定。请在“外观与摆放”中选择显示器。", button: "选择显示器") { model.page = .appearance }
+                notice(L10n.text("display.binding_notice"), button: L10n.text("display.choose")) { model.page = .appearance }
             } else if manager.allHidden {
-                notice("所有角色已被临时隐藏，恢复后会保留各角色原来的显示偏好。", button: "恢复显示") { manager.toggleAllHidden() }
+                notice(L10n.text("role.hidden_notice"), button: L10n.text("role.restore")) { manager.toggleAllHidden() }
             }
             Form {
                 switch model.page {
@@ -185,21 +195,23 @@ private struct RoleSettingsView: View {
                 }
             }.formStyle(.grouped)
         }
-        .onChange(of: editingName) { _, focused in if !focused { commitName() } }
+        .onChange(of: editingName) { _, focused in if focused { originalName = name } else { commitName() } }
         .onChange(of: settings.outfitID) { _, _ in previewIndex = 0 }
-        .onChange(of: settings.displayName) { _, value in if !editingName { name = value } }
+        .onChange(of: settings.localizedDisplayName) { _, value in if !editingName { name = value; originalName = value } }
         .onDisappear { commitName() }
-        .alert("移除“\(settings.displayName)”？", isPresented: $removing) {
-            Button("取消", role: .cancel) {}
-            Button("移除角色", role: .destructive) { manager.remove(id) }
-        } message: { Text("不会删除模型文件。可在通用设置中撤销最近一次移除。") }
+        .sheet(isPresented: $removing) {
+            RemoveCharacterConfirmation(settings: settings, cancel: { removing = false }, remove: {
+                removing = false; manager.remove(id)
+            })
+        }
     }
     private func commitName() {
         let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard manager.record(id) != nil else { return }
-        if !cleaned.isEmpty && cleaned != settings.displayName { manager.mutate(id) { $0.displayName = cleaned } }
+        if !cleaned.isEmpty && cleaned != originalName && cleaned != settings.localizedDisplayName { manager.mutate(id) { $0.displayName = cleaned; $0.generatedName = nil } }
         // An empty or whitespace-only name reverts to the stored one.
-        name = cleaned.isEmpty ? settings.displayName : cleaned
+        name = settings.localizedDisplayName
+        originalName = name
     }
     private func notice(_ message: String, button: String, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -211,56 +223,56 @@ private struct RoleSettingsView: View {
             .padding(.horizontal, 24).padding(.bottom, 8)
     }
     @ViewBuilder private var appearance: some View {
-        Section("外观") {
-            Toggle("显示角色", isOn: model.binding(record, \.isVisible)).disabled(record.error != nil)
+        Section(L10n.text("appearance.section")) {
+            Toggle(L10n.text("role.show"), isOn: model.binding(record, \.isVisible)).disabled(record.error != nil)
             if record.outfits.count > 1 || settings.outfitID != nil {
-                Picker("服装", selection: Binding(get: { settings.outfitID ?? "" }, set: { value in
+                Picker(L10n.text("outfit.section"), selection: Binding(get: { settings.outfitID ?? "" }, set: { value in
                     model.status.attempt { try manager.setOutfit(id, outfitID: value) }
                 })) {
-                    ForEach(record.outfits, id: \.id) { Text($0.name).tag($0.id) }
+                    ForEach(record.outfits, id: \.id) { Text($0.localizedName).tag($0.id) }
                 }
             }
             let expressions = record.controller?.view.bridge.expressionNames ?? []
             if !expressions.isEmpty {
-                Picker("表情", selection: Binding(get: { settings.expressionId ?? "" }, set: { manager.setExpression(id, expression: $0) })) {
-                    Text("默认").tag("")
+                Picker(L10n.text("expression.section"), selection: Binding(get: { settings.expressionId ?? "" }, set: { manager.setExpression(id, expression: $0) })) {
+                    Text(L10n.text("common.default")).tag("")
                     ForEach(expressions, id: \.self) { Text($0).tag($0) }
                 }
             }
-            LabeledContent("大小") {
+            LabeledContent(L10n.text("appearance.size")) {
                 HStack(spacing: 8) {
                     Text("\(Int((settings.scale * 100).rounded()))%").monospacedDigit().foregroundStyle(.secondary)
-                    Stepper("大小", onIncrement: { manager.zoom(id, factor: 1.15) }, onDecrement: { manager.zoom(id, factor: 1 / 1.15) })
+                    Stepper(L10n.text("appearance.size"), onIncrement: { manager.zoom(id, factor: 1.15) }, onDecrement: { manager.zoom(id, factor: 1 / 1.15) })
                         .labelsHidden()
                 }
             }.disabled(record.error != nil)
         }
         Section {
-            Picker("所属显示器", selection: Binding(get: { settings.displayUUID ?? "" }, set: { manager.bind(id, to: $0) })) {
-                if !manager.isDisplayConnected(record) { Text(settings.boundDisplayName.map { "\($0)（未连接）" } ?? "请选择显示器").tag(settings.displayUUID ?? "") }
+            Picker(L10n.text("display.assigned"), selection: Binding(get: { settings.displayUUID ?? "" }, set: { manager.bind(id, to: $0) })) {
+                if !manager.isDisplayConnected(record) { Text(settings.boundDisplayName.map { L10n.text("display.disconnected_name", $0) } ?? L10n.text("display.placeholder")).tag(settings.displayUUID ?? "") }
                 ForEach(Array(manager.displayRegistry.displays.enumerated()), id: \.element.id) { index, display in
-                    Text("\(display.name)（\(index + 1)）").tag(display.id)
+                    Text(L10n.text("format.numbered", display.name, String(index + 1))).tag(display.id)
                 }
             }
             HStack {
-                Button(settings.interactionMode == .edit ? "完成调整" : "调整位置与大小") { manager.edit(id) }.disabled(!canAdjust)
-                Button("置于最前") { manager.bringForward(id) }.disabled(!canAdjust)
-                Button("重置位置") { manager.resetPosition(id) }.disabled(!manager.isDisplayConnected(record))
+                Button(settings.interactionMode == .edit ? L10n.text("placement.done") : L10n.text("placement.adjust")) { manager.edit(id) }.disabled(!canAdjust)
+                Button(L10n.text("placement.front")) { manager.bringForward(id) }.disabled(!canAdjust)
+                Button(L10n.text("placement.reset")) { manager.resetPosition(id) }.disabled(!manager.isDisplayConnected(record))
             }
-        } header: { Text("摆放") } footer: {
-            Text(settings.interactionMode == .edit ? "正在调整：拖动角色移动，滚轮缩放。完成后点击“完成调整”。" : "进入调整模式后，可拖动角色、滚轮缩放；每次只调整一个角色。屏幕断开时角色会隐藏，重连后恢复。")
+        } header: { Text(L10n.text("placement.section")) } footer: {
+            Text(settings.interactionMode == .edit ? L10n.text("placement.edit_help") : L10n.text("placement.help"))
         }
     }
     @ViewBuilder private var interaction: some View {
         Section {
-            Toggle("暂停动作", isOn: model.binding(record, \.animationPaused))
+            Toggle(L10n.text("motion.pause"), isOn: model.binding(record, \.animationPaused))
             if !groups.isEmpty {
-                Picker("自动播放动作组", selection: Binding(get: { settings.idleMotionGroup ?? groups.first(where: { $0.lowercased() == "idle" }) ?? "" }, set: { manager.setIdle(id, group: $0) })) {
-                    Text("无").tag("")
-                    if let selected = settings.idleMotionGroup, !selected.isEmpty, !groups.contains(selected) { Text("\(selected)（当前服装不可用）").tag(selected) }
+                Picker(L10n.text("motion.idle_group"), selection: Binding(get: { settings.idleMotionGroup ?? groups.first(where: { $0.lowercased() == "idle" }) ?? "" }, set: { manager.setIdle(id, group: $0) })) {
+                    Text(L10n.text("common.none")).tag("")
+                    if let selected = settings.idleMotionGroup, !selected.isEmpty, !groups.contains(selected) { Text(L10n.text("motion.unavailable_group", selected)).tag(selected) }
                     ForEach(groups, id: \.self) { Text($0).tag($0) }
                 }
-                DisclosureGroup("动作权重") {
+                DisclosureGroup(L10n.text("motion.weights")) {
                     let motions = record.controller?.view.motions ?? []
                     ForEach(groups, id: \.self) { group in
                         DisclosureGroup(group) {
@@ -274,87 +286,88 @@ private struct RoleSettingsView: View {
                             }
                         }
                     }
-                    Button("恢复当前服装的默认权重") {
+                    Button(L10n.text("motion.reset_weights")) {
                         var overrides = settings.motionWeightOverrides
                         for motion in motions { overrides.removeValue(forKey: motion.key) }
                         manager.setMotionWeights(id, overrides: overrides)
                     }
-                    Text("0 表示不参与自动播放；组内全部为 0 时停止自动选播。手动预览不受权重限制。").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.text("motion.weights_help")).font(.caption).foregroundStyle(.secondary)
                 }
-            } else { Text("当前模型或服装没有可用动作。").foregroundStyle(.secondary) }
-        } header: { Text("自动播放") } footer: { Text("按权重随机播放所选组内的动作，允许连续重复。权重修改在下次选播时生效。") }
+            } else { Text(L10n.text("motion.empty")).foregroundStyle(.secondary) }
+        } header: { Text(L10n.text("motion.autoplay")) } footer: { Text(L10n.text("motion.autoplay_help")) }
         if !groups.isEmpty {
-            Section("手动预览") {
+            Section(L10n.text("motion.preview")) {
                 let selected = groups.contains(previewGroup) ? previewGroup : groups[0]
-                Picker("动作组", selection: Binding(get: { selected }, set: { previewGroup = $0; previewIndex = 0 })) {
+                Picker(L10n.text("motion.group"), selection: Binding(get: { selected }, set: { previewGroup = $0; previewIndex = 0 })) {
                     ForEach(groups, id: \.self) { Text($0).tag($0) }
                 }
                 let count = record.controller?.view.bridge.motionGroups[selected]?.intValue ?? 0
-                Picker("动作", selection: $previewIndex) {
+                Picker(L10n.text("motion.label"), selection: $previewIndex) {
                     ForEach(0..<count, id: \.self) { index in
-                        Text(record.controller?.view.motions.first { $0.group == selected && $0.index == index }?.name ?? "动作 \(index + 1)").tag(index)
+                        Text(record.controller?.view.motions.first { $0.group == selected && $0.index == index }?.localizedName ?? L10n.text("motion.fallback", String(index + 1))).tag(index)
                     }
                 }
-                Button("播放预览", systemImage: "play.fill") { manager.play(id, group: selected, index: min(previewIndex, max(0, count - 1))) }
+                Button(L10n.text("motion.play_preview"), systemImage: "play.fill") { manager.play(id, group: selected, index: min(previewIndex, max(0, count - 1))) }
                     .disabled(settings.animationPaused || !canAdjust)
-                if settings.animationPaused { Text("继续播放动作后即可预览。").font(.caption).foregroundStyle(.secondary) }
+                if settings.animationPaused { Text(L10n.text("motion.paused_help")).font(.caption).foregroundStyle(.secondary) }
             }
         }
-        Section("鼠标跟随") {
-            Toggle("视线跟随鼠标", isOn: model.binding(record, \.trackingEnabled))
-            Picker("跟随平滑度", selection: model.binding(record, \.trackingSmoothingSeconds)) {
-                Text("灵敏").tag(0.06); Text("标准").tag(0.14); Text("柔和").tag(0.30)
-                if ![0.06, 0.14, 0.30].contains(settings.trackingSmoothingSeconds) { Text("自定义").tag(settings.trackingSmoothingSeconds) }
+        Section(L10n.text("tracking.section")) {
+            Toggle(L10n.text("tracking.enabled"), isOn: model.binding(record, \.trackingEnabled))
+            Picker(L10n.text("tracking.smoothing"), selection: model.binding(record, \.trackingSmoothingSeconds)) {
+                Text(L10n.text("tracking.responsive")).tag(0.06); Text(L10n.text("tracking.standard")).tag(0.14); Text(L10n.text("tracking.soft")).tag(0.30)
+                if ![0.06, 0.14, 0.30].contains(settings.trackingSmoothingSeconds) { Text(L10n.text("common.custom")).tag(settings.trackingSmoothingSeconds) }
             }.disabled(!settings.trackingEnabled)
         }
         Section {
-            Toggle("点击角色触发动作", isOn: model.binding(record, \.clickInteractionEnabled))
+            Toggle(L10n.text("click.enabled"), isOn: model.binding(record, \.clickInteractionEnabled))
                 .disabled(!settings.clickInteractionEnabled && !groups.contains(clickGroup))
             if !groups.isEmpty {
-                Picker("点击动作组", selection: Binding(get: { clickGroup }, set: { value in manager.mutate(id) { $0.clickMotionGroup = value } })) {
-                    Text("请选择").tag("")
-                    if !clickGroup.isEmpty && !groups.contains(clickGroup) { Text("\(clickGroup)（当前服装不可用）").tag(clickGroup) }
+                Picker(L10n.text("click.group"), selection: Binding(get: { clickGroup }, set: { value in manager.mutate(id) { $0.clickMotionGroup = value } })) {
+                    Text(L10n.text("common.choose")).tag("")
+                    if !clickGroup.isEmpty && !groups.contains(clickGroup) { Text(L10n.text("motion.unavailable_group", clickGroup)).tag(clickGroup) }
                     ForEach(groups, id: \.self) { Text($0).tag($0) }
                 }
             }
             if settings.clickInteractionEnabled && !groups.contains(clickGroup) {
-                Text("所选动作组在当前服装中不可用，点击互动暂时停用。").foregroundStyle(.orange)
+                Text(L10n.text("click.unavailable")).foregroundStyle(.orange)
             }
-        } header: { Text("点击互动") } footer: {
-            Text("点击角色可见部分时随机播放所选组内的动作，同时底下的应用也会收到点击。调整、暂停或隐藏期间不触发；动作播放期间忽略重复点击。")
+        } header: { Text(L10n.text("click.section")) } footer: {
+            Text(L10n.text("click.help"))
         }
     }
     @ViewBuilder private var advanced: some View {
-        Section("性能") {
-            Picker("帧率", selection: model.binding(record, \.targetFPS)) { Text("30 FPS").tag(30); Text("60 FPS").tag(60) }
-            Text("较低帧率可减少资源消耗，每个角色独立保存。").font(.caption).foregroundStyle(.secondary)
+        Section(L10n.text("performance.section")) {
+            Picker(L10n.text("performance.fps"), selection: model.binding(record, \.targetFPS)) { Text("30 FPS").tag(30); Text("60 FPS").tag(60) }
+            Text(L10n.text("performance.help")).font(.caption).foregroundStyle(.secondary)
         }
         Section {
-            LabeledContent("位置") {
+            LabeledContent(L10n.text("file.location")) {
                 Text((settings.modelPath as NSString).abbreviatingWithTildeInPath)
                     .lineLimit(2).truncationMode(.middle).multilineTextAlignment(.trailing).textSelection(.enabled)
             }
-            LabeledContent("文件") {
+            LabeledContent(L10n.text("file.label")) {
                 HStack {
-                    Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: settings.modelPath)]) }
-                    Button("更换模型…") { model.status.chooseReplacement(id) }
+                    Button(L10n.text("file.reveal")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: settings.modelPath)]) }
+                    Button(L10n.text("model.replace")) { model.status.chooseReplacement(id) }
                 }
             }
-        } header: { Text("模型文件") } footer: { Text("更换模型保留位置和显示设置，重置服装、表情及动作配置。") }
-        Section("角色管理") {
-            LabeledContent("复制角色") {
-                Button("复制") {
+        } header: { Text(L10n.text("model.files")) } footer: { Text(L10n.text("model.replace_help")) }
+        Section(L10n.text("role.management")) {
+            LabeledContent(L10n.text("role.duplicate")) {
+                Button(L10n.text("action.copy")) {
                     model.status.attempt {
                         if let copy = try manager.duplicate(id) { model.selection = copy.settings.id.uuidString }
                     }
                 }
             }
-            LabeledContent("移除角色") { Button("移除…", role: .destructive) { removing = true } }
+            LabeledContent(L10n.text("role.remove")) { Button(L10n.text("role.remove_action"), role: .destructive) { removing = true } }
         }
     }
 }
 
 private struct MotionWeightSettingRow: View {
+    @ObservedObject private var language = LanguageStore.shared
     let motion: ModelMotion
     let weight: Double
     let update: (Double) -> Void
@@ -368,21 +381,21 @@ private struct MotionWeightSettingRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(motion.name)
-                Text("默认 \(ModelMotion.displayWeight(motion.defaultWeight))").font(.caption).foregroundStyle(.secondary)
+                Text(motion.localizedName)
+                Text(L10n.text("motion.default_weight", ModelMotion.displayWeight(motion.defaultWeight))).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             HStack(spacing: 6) {
-                TextField("权重", text: $text).labelsHidden().textFieldStyle(.roundedBorder)
+                TextField(L10n.text("motion.weight"), text: $text).labelsHidden().textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(.trailing).monospacedDigit().frame(width: 72).focused($focused)
                     .foregroundStyle(value == nil ? Color.red : Color.primary)
-                    .accessibilityLabel("\(motion.group) · \(motion.name) 权重")
-                Stepper("权重", onIncrement: { step(1) }, onDecrement: { step(-1) }).labelsHidden()
+                    .accessibilityLabel(L10n.text("motion.weight_accessibility", motion.group, motion.localizedName))
+                Stepper(L10n.text("motion.weight"), onIncrement: { step(1) }, onDecrement: { step(-1) }).labelsHidden()
             }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
-        .help(value == nil ? "请输入不小于 0 的数字" : "")
+        .help(value == nil ? L10n.text("motion.invalid_weight") : "")
         .onChange(of: text) { _, _ in if let value, value != weight { update(value) } }
         .onChange(of: weight) { _, value in if !focused { text = ModelMotion.displayWeight(value) } }
         .onChange(of: focused) { _, value in if !value { text = ModelMotion.displayWeight(weight) } }
@@ -394,34 +407,60 @@ private struct MotionWeightSettingRow: View {
 }
 
 private struct GeneralSettingsView: View {
+    @ObservedObject private var language = LanguageStore.shared
     @ObservedObject var model: SettingsWindowModel
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("通用设置").font(.system(size: 25, weight: .semibold)).padding(24)
+            Text(L10n.text("settings.general")).font(.system(size: 25, weight: .semibold)).padding(24)
             Form {
-                Section("启动") {
-                    Toggle("登录时自动启动", isOn: Binding(get: { model.login.isRegistered }, set: { model.toggleLogin($0) }))
+                Section {
+                    Picker(L10n.text("language.label"), selection: Binding(get: { language.selection }, set: { language.selection = $0 })) {
+                        ForEach(AppLanguage.allCases) { Text($0.title).tag($0) }
+                    }
+                } header: { Text(L10n.text("language.section")) } footer: {
+                    Text(L10n.text("language.help"))
+                }
+                Section(L10n.text("startup.section")) {
+                    Toggle(L10n.text("startup.login"), isOn: Binding(get: { model.login.isRegistered }, set: { model.toggleLogin($0) }))
                         .disabled(model.updatingLogin)
                     if model.updatingLogin { ProgressView().controlSize(.small) }
                     if model.login.status == .requiresApproval {
-                        Text("等待系统允许登录启动。").foregroundStyle(.secondary)
-                        Button("在系统设置中允许…") { model.login.openSystemSettings() }
+                        Text(L10n.text("startup.approval")).foregroundStyle(.secondary)
+                        Button(L10n.text("startup.open_settings")) { model.login.openSystemSettings() }
                     }
                 }
                 Section {
-                    Button(model.manager.allHidden ? "恢复角色显示" : "隐藏所有角色") { model.manager.toggleAllHidden() }.disabled(model.manager.records.isEmpty)
-                    Button("撤销上次移除") { model.manager.undoRemove() }.disabled(model.manager.removedSettings == nil)
-                } header: { Text("角色") } footer: { Text("隐藏所有角色是临时操作，恢复时保留每个角色原来的显示偏好。") }
-                Section("显示器") {
-                    Button("刷新显示器连接状态") { model.manager.refreshDisplayBindings() }
-                    Button("重置所有角色的位置") { for record in model.manager.records { model.manager.resetPosition(record.settings.id) } }
-                    Text("重置位置保留显示器绑定；屏幕未连接的角色不会迁移到其他屏幕。").font(.caption).foregroundStyle(.secondary)
+                    Button(model.manager.allHidden ? L10n.text("role.restore_all") : L10n.text("role.hide_all")) { model.manager.toggleAllHidden() }.disabled(model.manager.records.isEmpty)
+                    Button(L10n.text("role.undo_remove")) { model.manager.undoRemove() }.disabled(model.manager.removedSettings == nil)
+                } header: { Text(L10n.text("role.section")) } footer: { Text(L10n.text("role.hide_help")) }
+                Section(L10n.text("display.section")) {
+                    Button(L10n.text("display.refresh")) { model.manager.refreshDisplayBindings() }
+                    Button(L10n.text("placement.reset_all")) { for record in model.manager.records { model.manager.resetPosition(record.settings.id) } }
+                    Text(L10n.text("placement.reset_help")).font(.caption).foregroundStyle(.secondary)
                 }
-                Section("关于") {
+                Section(L10n.text("about.section")) {
                     LabeledContent("Lite2D", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
-                    Text("macOS 原生 Live2D 桌面角色").foregroundStyle(.secondary)
+                    Text(L10n.text("about.description")).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped)
         }
+    }
+}
+
+private struct RemoveCharacterConfirmation: View {
+    @ObservedObject private var language = LanguageStore.shared
+    let settings: ModelInstanceSettings
+    let cancel: () -> Void
+    let remove: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L10n.text("role.remove_confirm", settings.localizedDisplayName)).font(.headline)
+            Text(L10n.text("role.remove_help")).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button(L10n.text("action.cancel"), action: cancel).keyboardShortcut(.cancelAction)
+                Button(L10n.text("role.remove"), role: .destructive, action: remove)
+            }
+        }.padding(24).frame(width: 420)
     }
 }

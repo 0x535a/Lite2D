@@ -98,7 +98,7 @@ subprocess.run(['xcrun', 'clang++', '-c', '-fobjc-arc', '-mmacosx-version-min=14
                 str(ROOT / 'Bridge/ModelArchive.mm'), '-o', str(archive_object)], check=True)
 binary = target / 'import-tests'
 subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-import-objc-header', str(ROOT / 'Bridge/ModelArchive.h'),
-                *[str(ROOT / 'App' / f) for f in ['ModelFileValidator.swift', 'ModelOutfit.swift', 'ModelLibraryImporter.swift', 'ModelPackageDecoder.swift']],
+                *[str(ROOT / 'App' / f) for f in ['Localization.swift', 'ModelFileValidator.swift', 'ModelOutfit.swift', 'ModelLibraryImporter.swift', 'ModelPackageDecoder.swift']],
                 str(ROOT / 'Tests/ModelImportTests.swift'), str(archive_object), '-larchive', '-lc++', '-framework', 'Foundation', '-o', str(binary)], check=True)
 command = [str(binary), str(target)]
 if args.workshop:

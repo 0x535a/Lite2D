@@ -5,6 +5,8 @@ struct ModelMotion {
     let index: Int
     let file: String
     let name: String
+    var generatedName: GeneratedName? = nil
+    var localizedName: String { generatedName?.text ?? name }
     let defaultWeight: Double
     // File identity preserves overrides when outfits reorder or share motions.
     var key: String { "\(group.utf8.count):\(group)\(file)" }
@@ -25,7 +27,8 @@ struct ModelMotion {
                 let value = (entry["weight"] as? NSNumber)?.doubleValue ?? 1
                 let weight = value.isFinite && value >= 0 ? value : 1
                 return ModelMotion(group: group, index: index, file: file,
-                                   name: entry["name"] as? String ?? "动作 \(index + 1)", defaultWeight: weight)
+                                   name: entry["name"] as? String ?? "Motion \(index + 1)",
+                                   generatedName: entry["name"] is String ? nil : GeneratedName(key: "motion.fallback", arguments: [String(index + 1)]), defaultWeight: weight)
             }
         }
     }

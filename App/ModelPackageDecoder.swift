@@ -3,33 +3,33 @@ import CryptoKit
 
 // ViewerEX package compatibility is isolated from the player and model library.
 enum ModelPackageDecoder {
-    static func decode(in root: URL) throws -> [(String, URL)] {
+    static func decode(in root: URL) throws -> [(String, URL, GeneratedName?)] {
         try decode(in: root, depth: 0)
     }
 
-    private static func decode(in root: URL, depth: Int) throws -> [(String, URL)] {
+    private static func decode(in root: URL, depth: Int) throws -> [(String, URL, GeneratedName?)] {
         let files = try ModelLibraryImporter.files(in: root)
         let metadataName = Insecure.MD5.hash(data: Data("config.mlve".utf8)).map { String(format: "%02x", $0) }.joined()
         let configs = files.filter { ["config.json", ".lite2d-ex-source.json"].contains($0.lastPathComponent) }
         let manifests = files.filter { $0.lastPathComponent == metadataName || $0.lastPathComponent == "config.mlve" }
-        guard manifests.count <= 1 else { throw ModelImportError.invalid("发现多个独立 EX 包清单，请分别选择对应模型包导入。") }
+        guard manifests.count <= 1 else { throw ModelImportError.invalid(.key("error.multiple_manifests", [])) }
         if let metadataURL = manifests.first {
             let metadata = try ModelLibraryImporter.object(metadataURL)
             guard let list = metadata["list"] as? [[String: Any]], !list.isEmpty else {
-                throw ModelImportError.invalid("LPK 清单版本暂不支持：没有角色列表。")
+                throw ModelImportError.invalid(.key("error.lpk_list", []))
             }
             let parent = metadataURL.deletingLastPathComponent()
             let config = configs.compactMap { try? ModelLibraryImporter.object($0) }.first { $0["metaData"] != nil } ?? [:]
             let encrypted = String(describing: metadata["encrypt"] ?? "false").lowercased() == "true" || (metadata["encrypt"] as? Bool == true)
             if encrypted && (config["metaData"] as? String == nil || config["fileId"] as? String == nil) {
-                throw ModelImportError.invalid("此 LPK 依赖 EX 工坊配套信息。请将原始 config.json 与 LPK 放在一起后重试，或导入包含配套信息的 WPK。")
+                throw ModelImportError.invalid(.key("error.lpk_config", []))
             }
             let payloads = try ModelLibraryImporter.files(in: parent).filter { ["bin", "bin3"].contains($0.pathExtension.lowercased()) }
-            guard !payloads.isEmpty else { throw ModelImportError.invalid("LPK 资源布局暂不支持：没有找到模型资源。") }
+            guard !payloads.isEmpty else { throw ModelImportError.invalid(.key("error.lpk_resources", [])) }
             var fileID = config["fileId"] as? String ?? ""
             if encrypted {
                 guard let firstCostume = (list.first?["costume"] as? [[String: Any]])?.first,
-                      let firstPath = firstCostume["path"] as? String else { throw ModelImportError.invalid("LPK 缺少服装入口。") }
+                      let firstPath = firstCostume["path"] as? String else { throw ModelImportError.invalid(.key("error.lpk_entry", [])) }
                 let firstURL = try ModelOutfitCatalog.resolve(firstPath, relativeTo: metadataURL)
                 let firstData = try Data(contentsOf: firstURL)
                 let fallback = ((config["lpkFile"] as? String ?? "") as NSString).deletingPathExtension
@@ -39,7 +39,7 @@ enum ModelPackageDecoder {
                     let data = decodeBytes(firstData, seed: seed)
                     guard data.count < 8 * 1024 * 1024, let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
                     return object["model"] is String || object["FileReferences"] is [String: Any] || object["type"] != nil
-                }) else { throw ModelImportError.invalid("LPK 解码失败：配套 config.json 不匹配或包版本暂不支持。") }
+                }) else { throw ModelImportError.invalid(.key("error.lpk_decode", [])) }
                 fileID = matched
             }
             let output = parent.appendingPathComponent(".lite2d-decoded", isDirectory: true)
@@ -80,39 +80,40 @@ enum ModelPackageDecoder {
                 try JSONSerialization.data(withJSONObject: remap(object), options: [.fragmentsAllowed, .sortedKeys, .prettyPrinted])
                     .write(to: output.appendingPathComponent(mapping[key]!))
             }
-            var result: [(String, URL)] = []
+            var result: [(String, URL, GeneratedName?)] = []
             for (index, character) in list.enumerated() {
                 guard let costumes = character["costume"] as? [[String: Any]], !costumes.isEmpty else {
-                    throw ModelImportError.invalid("LPK 角色缺少服装列表。")
+                    throw ModelImportError.invalid(.key("error.lpk_outfits", []))
                 }
-                var costumeEntries: [(String, URL)] = []
+                var costumeEntries: [(String, URL, GeneratedName?)] = []
                 for (costumeIndex, costume) in costumes.enumerated() {
                     guard let path = costume["path"] as? String, let mapped = mapping[path], jsons[path] is [String: Any] else {
-                        throw ModelImportError.invalid("LPK 服装入口无法读取，可能是包版本不支持或配套信息不匹配。")
+                        throw ModelImportError.invalid(.key("error.lpk_outfit_read", []))
                     }
                     let entry = output.appendingPathComponent(mapped)
                     // Reject Spine and corrupted/decryption-mismatched entries explicitly.
                     let object = try ModelLibraryImporter.object(entry)
                     guard object["model"] is String || object["FileReferences"] is [String: Any] else {
-                        throw ModelImportError.invalid("包内包含非 Live2D 模型（例如 Spine），当前只支持 Cubism 2 / 3+。")
+                        throw ModelImportError.invalid(.key("error.non_live2d", []))
                     }
-                    costumeEntries.append((costume["name"] as? String ?? "服装 \(costumeIndex + 1)", entry))
+                    costumeEntries.append((costume["name"] as? String ?? "Outfit \(costumeIndex + 1)", entry,
+                                           costume["name"] is String ? nil : GeneratedName(key: "outfit.fallback", arguments: [String(costumeIndex + 1)])))
                 }
                 // Each character gets its own entry and outfit catalog, even when assets are shared.
                 let first = costumeEntries[0]
                 let entry = output.appendingPathComponent("character-\(index).json")
                 try FileManager.default.copyItem(at: first.1, to: entry)
-                var outfits = [ModelOutfit(id: "", name: first.0)]
-                outfits += costumeEntries.dropFirst().map { ModelOutfit(id: $0.1.lastPathComponent, name: $0.0) }
+                var outfits = [ModelOutfit(id: "", name: first.0, generatedName: first.2)]
+                outfits += costumeEntries.dropFirst().map { ModelOutfit(id: $0.1.lastPathComponent, name: $0.0, generatedName: $0.2) }
                 // Preserve old change_cos costumes as well when the manifest exposes only one costume.
                 let existing = try ModelOutfitCatalog.load(entry)
                 for outfit in existing where !outfit.id.isEmpty && !outfits.contains(where: { $0.id == outfit.id }) { outfits.append(outfit) }
-                if ["costume", "默认"].contains(first.0), let original = existing.first { outfits[0] = original }
                 let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
                 try encoder.encode(outfits).write(to: ModelOutfitCatalog.sidecar(entry))
-                let name = character["character"] as? String ?? character["name"] as? String ?? "角色 \(index + 1)"
+                let name = character["character"] as? String ?? character["name"] as? String ?? "Character \(index + 1)"
                 let title = (list.count == 1 && name == "character") ? (config["title"] as? String ?? metadata["name"] as? String ?? name) : name
-                result.append((title, entry))
+                let generatedName = character["character"] is String || character["name"] is String ? nil : GeneratedName(key: "role.fallback", arguments: [String(index + 1)])
+                result.append((title, entry, generatedName))
             }
             // Keep only normalized assets plus package metadata (not duplicate encoded payloads).
             for file in payloads { try FileManager.default.removeItem(at: file) }
@@ -125,18 +126,18 @@ enum ModelPackageDecoder {
         }
 
         // WPK wrappers and installed Workshop directories: config.json references the inner LPK.
-        var result: [(String, URL)] = []
+        var result: [(String, URL, GeneratedName?)] = []
         for configURL in configs where configURL.lastPathComponent == "config.json" {
             let config = try ModelLibraryImporter.object(configURL)
             guard let packageName = config["lpkFile"] as? String else { continue }
-            guard depth < 1 else { throw ModelImportError.invalid("模型包嵌套层数不支持。") }
+            guard depth < 1 else { throw ModelImportError.invalid(.key("error.package_depth", [])) }
             let package = try ModelOutfitCatalog.resolve(packageName, relativeTo: configURL)
             let inner = configURL.deletingLastPathComponent().appendingPathComponent(".lite2d-package", isDirectory: true)
             try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
             try L2DModelArchive.extract(path: package.path, toDirectory: inner.path)
             try JSONSerialization.data(withJSONObject: config, options: [.sortedKeys]).write(to: inner.appendingPathComponent(".lite2d-ex-source.json"))
             let decoded = try decode(in: inner, depth: depth + 1)
-            guard !decoded.isEmpty else { throw ModelImportError.invalid("WPK 内部的 LPK 清单布局暂不支持。") }
+            guard !decoded.isEmpty else { throw ModelImportError.invalid(.key("error.wpk_layout", [])) }
             result += decoded
             try FileManager.default.removeItem(at: package)
             try FileManager.default.moveItem(at: configURL, to: configURL.deletingLastPathComponent().appendingPathComponent(".lite2d-source-config.json"))

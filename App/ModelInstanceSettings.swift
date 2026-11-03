@@ -36,6 +36,8 @@ enum ZoomGeometry {
 struct ModelInstanceSettings: Codable, Identifiable, Equatable {
     var id = UUID()
     var displayName: String
+    var generatedName: GeneratedName?
+    var localizedDisplayName: String { generatedName?.text ?? displayName }
     var modelPath: String
     var windowFrame = WindowFrame()
     var scale: Double = 1
@@ -61,13 +63,15 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         self.displayName = displayName; self.modelPath = modelPath
     }
     enum CodingKeys: String, CodingKey {
-        case id, displayName, modelPath, windowFrame, scale, isVisible, trackingEnabled,
+        case id, displayName, generatedName, modelPath, windowFrame, scale, isVisible, trackingEnabled,
              trackingSmoothingSeconds, interactionMode, targetFPS, animationPaused, idleMotionGroup, clickInteractionEnabled, clickMotionGroup, motionWeightOverrides, expressionId, outfitID, zOrder,
              displayUUID, boundDisplayName, displayPosition, displayBindingVersion
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? "模型"
+        let storedName = try? c.decode(String.self, forKey: .displayName)
+        displayName = storedName ?? "Model"
+        generatedName = (try? c.decode(GeneratedName.self, forKey: .generatedName)) ?? (storedName == nil ? GeneratedName(key: "model.fallback") : nil)
         modelPath = try c.decode(String.self, forKey: .modelPath)
         id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
         windowFrame = (try? c.decode(WindowFrame.self, forKey: .windowFrame)) ?? WindowFrame()
@@ -92,7 +96,9 @@ struct ModelInstanceSettings: Codable, Identifiable, Equatable {
         sanitize()
     }
     mutating func sanitize() {
-        if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { displayName = "模型" }
+        if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            displayName = "Model"; generatedName = GeneratedName(key: "model.fallback")
+        }
         motionWeightOverrides = motionWeightOverrides.filter { $0.value.isFinite && $0.value >= 0 }
         windowFrame.sanitize()
         scale = scale.isFinite ? min(max(scale, 0.25), 3) : 1
@@ -119,7 +125,8 @@ struct AppSettings: Codable {
             }
         }
         if instances.isEmpty, let legacy = try? c.decode(String.self, forKey: .modelPath) {
-            var migrated = ModelInstanceSettings(displayName: "模型", modelPath: legacy)
+            var migrated = ModelInstanceSettings(displayName: "Model", modelPath: legacy)
+            migrated.generatedName = GeneratedName(key: "model.fallback")
             migrated.displayBindingVersion = 0
             instances = [migrated]
         }

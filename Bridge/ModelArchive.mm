@@ -29,7 +29,7 @@ static const mode_t AE_IFREG = S_IFREG, AE_IFDIR = S_IFDIR;
     NSUInteger count = 0;
     NSMutableSet<NSString *> *seen = [NSMutableSet set];
     if (archive_read_open_filename(reader, path.fileSystemRepresentation, 65536) != ARCHIVE_OK) {
-        failure = @"无法读取模型包：文件不是有效的 ZIP 容器，或包版本暂不支持。";
+        failure = @"error.archive_read";
     } else {
         struct archive_entry *entry;
         int status;
@@ -44,38 +44,38 @@ static const mode_t AE_IFREG = S_IFREG, AE_IFDIR = S_IFDIR;
                 [name containsString:@"\\"] || [name containsString:@":"] ||
                 archive_entry_symlink(entry) || archive_entry_hardlink(entry) ||
                 (type != AE_IFREG && type != AE_IFDIR) || [seen containsObject:canonical]) {
-                failure = @"模型包包含不安全、重复或不支持的文件路径。"; break;
+                failure = @"error.archive_path"; break;
             }
             [seen addObject:canonical];
             if (++count > 20000 || archive_entry_size(entry) < 0 ||
                 (unsigned long long)archive_entry_size(entry) > 512ULL * 1024 * 1024) {
-                failure = @"模型包超过限制（20,000 项或解包后 512 MiB）。"; break;
+                failure = @"error.archive_limit"; break;
             }
             NSString *target = [directory stringByAppendingPathComponent:name];
             NSFileManager *fm = NSFileManager.defaultManager;
             if (type == AE_IFDIR) {
-                if (![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error]) { failure = @"无法创建模型目录。"; break; }
+                if (![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error]) { failure = @"error.archive_mkdir"; break; }
                 continue;
             }
             if (![fm createDirectoryAtPath:target.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:error] ||
-                ![fm createFileAtPath:target contents:nil attributes:nil]) { failure = @"无法写入模型资源。"; break; }
+                ![fm createFileAtPath:target contents:nil attributes:nil]) { failure = @"error.archive_write"; break; }
             NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:target];
-            if (!handle) { failure = @"无法写入模型资源。"; break; }
+            if (!handle) { failure = @"error.archive_write"; break; }
             char buffer[65536];
             ssize_t size;
             while ((size = archive_read_data(reader, buffer, sizeof buffer)) > 0) {
                 total += size;
-                if (total > 512ULL * 1024 * 1024) { failure = @"模型包解包后超过 512 MiB。"; break; }
-                if (![handle writeData:[NSData dataWithBytes:buffer length:size] error:error]) { failure = @"无法写入模型资源。"; break; }
+                if (total > 512ULL * 1024 * 1024) { failure = @"error.archive_size"; break; }
+                if (![handle writeData:[NSData dataWithBytes:buffer length:size] error:error]) { failure = @"error.archive_write"; break; }
             }
             [handle closeFile];
-            if (size < 0) failure = @"模型包损坏、受密码保护或压缩方式不支持。";
+            if (size < 0) failure = @"error.archive_corrupt";
             if (failure) break;
         }
-        if (!failure && status != ARCHIVE_EOF) failure = @"模型包目录损坏。";
+        if (!failure && status != ARCHIVE_EOF) failure = @"error.archive_directory";
     }
     archive_read_free(reader);
-    if (failure && error) *error = [NSError errorWithDomain:@"Lite2D.Import" code:1 userInfo:@{NSLocalizedDescriptionKey:failure}];
+    if (failure && error) *error = [NSError errorWithDomain:@"Lite2D.Import" code:1 userInfo:@{NSLocalizedDescriptionKey:failure, @"Lite2DLocalizationKey":failure}];
     return failure == nil;
 }
 @end

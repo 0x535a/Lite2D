@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var selfTest: SelfTestRunner?
     var benchmark: BenchmarkRunner?
     private var terminating = false
+    private var languageObserver: NSObjectProtocol?
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--check-login-item-registration") {
             Task { @MainActor in
@@ -37,6 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager = ModelInstanceManager(store: store)
         status = StatusBarController(manager: manager)
         installApplicationMenu()
+        languageObserver = NotificationCenter.default.addObserver(forName: .appLanguageChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.installApplicationMenu()
+        }
         if probeDirectory == nil { manager.restore() }
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("--") }
         for path in paths {
@@ -86,21 +90,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installApplicationMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem(); let appMenu = NSMenu(title: "Lite2D"); appItem.submenu = appMenu; main.addItem(appItem)
-        let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: L10n.text("settings.open"), action: #selector(openSettings(_:)), keyEquivalent: ",")
         settingsItem.target = self; appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(title: "退出 Lite2D", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        let editItem = NSMenuItem(); let edit = NSMenu(title: "编辑"); editItem.submenu = edit; main.addItem(editItem)
-        for (title, selector, key) in [("撤销", Selector(("undo:")), "z"),
-                                      ("剪切", #selector(NSText.cut(_:)), "x"),
-                                      ("复制", #selector(NSText.copy(_:)), "c"),
-                                      ("粘贴", #selector(NSText.paste(_:)), "v"),
-                                      ("全选", #selector(NSText.selectAll(_:)), "a")] {
+        appMenu.addItem(NSMenuItem(title: L10n.text("app.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let editItem = NSMenuItem(); let edit = NSMenu(title: L10n.text("menu.edit")); editItem.submenu = edit; main.addItem(editItem)
+        for (title, selector, key) in [(L10n.text("action.undo"), Selector(("undo:")), "z"),
+                                      (L10n.text("action.cut"), #selector(NSText.cut(_:)), "x"),
+                                      (L10n.text("action.copy"), #selector(NSText.copy(_:)), "c"),
+                                      (L10n.text("action.paste"), #selector(NSText.paste(_:)), "v"),
+                                      (L10n.text("action.select_all"), #selector(NSText.selectAll(_:)), "a")] {
             edit.addItem(NSMenuItem(title: title, action: selector, keyEquivalent: key))
         }
-        let windowItem = NSMenuItem(); let window = NSMenu(title: "窗口"); windowItem.submenu = window; main.addItem(windowItem)
-        window.addItem(NSMenuItem(title: "关闭", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
-        window.addItem(NSMenuItem(title: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        let windowItem = NSMenuItem(); let window = NSMenu(title: L10n.text("menu.window")); windowItem.submenu = window; main.addItem(windowItem)
+        window.addItem(NSMenuItem(title: L10n.text("action.close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        window.addItem(NSMenuItem(title: L10n.text("action.minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
         NSApp.mainMenu = main; NSApp.windowsMenu = window
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -114,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if exitCode != 0 { exit(exitCode) }
     }
 }
+L10n.configureSystemDialogs()
 let application = NSApplication.shared
 let delegate = AppDelegate()
 application.delegate = delegate

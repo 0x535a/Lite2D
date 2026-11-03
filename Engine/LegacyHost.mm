@@ -196,7 +196,7 @@ unsupported:
 }
 - (BOOL)loadPath:(NSString*)path error:(NSError**)error {
  glewExperimental=GL_TRUE;
- if(glewInit()!=GLEW_OK){if(error)*error=[NSError errorWithDomain:@"Lite2D.Legacy" code:2 userInfo:@{NSLocalizedDescriptionKey:@"GLEW initialization failed"}];return NO;}
+ if(glewInit()!=GLEW_OK){if(error)*error=[NSError errorWithDomain:@"Lite2D.Legacy" code:2 userInfo:@{NSLocalizedDescriptionKey:@"GLEW initialization failed",@"Lite2DLocalizationKey":@"error.engine_glew"}];return NO;}
  while(glGetError()!=GL_NO_ERROR){}
  _context=[[JSContext alloc]init];__weak L2DLegacyHost* weakSelf=self;
  _context.exceptionHandler=^(JSContext* context,JSValue* exception){
@@ -262,7 +262,7 @@ unsupported:
  if(_lastError)goto failed;
  return YES;
 failed:
- if(error)*error=[NSError errorWithDomain:@"Lite2D.Legacy" code:1 userInfo:@{NSLocalizedDescriptionKey:_lastError?:@"Legacy model load failed"}];return NO;
+ if(error)*error=[NSError errorWithDomain:@"Lite2D.Legacy" code:1 userInfo:@{NSLocalizedDescriptionKey:_lastError?:@"Legacy model load failed",@"Lite2DLocalizationKey":@"error.legacy_load"}];return NO;
 }
 - (void)step:(double)dt lookX:(float)x lookY:(float)y {
  _time+=dt;[_context[@"stepLegacy"]callWithArguments:@[@(_time),@(x),@(y)]];

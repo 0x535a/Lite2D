@@ -8,7 +8,7 @@ final class PetWindow: NSWindow {
 final class ModelRecord {
     var settings: ModelInstanceSettings
     var controller: ModelInstanceController?
-    var error: String?
+    var error: Error?
     var outfits: [ModelOutfit] = []
     init(_ settings: ModelInstanceSettings) { self.settings = settings }
 }
@@ -23,7 +23,7 @@ final class ModelInstanceController: NSObject {
     init(record: ModelRecord) throws {
         self.record = record
         guard let view = OpenGLModelView(settings: record.settings) else {
-            throw NSError(domain: "Lite2D", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建 OpenGL context。"])
+            throw LocalizedFailure(message: .key("error.opengl", []))
         }
         record.outfits = (try? ModelOutfitCatalog.load(URL(fileURLWithPath: record.settings.modelPath))) ?? []
         self.view = view
@@ -45,7 +45,7 @@ final class ModelInstanceController: NSObject {
         let changedFPS = view.settings.targetFPS != record.settings.targetFPS
         view.settings = record.settings
         if changedFPS { view.applyFPS() }
-        window.title = record.settings.displayName
+        window.title = record.settings.localizedDisplayName
         window.ignoresMouseEvents = record.settings.interactionMode != .edit
         view.setActive(visible && !sleeping)
         if visible {

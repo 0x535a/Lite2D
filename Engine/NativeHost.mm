@@ -44,7 +44,7 @@ CubismFramework::Option options;
 std::string shaderRoot;
 std::vector<unsigned char> readFile(const std::string& path) {
  std::ifstream f(path,std::ios::binary);
- if(!f) throw std::runtime_error("Cannot read: "+path);
+ if(!f) throw Lite2D::LocalizedEngineError("error.engine_read", "Cannot read: "+path);
  return {std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>()};
 }
 std::vector<unsigned char> readJsonFile(const std::string& path) {
@@ -53,9 +53,9 @@ std::vector<unsigned char> readJsonFile(const std::string& path) {
  auto raw=readFile(path);
  NSData* data=[NSData dataWithBytes:raw.data() length:raw.size()];
  id object=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
- if(!object)throw std::runtime_error("Invalid model JSON: "+path);
+ if(!object)throw Lite2D::LocalizedEngineError("error.engine_json", "Invalid model JSON: "+path);
  NSData* formatted=[NSJSONSerialization dataWithJSONObject:object options:NSJSONWritingPrettyPrinted error:nil];
- if(!formatted)throw std::runtime_error("Cannot normalize model JSON: "+path);
+ if(!formatted)throw Lite2D::LocalizedEngineError("error.engine_normalize", "Cannot normalize model JSON: "+path);
  auto bytes=static_cast<const unsigned char*>(formatted.bytes);
  return {bytes,bytes+formatted.length};
 }
@@ -85,7 +85,7 @@ void startRuntime(const std::string& resources) {
  options.LoggingLevel=CubismFramework::Option::LogLevel_Warning;
  options.LogFunction=[](const char* message){fprintf(stderr,"Cubism: %s\n",message);};
  options.LoadFileFunction=shaderFile;options.ReleaseBytesFunction=releaseFile;
- if(!CubismFramework::StartUp(&allocator,&options))throw std::runtime_error("Cubism startup failed");
+ if(!CubismFramework::StartUp(&allocator,&options))throw Lite2D::LocalizedEngineError("error.engine_startup", "Cubism startup failed");
  CubismFramework::Initialize();started=true;
 }
 void stopRuntime(){if(started){CubismFramework::Dispose();CubismFramework::CleanUp();started=false;}}
@@ -123,13 +123,13 @@ public:
  }
  void load(const std::string& path,int width,int height) {
   glewExperimental=GL_TRUE;
-  if(glewInit()!=GLEW_OK)throw std::runtime_error("GLEW initialization failed");
+  if(glewInit()!=GLEW_OK)throw Lite2D::LocalizedEngineError("error.engine_glew", "GLEW initialization failed");
   while(glGetError()!=GL_NO_ERROR){}
   directory=std::filesystem::path(path).parent_path();auto json=readJsonFile(path);
   settings=std::make_unique<CubismModelSettingJson>(json.data(),(int)json.size());
-  if(!settings->IsValid())throw std::runtime_error("Model JSON is unsupported by Cubism parser");
+  if(!settings->IsValid())throw Lite2D::LocalizedEngineError("error.engine_parser", "Model JSON is unsupported by Cubism parser");
   auto moc=asset(settings->GetModelFileName());LoadModel(moc.data(),(int)moc.size(),true);
-  if(!_model)throw std::runtime_error("Invalid or unsupported moc3");
+  if(!_model)throw Lite2D::LocalizedEngineError("error.engine_moc", "Invalid or unsupported moc3");
   auto optional=[&](const char* name,auto load){
    if(name&&*name){try {auto b=asset(name);load(b);}catch(const std::exception& e){fprintf(stderr,"Optional asset skipped: %s\n",e.what());}}
   };
@@ -176,7 +176,7 @@ public:
   for(int i=0;i<settings->GetTextureCount();++i) {
    auto bytes=asset(settings->GetTextureFileName(i));int w,h,n;
    auto* pixels=stbi_load_from_memory(bytes.data(),(int)bytes.size(),&w,&h,&n,4);
-   if(!pixels)throw std::runtime_error("Cannot decode model texture");
+   if(!pixels)throw Lite2D::LocalizedEngineError("error.engine_texture", "Cannot decode model texture");
    GLuint tex;glGenTextures(1,&tex);textures.push_back(tex);glBindTexture(GL_TEXTURE_2D,tex);
    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);

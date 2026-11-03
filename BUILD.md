@@ -62,7 +62,7 @@ python3 scripts/probe_app.py .local/models/legacy-b/model.json --name legacy-33
 
 ```sh
 python3 scripts/run_integration.py
-xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift App/ModelMotion.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/Localization.swift App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift App/ModelMotion.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
 xcrun swiftc -parse-as-library Tests/WeightedMotionTests.swift -o .local/verification/unit/weighted-motion-tests
 .local/verification/unit/weighted-motion-tests
@@ -103,7 +103,7 @@ xcodebuild -project build/xcode/Lite2D.xcodeproj -scheme Lite2D -configuration R
 ```sh
 python3 scripts/create_test_fixtures.py
 mkdir -p .local/verification/unit
-xcrun swiftc -parse-as-library App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift App/ModelMotion.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
+xcrun swiftc -parse-as-library App/Localization.swift App/DisplayLayout.swift App/ModelInstanceSettings.swift App/SettingsStore.swift App/ModelFileValidator.swift App/ModelOutfit.swift App/ModelMotion.swift Tests/SettingsAndValidationTests.swift -o .local/verification/unit/settings-tests
 .local/verification/unit/settings-tests
 xcrun swiftc -parse-as-library Tests/WeightedMotionTests.swift -o .local/verification/unit/weighted-motion-tests
 .local/verification/unit/weighted-motion-tests
@@ -150,3 +150,11 @@ xcrun swiftc -parse-as-library Tests/LegacyEyeBlinkTests.swift -o .local/verific
 
 运行 `python3 scripts/test_model_import.py` 验证导入。可选 `--workshop /path/to/616720` 只读验证显式指定的本机工坊资源。测试会重建 `.local/verification/model-import/`；日常配置和原资源不变。GUI 验证可分别设置 `LITE2D_SETTINGS_PATH` 和 `LITE2D_MODEL_LIBRARY_PATH` 隔离设置、模型库。
 
+
+## 四语本地化验证
+
+```sh
+python3 scripts/test_localization.py
+```
+
+资源、即时切换和模型名称兼容规则见 [docs/I18N.md](docs/I18N.md)。应用内集成测试同时输出四语设置页截图。
