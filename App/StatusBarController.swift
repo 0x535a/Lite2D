@@ -112,7 +112,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func panel(multiple: Bool) -> NSOpenPanel {
         let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = true
         panel.allowsMultipleSelection = multiple
-        panel.allowedContentTypes = [.json, .zip] + ["lpk", "wpk"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = [.folder, .json, .zip] + ["lpk", "wpk"].compactMap { UTType(filenameExtension: $0) }
         panel.message = L10n.text("import.panel_help")
         return panel
     }
