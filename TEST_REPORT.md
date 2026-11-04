@@ -253,3 +253,9 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 刷新循环同步相对位置，不会把正在拖动的预览拉回旧位置；模型移动后气泡跟随。普通气泡保持不激活和点击穿透，仅预览接受鼠标。
 - 原生专项验收新增 5 项：预览可交互、拖动结果保存、后台刷新不改位置、正常台词采用保存偏移、设置编解码与重置；合计 25 项通过。14 项 Controller/协议测试、四语 288 键检查通过。
 - 已更新并启动 `/Applications/Lite2D.app` 1.1.2（build 9），保留 Companion 设置与全部会话观察授权；安装文件与构建哈希一致，严格签名校验通过，实时状态 OpenCode 302 / Codex 344 / Claude 17 均 available。
+
+## Companion v1.1.3（2026-11-04，build 10）
+
+- 将共享 System、每轮行为要求、手动测试、同伴消息回送、风格示例说明和 13 个工具描述统一到 `Companion/prompt.mjs`，并纳入用户修改后的提示词。Persona Markdown 与工具权限保持独立。
+- `prompt.mjs` 作为独立文件随应用打包，Controller 和 MCP 入口共用；14 项 Controller/真实 OpenCode 协议测试通过。打包后的 Controller 独立启动/退出、MCP 13 个工具描述加载以及严格签名校验通过。
+- `/Applications/Lite2D.app` 已更新为 1.1.3（build 10）并重启，安装的二进制与 Controller/MCP 资源和构建一致；安装包内提示词与用户编辑文件逐字一致。保留现有模型、Persona、记忆与开关设置；用户当前关闭了陪伴功能，安装未自动开启。

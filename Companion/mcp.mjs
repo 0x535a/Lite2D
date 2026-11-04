@@ -1,22 +1,23 @@
 // Per-character stdio MCP entrypoint. The model cannot choose its sender identity.
 import { createInterface } from 'node:readline';
+import { TOOL_DESCRIPTIONS } from './prompt.mjs';
 
 const schema = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const string = { type: 'string' };
 export const tools = [
-  { name: 'companion_list_characters', description: 'List visible companions available to talk to.', inputSchema: schema() },
-  { name: 'companion_send_message', description: 'Say a short visible message to another character. Queues delivery; never waits for a reply.', inputSchema: schema({ to: string, text: string }, ['to', 'text']) },
-  { name: 'observer_list_sessions', description: 'List authorized observed work sessions.', inputSchema: schema() },
-  { name: 'observer_get_activity', description: 'Read the cached, filtered recent activity for an authorized session.', inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
-  { name: 'observer_get_recent_work', description: 'Read filtered activity across authorized work sessions.', inputSchema: schema() },
-  { name: 'observer_get_session_summary', description: 'Read bounded evidence for a session; distinguish facts from your interpretation.', inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
-  { name: 'observer_watch_session', description: 'Prioritize an already authorized session; cannot grant access.', inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
-  { name: 'observer_unwatch_session', description: 'Stop prioritizing a session.', inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
-  { name: 'public_record_list', description: 'List shared memory records.', inputSchema: schema() },
-  { name: 'public_record_read', description: 'Read a shared memory Markdown record and its revision.', inputSchema: schema({ path: string }, ['path']) },
-  { name: 'public_record_update', description: 'Update shared memory with a source and expected revision; conflict requires rereading.', inputSchema: schema({ path: string, content: string, expectedRevision: string }, ['path', 'content', 'expectedRevision']) },
-  { name: 'private_memory_read', description: 'Read your own private long-term notes.', inputSchema: schema() },
-  { name: 'private_memory_update', description: 'Update only your own private long-term notes.', inputSchema: schema({ content: string }, ['content']) },
+  { name: 'companion_list_characters', description: TOOL_DESCRIPTIONS.companion_list_characters, inputSchema: schema() },
+  { name: 'companion_send_message', description: TOOL_DESCRIPTIONS.companion_send_message, inputSchema: schema({ to: string, text: string }, ['to', 'text']) },
+  { name: 'observer_list_sessions', description: TOOL_DESCRIPTIONS.observer_list_sessions, inputSchema: schema() },
+  { name: 'observer_get_activity', description: TOOL_DESCRIPTIONS.observer_get_activity, inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
+  { name: 'observer_get_recent_work', description: TOOL_DESCRIPTIONS.observer_get_recent_work, inputSchema: schema() },
+  { name: 'observer_get_session_summary', description: TOOL_DESCRIPTIONS.observer_get_session_summary, inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
+  { name: 'observer_watch_session', description: TOOL_DESCRIPTIONS.observer_watch_session, inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
+  { name: 'observer_unwatch_session', description: TOOL_DESCRIPTIONS.observer_unwatch_session, inputSchema: schema({ sessionRef: string }, ['sessionRef']) },
+  { name: 'public_record_list', description: TOOL_DESCRIPTIONS.public_record_list, inputSchema: schema() },
+  { name: 'public_record_read', description: TOOL_DESCRIPTIONS.public_record_read, inputSchema: schema({ path: string }, ['path']) },
+  { name: 'public_record_update', description: TOOL_DESCRIPTIONS.public_record_update, inputSchema: schema({ path: string, content: string, expectedRevision: string }, ['path', 'content', 'expectedRevision']) },
+  { name: 'private_memory_read', description: TOOL_DESCRIPTIONS.private_memory_read, inputSchema: schema() },
+  { name: 'private_memory_update', description: TOOL_DESCRIPTIONS.private_memory_update, inputSchema: schema({ content: string }, ['content']) },
 ];
 if (process.argv[1]?.endsWith('/mcp.mjs')) {
   const write = value => process.stdout.write(JSON.stringify(value) + '\n');
