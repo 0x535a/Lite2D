@@ -81,6 +81,29 @@ final class CompanionSelfTest {
                 c.receive(["type": "error", "requestType": "trigger", "message": "Test budget response"])
                 try check(!c.busy, "Rejected test command releases the busy state")
                 c.error = nil; c.settings.enabled = false
+                try check(c.canPlaceBubble(a.settings.id), "Bubble placement is available for a loaded visible model")
+                c.beginBubblePlacement(a.settings.id)
+                try check(c.bubbleEditingID == a.settings.id && c.bubblePreviewFrame != nil && c.bubblePreviewIsInteractive, "Adjust Position shows the draggable preview bubble")
+                if let preview = c.bubblePreviewWindow { try capture(preview, "companion-bubble-placement-preview") }
+                c.moveBubblePreview(by: NSPoint(x: 40, y: -25))
+                let dragged = c.bubblePreviewFrame
+                c.tick()
+                try check(c.bubblePreviewFrame?.origin == dragged?.origin, "Background refresh does not snap the dragged preview back")
+                c.finishBubblePlacement(a.settings.id, save: true)
+                let offset = c.character(a.settings.id).bubbleOffset
+                try check(abs((offset?.x ?? 0) - 40) < 0.6 && abs((offset?.y ?? 0) + 25) < 0.6, "Dragged bubble position is saved with the model")
+                let savedCharacter = c.character(a.settings.id)
+                let decodedCharacter = try JSONDecoder().decode(CompanionCharacterSettings.self, from: JSONEncoder().encode(savedCharacter))
+                try check(decodedCharacter.bubbleOffset == offset, "Bubble position survives settings serialization")
+                if let w = a.controller?.window {
+                    let placed = CompanionBubble(); placed.offset = NSPoint(x: offset?.x ?? 0, y: offset?.y ?? 0)
+                    placed.show(name: "22", text: "Bubble placement check", near: w)
+                    let base = placed.baseOrigin(near: w)!, actual = placed.panel.frame.origin
+                    try check(abs((actual.x - base.x) - 40) < 0.6 && abs((actual.y - base.y) + 25) < 0.6, "Normal speech uses the saved per-model bubble position")
+                    placed.hide()
+                }
+                c.resetBubblePlacement(a.settings.id)
+                try check(c.character(a.settings.id).bubbleOffset == nil, "Bubble position can be reset to its default")
                 let topic = UUID().uuidString
                 c.receive(["type": "topic.start", "topicId": topic])
                 c.receive(["type": "conversation.focus", "topicId": topic, "speakerId": a.settings.id.uuidString, "listenerId": b.settings.id.uuidString,

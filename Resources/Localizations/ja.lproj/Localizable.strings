@@ -285,3 +285,11 @@
 "companion.trigger_help" = "タイマーを待たずにこのキャラクターをテストします。コンパニオンとキャラクターを有効にし、モデルを表示しておやすみモードを解除してください。共有予算を使用します。";
 
 "companion.test_skipped" = "キャラクターは今回は静かにすることを選びました。後でもう一度試すか、ペルソナを調整してください。";
+"companion.bubble_section" = "スピーチバブル";
+"companion.bubble_position" = "位置";
+"companion.bubble_adjust" = "位置を調整…";
+"companion.bubble_done" = "完了";
+"companion.bubble_reset" = "リセット";
+"companion.bubble_help" = "既定ではモデルの上に表示されます。プレビューをドラッグしてこのキャラクターの近くに配置します。モデルを動かすと保存位置も追従します。";
+"companion.bubble_dragging" = "プレビューのバブルを目的の位置へドラッグし、「完了」をクリックします。";
+"companion.bubble_preview" = "ここで話しても大丈夫？ドラッグして台詞の表示位置を決めてね。";

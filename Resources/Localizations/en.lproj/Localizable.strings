@@ -285,3 +285,11 @@
 "companion.trigger_help" = "Test this character now without waiting for the timer. Enable Companion and this character, show the model, and turn off Do Not Disturb. Uses the shared model budget.";
 
 "companion.test_skipped" = "The character chose to stay quiet. Try again later or adjust the Persona.";
+"companion.bubble_section" = "Speech Bubble";
+"companion.bubble_position" = "Position";
+"companion.bubble_adjust" = "Adjust Position…";
+"companion.bubble_done" = "Done";
+"companion.bubble_reset" = "Reset";
+"companion.bubble_help" = "Bubbles stay above the model by default. Drag the preview to place them near this character; the saved position follows the model when it moves.";
+"companion.bubble_dragging" = "Drag the preview bubble to the desired position, then click Done.";
+"companion.bubble_preview" = "I can talk here, right? Drag me to choose where my words will appear.";

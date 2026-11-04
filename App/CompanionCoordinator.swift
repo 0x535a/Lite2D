@@ -15,16 +15,22 @@ struct CompanionCharacterSettings: Codable, Equatable {
     var enabled = false
     var gaze = true
     var reactionMotionGroup: String?
-    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup }
-    init(enabled: Bool = false, gaze: Bool = true, reactionMotionGroup: String? = nil) {
-        self.enabled = enabled; self.gaze = gaze; self.reactionMotionGroup = reactionMotionGroup
+    var bubbleOffset: BubbleOffset?
+    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup, bubbleOffset }
+    init(enabled: Bool = false, gaze: Bool = true, reactionMotionGroup: String? = nil, bubbleOffset: BubbleOffset? = nil) {
+        self.enabled = enabled; self.gaze = gaze; self.reactionMotionGroup = reactionMotionGroup; self.bubbleOffset = bubbleOffset
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         gaze = (try? c.decodeIfPresent(Bool.self, forKey: .gaze)) ?? true
         reactionMotionGroup = try? c.decodeIfPresent(String.self, forKey: .reactionMotionGroup)
+        bubbleOffset = try? c.decodeIfPresent(BubbleOffset.self, forKey: .bubbleOffset)
     }
+}
+struct BubbleOffset: Codable, Equatable {
+    var x: Double = 0
+    var y: Double = 0
 }
 struct CompanionSettings: Codable {
     var enabled = false
@@ -86,6 +92,9 @@ final class CompanionCoordinator: ObservableObject {
     private var buffer = Data()
     private var gaze: (a: UUID, b: UUID, until: Date, topic: String)?
     private var bubbles: [UUID: CompanionBubble] = [:]
+    private var bubblePreview: CompanionBubble?
+    private var bubblePreviewID: UUID?
+    @Published private(set) var bubbleEditingID: UUID?
     private var pending: [[String: Any]] = []
     private var bubbleUntil = Date.distantPast
     private var bubbleTopic: String?
@@ -289,6 +298,10 @@ final class CompanionCoordinator: ObservableObject {
             if let record = manager?.record(id), let window = record.controller?.window, visible(record) { bubble.position(near: window) }
             else { bubble.hide() }
         }
+        if let id = bubblePreviewID, let preview = bubblePreview {
+            if let record = manager?.record(id), let window = record.controller?.window { preview.position(near: window) }
+            else { preview.hide() }
+        }
         if Date() >= bubbleUntil {
             for bubble in bubbles.values { bubble.hide() }
             restoreExpressions()
@@ -307,6 +320,7 @@ final class CompanionCoordinator: ObservableObject {
             guard let id = (event["characterId"] as? String).flatMap(UUID.init(uuidString:)), let text = event["text"] as? String,
                   let record = manager?.record(id), let window = record.controller?.window, visible(record) else { continue }
             let bubble = bubbles[id] ?? CompanionBubble(); bubbles[id] = bubble
+            bubble.offset = bubblePoint(character(id).bubbleOffset)
             bubble.show(name: record.settings.localizedDisplayName, text: text, near: window)
             if !record.settings.animationPaused && record.settings.interactionMode != .edit,
                let group = character(id).reactionMotionGroup, let view = record.controller?.view,
@@ -345,6 +359,57 @@ final class CompanionCoordinator: ObservableObject {
     }
     private func cancelPresentation() { pending.removeAll(); for bubble in bubbles.values { bubble.hide() }; restoreExpressions(); bubbleUntil = .distantPast; clearGaze() }
     func stopTopic() { send(["type": "stop"]); cancelPresentation() }
+    func canPlaceBubble(_ id: UUID) -> Bool {
+        guard let record = manager?.record(id), record.error == nil, record.controller != nil,
+              manager?.isDisplayConnected(record) == true else { return false }
+        return true
+    }
+    private func bubblePoint(_ offset: BubbleOffset?) -> NSPoint {
+        NSPoint(x: offset?.x ?? 0, y: offset?.y ?? 0)
+    }
+    func beginBubblePlacement(_ id: UUID) {
+        if let current = bubbleEditingID, current != id { finishBubblePlacement(current, save: true) }
+        guard bubbleEditingID == nil, canPlaceBubble(id), let record = manager?.record(id), let window = record.controller?.window else { return }
+        let preview = CompanionBubble(preview: true)
+        preview.offset = bubblePoint(character(id).bubbleOffset)
+        preview.show(name: record.settings.localizedDisplayName, text: L10n.text("companion.bubble_preview"), near: window)
+        preview.onMoved = { [weak self, weak preview, weak window] in
+            guard let self, let preview, let window else { return }
+            self.syncPreviewOffset(preview, near: window)
+        }
+        preview.panel.makeKeyAndOrderFront(nil)
+        bubblePreview = preview; bubblePreviewID = id; bubbleEditingID = id
+        objectWillChange.send()
+    }
+    func finishBubblePlacement(_ id: UUID, save: Bool) {
+        guard bubblePreviewID == id, let preview = bubblePreview, let window = manager?.record(id)?.controller?.window else { return }
+        if save, let base = preview.baseOrigin(near: window), let screen = window.screen {
+            let area = screen.visibleFrame, size = preview.panel.frame.size
+            let x = min(max(preview.panel.frame.minX, area.minX + 8), area.maxX - size.width - 8)
+            let y = min(max(preview.panel.frame.minY, area.minY + 8), area.maxY - size.height - 8)
+            updateCharacter(id) { $0.bubbleOffset = BubbleOffset(x: x - base.x, y: y - base.y) }
+        }
+        preview.hide(); bubblePreview = nil; bubblePreviewID = nil; bubbleEditingID = nil
+        bubbles[id]?.offset = bubblePoint(character(id).bubbleOffset)
+        objectWillChange.send()
+    }
+    func resetBubblePlacement(_ id: UUID) {
+        if bubbleEditingID == id { finishBubblePlacement(id, save: false) }
+        updateCharacter(id) { $0.bubbleOffset = nil }
+        bubbles[id]?.offset = .zero
+    }
+    var bubblePreviewFrame: NSRect? { bubblePreview?.panel.frame }
+    var bubblePreviewWindow: NSWindow? { bubblePreview?.panel }
+    var bubblePreviewIsInteractive: Bool { bubblePreview?.panel.ignoresMouseEvents == false }
+    func moveBubblePreview(by delta: NSPoint) {
+        guard let preview = bubblePreview else { return }
+        preview.panel.setFrameOrigin(NSPoint(x: preview.panel.frame.minX + delta.x, y: preview.panel.frame.minY + delta.y))
+        if let id = bubblePreviewID, let window = manager?.record(id)?.controller?.window { syncPreviewOffset(preview, near: window) }
+    }
+    private func syncPreviewOffset(_ preview: CompanionBubble, near window: NSWindow) {
+        guard let base = preview.baseOrigin(near: window) else { return }
+        preview.offset = NSPoint(x: preview.panel.frame.minX - base.x, y: preview.panel.frame.minY - base.y)
+    }
     func canTrigger(_ id: UUID) -> Bool {
         guard settings.enabled, !settings.paused, runtimeState == "running", !busy,
               character(id).enabled, hasPersona(id), let record = manager?.record(id) else { return false }
@@ -389,13 +454,18 @@ final class CompanionCoordinator: ObservableObject {
 
 final class CompanionBubble {
     let panel: NSPanel
-    init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    var offset = NSPoint.zero
+    var onMoved: (() -> Void)?
+    init(preview: Bool = false) {
+        panel = preview ? BubblePreviewPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            : NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.level = .floating; panel.ignoresMouseEvents = true; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.level = .floating; panel.ignoresMouseEvents = !preview; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
     func show(name: String, text: String, near window: NSWindow) {
-        let effect = NSVisualEffectView(); effect.material = .popover; effect.blendingMode = .behindWindow; effect.state = .active
+        let drag = BubbleDragView(); drag.onMoved = { [weak self] in self?.onMoved?() }
+        let effect: NSVisualEffectView = panel is BubblePreviewPanel ? drag : NSVisualEffectView()
+        effect.material = .popover; effect.blendingMode = .behindWindow; effect.state = .active
         effect.wantsLayer = true; effect.layer?.cornerRadius = 12; effect.layer?.masksToBounds = true
         let title = NSTextField(labelWithString: name); title.font = .systemFont(ofSize: 11, weight: .semibold); title.textColor = .secondaryLabelColor
         let label = NSTextField(wrappingLabelWithString: text); label.font = .systemFont(ofSize: 14); label.maximumNumberOfLines = 12
@@ -409,11 +479,42 @@ final class CompanionBubble {
     }
     func position(near window: NSWindow) {
         guard let screen = window.screen else { hide(); return }
+        guard let base = baseOrigin(near: window) else { hide(); return }
         let area = screen.visibleFrame, size = panel.frame.size
-        let x = min(max(window.frame.midX - size.width / 2, area.minX + 8), area.maxX - size.width - 8)
-        let preferredY = window.frame.maxY + 8
+        let x = min(max(base.x + offset.x, area.minX + 8), area.maxX - size.width - 8)
+        let preferredY = base.y + offset.y
         let y = min(max(preferredY, area.minY + 8), area.maxY - size.height - 8)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
+    func baseOrigin(near window: NSWindow) -> NSPoint? {
+        guard window.screen != nil else { return nil }
+        let size = panel.frame.size
+        return NSPoint(x: window.frame.midX - size.width / 2, y: window.frame.maxY + 8)
+    }
     func hide() { panel.orderOut(nil) }
+}
+
+private final class BubblePreviewPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+private final class BubbleDragView: NSVisualEffectView {
+    private var startMouse: NSPoint?
+    private var startOrigin: NSPoint?
+    var onMoved: (() -> Void)?
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func mouseDown(with event: NSEvent) {
+        startMouse = NSEvent.mouseLocation; startOrigin = window?.frame.origin
+        NSCursor.closedHand.set()
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let startMouse, let startOrigin else { return }
+        let point = NSEvent.mouseLocation
+        window?.setFrameOrigin(NSPoint(x: startOrigin.x + point.x - startMouse.x, y: startOrigin.y + point.y - startMouse.y))
+        onMoved?()
+    }
+    override func mouseUp(with event: NSEvent) {
+        startMouse = nil; startOrigin = nil; NSCursor.openHand.set()
+    }
 }
