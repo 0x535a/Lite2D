@@ -44,7 +44,7 @@ final class SettingsWindowModel: ObservableObject {
 }
 
 enum RoleSettingsPage: String, CaseIterable, Identifiable {
-    case appearance, interaction, advanced
+    case appearance, interaction, companion, advanced
     var title: String { L10n.text("settings." + rawValue) }
     var id: String { rawValue }
 }
@@ -140,6 +140,7 @@ private struct SettingsRootView: View {
 }
 
 private struct RoleSettingsView: View {
+    @ObservedObject private var language = LanguageStore.shared
     @ObservedObject var model: SettingsWindowModel
     let record: ModelRecord
     @State private var name: String
@@ -179,7 +180,7 @@ private struct RoleSettingsView: View {
             }.padding(24)
             Picker(L10n.text("settings.group"), selection: $model.page) {
                 ForEach(RoleSettingsPage.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 16)
+            }.id(language.revision).pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 16)
             if let error = record.error {
                 notice(L10n.text("role.load_failure", L10n.error(error)), button: L10n.text("model.replace")) { model.status.chooseReplacement(id) }
             } else if !manager.isDisplayConnected(record) {
@@ -191,6 +192,8 @@ private struct RoleSettingsView: View {
                 switch model.page {
                 case .appearance: appearance
                 case .interaction: interaction
+                case .companion:
+                    if let companion = manager.companion { CompanionRoleSections(companion: companion, id: id, openGeneral: { model.selection = "general" }) }
                 case .advanced: advanced
                 }
             }.formStyle(.grouped)
@@ -432,6 +435,7 @@ private struct GeneralSettingsView: View {
                         Button(L10n.text("startup.open_settings")) { model.login.openSystemSettings() }
                     }
                 }
+                if let companion = model.manager.companion { CompanionGeneralSections(companion: companion) }
                 Section {
                     Button(model.manager.allHidden ? L10n.text("role.restore_all") : L10n.text("role.hide_all")) { model.manager.toggleAllHidden() }.disabled(model.manager.records.isEmpty)
                     Button(L10n.text("role.undo_remove")) { model.manager.undoRemove() }.disabled(model.manager.removedSettings == nil)

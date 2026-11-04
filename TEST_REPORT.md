@@ -215,3 +215,23 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 构建产物、分发暂存副本和 ZIP 解压后的应用均通过 `codesign --verify --deep --strict`；版本与 ZIP 完整性检查通过，应用附件无模型、个人配置、日志或 Finder 元数据。
 - 发布日志与应用 README 同步为 build 6；源码附件使用发布提交的 Git 快照生成，应用包与源码包重新计算 SHA-256。日志与暂存产物保留于忽略目录 `.local/release-1.0.0-build6/`。
 - 本次未重复完整集成、压力或性能测试，未覆盖 `/Applications` 安装版和日常角色配置。
+
+## Companion v1.1（2026-11-04，build 7）
+
+**交付：** 新增按模型实例绑定 Persona Markdown 的主动陪伴功能，三种工作来源、主动评论/低频闲聊、真实双 Session 角色交流、公共/私有记忆、原生气泡、交流记录、停止与对视。无 TTS、音频、口型或用户聊天输入；角色工具层禁用 Shell、execute、edit、write、external_directory。应用包 1.1.0（build 7），controller 客户端随包提供，Claude 可执行文件不随包分发给用户。
+
+**实际运行验收：**
+
+- `node --test Companion/controller.test.mjs Companion/native.test.mjs`：11 项通过，覆盖记录事务/冲突/作者、Persona 校验、输出隔离、工具宿主即时返回、独立 Session 与 MCP 消息、私聊回送、预算/持续工具调用/重试计费、停止、频率、缓存重置、文本更新检测、重启恢复及上下文消费；权限检查覆盖 shell/execute/edit/write/external_directory 均为 deny。
+- 真实 OpenCode 2.2.5 + 本地确定性 OpenAI-compatible 上游：两个角色各自的 Session，A 调工具后 B 独立执行记忆工具并回复，A 以非生成 inbox 接纳；应用重启恢复同一 Session 和私有记忆；不修改用户 Session。
+- **真实外部模型**：`homo/gpt-5.6-sol` + 提供的 22/33 人设完成一次双角色消息往来。A 说「三三，晚上好呀！我来看看姐妹频道有没有顺利接通～」，B 说「晚上好，姐姐。姐妹频道已经顺利接通了——这次没被你弄成单向广播，做得不错。」，无错误、两个独立 Session。此次不宣称长期外网可用性；本机默认免费模型额度耗尽、其他几项 provider 返回 502/503 是外部服务状态。
+- `LITE2D_CAPTURE_OWN_WINDOW=1 python3 scripts/test_companion.py`：12 项通过，含普通 Markdown、22/33 示例按说话人筛选、四语页面状态、原生窗口、双向视线渲染值、拖动更新、取消/迟到事件释放、气泡非激活面板。截图仅为本测试窗口。
+- `python3 scripts/test_localization.py`：276 键 × 4 语言通过，占位符一致。设置单元测试通过（使用 `.local/models` 隔离复制，不含用户模型变化）。
+- 构建应用包 7.3 MB，通过 `codesign --verify --deep --strict`，内置 controller 为 1.4 MB。
+- 安装后再次从 `/Applications` 内置 bundle 启动隔离 Controller：三种来源状态均为 available（本项目 OpenCode 0、Claude 2、Codex 12 个近期会话），正常关闭且无遗留观察进程。运行中的日常应用通过 ready/status 事件确认 Companion 已成功加载；用户项目授权列表保持空。
+
+**已知边界：** OpenCode MCP 在 “connected” 后有一定注册时延；已在连接后等待工具注册完成再启动。共享小时预算基于请求数，无法覆盖 OpenCode 内部 provider 精确计费。Claude 历史读取不是文件尾部增量，跨进程更新时延与读取成本按实际 SDK 表现。工作来源默认不授权目录；观察内容可能发送给角色所用模型服务。对视脸部锚点仍是按窗口约 50%/70% 的默认估计，不同模型可能有偏差。
+
+安装验证修正了两项问题：Companion 设置解码支持缺省字段，避免旧配置整份失效；移除 jsonc-parser 的 UMD 打包路径，provider 配置通过本机 OpenCode 接口读取，已重验实际安装版 Controller 启动。
+
+**安装：** `/Applications/Lite2D.app` 已同步为 1.1.0（build 7），严格签名校验与运行中进程核对通过。已按现有模型实例 UUID 绑定用户提供的 22/33 Persona 与各 152 条可选原创风格示例；启用 30 分钟闲聊间隔，使用已实际验证的 `homo/gpt-5.6-sol`。三种工作来源默认不授权目录，原有播放器设置未修改。安装版已记录 Controller 的 ready/status 事件。

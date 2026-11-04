@@ -135,6 +135,10 @@ xcrun swiftc -parse-as-library Tests/LegacyMotionLifecycleTests.swift -o .local/
 
 模型应存放在稳定的数据目录，例如 `~/Library/Application Support/Lite2D/Models/`，不依赖项目目录。部署时备份现有设置，按现有 schema 追加模型实例并绑定显示器，不把私人资产或配置加入 git。登录启动沿用系统设置，不因安装而自动开启。
 
+## Companion 构建依赖（2026-11-04）
+
+Companion Controller 使用 Node.js 24+ 和 `Companion/package-lock.json`。`sh scripts/build.sh` 发现 `Companion/node_modules/esbuild` 缺失时会先执行 `npm ci --prefix Companion --ignore-scripts`，然后用 esbuild 生成 `Contents/Resources/Companion/main.mjs`，不会在用户机器上安装依赖。Python 脚本 `scripts/test_companion.py` 使用本应用内置 controller 和 CLI 探测；不驱动桌面输入。
+
 
 ## 设置窗口与快捷菜单（2026-11-03）
 
