@@ -36,6 +36,24 @@ struct CompanionRoleSections: View {
             Button(L10n.text("companion.history")) { companion.showHistory() }
             Text(L10n.text("companion.role_help")).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         } header: { Text(L10n.text("companion.continuity")) }
+        Section {
+            LabeledContent(L10n.text("companion.bubble_position")) {
+                HStack {
+                    if companion.bubbleEditingID == id {
+                        Button(L10n.text("companion.bubble_done")) { companion.finishBubblePlacement(id, save: true) }.keyboardShortcut(.defaultAction)
+                        Button(L10n.text("action.cancel")) { companion.finishBubblePlacement(id, save: false) }
+                    } else {
+                        Button(L10n.text("companion.bubble_adjust")) { companion.beginBubblePlacement(id) }
+                            .disabled(!companion.canPlaceBubble(id))
+                    }
+                    Button(L10n.text("companion.bubble_reset")) { companion.resetBubblePlacement(id) }
+                        .disabled(companion.character(id).bubbleOffset == nil || companion.bubbleEditingID == id)
+                }
+            }
+            Text(L10n.text(companion.bubbleEditingID == id ? "companion.bubble_dragging" : "companion.bubble_help"))
+                .font(.caption).foregroundStyle(companion.bubbleEditingID == id ? Color.accentColor : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } header: { Text(L10n.text("companion.bubble_section")) }
         Section(L10n.text("companion.section")) {
             LabeledContent(L10n.text("companion.state")) { Text(L10n.text("companion.state." + companion.runtimeState)).foregroundStyle(.secondary) }
             Button(L10n.text("settings.general"), action: openGeneral)

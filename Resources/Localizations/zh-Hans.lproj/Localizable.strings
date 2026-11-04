@@ -285,3 +285,11 @@
 "companion.trigger_help" = "立即测试此角色，无需等待定时器。需开启陪伴和此角色、显示模型并关闭勿扰，仍计入共享模型预算。";
 
 "companion.test_skipped" = "角色这次选择保持安静。可以稍后重试，或调整 Persona。";
+"companion.bubble_section" = "对话气泡";
+"companion.bubble_position" = "位置";
+"companion.bubble_adjust" = "调整位置…";
+"companion.bubble_done" = "完成";
+"companion.bubble_reset" = "重置";
+"companion.bubble_help" = "气泡默认位于模型上方。拖动预览即可放到此角色附近；模型移动时保存的位置会跟随。";
+"companion.bubble_dragging" = "拖动预览气泡到想要的位置，然后点完成。";
+"companion.bubble_preview" = "我可以在这里说话吧？拖动我，选择台词显示的位置。";
