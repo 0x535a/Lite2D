@@ -243,11 +243,11 @@
 "companion.budget" = "Up to {0} generation requests per hour";
 "companion.interval_help" = "The timer offers a chance to think, not an obligation to speak. Turning it off keeps work-triggered comments. Cooldowns and the shared budget still apply.";
 "companion.observers" = "Work Observation";
-"companion.observer_help" = "Only selected project folders are observed; worktrees need separate permission. Filtered excerpts may be sent to the model service configured for your characters. Revoking access stops future reads but does not erase past context.";
+"companion.observer_help" = "When enabled, observes all locally available conversations for this source, across projects and worktrees. Filtered excerpts may be sent to the character’s model service. Turning it off stops future reads; existing context remains.";
 "companion.source.available" = "Connected";
 "companion.source.disabled" = "Not observing";
 "companion.source.unavailable" = "Unavailable";
-"companion.sessions" = "{0} recent sessions";
+"companion.sessions" = "{0} conversations";
 "companion.remove_project" = "Revoke project access";
 "companion.add_project" = "Authorize Project Folder…";
 "companion.model" = "Model";
@@ -277,3 +277,11 @@
 "companion.reset_context_help" = "Clears private notes and disconnects the old model session. Future turns use a new session. The old OpenCode history remains in its own storage.";
 "companion.shared_settings_help" = "Model service, observation access and conversation frequency are shared. Configure them in General Settings.";
 "companion.reaction_motion" = "Motion while speaking";
+
+"companion.all_sessions" = "All conversations · Across projects and worktrees";
+
+"companion.trigger" = "Trigger Conversation";
+
+"companion.trigger_help" = "Test this character now without waiting for the timer. Enable Companion and this character, show the model, and turn off Do Not Disturb. Uses the shared model budget.";
+
+"companion.test_skipped" = "The character chose to stay quiet. Try again later or adjust the Persona.";

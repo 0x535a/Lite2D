@@ -46,7 +46,10 @@ final class CompanionSelfTest {
                         try check(!rows.isEmpty && rows.allSatisfy { $0["speaker"] as? String == speaker }, "Persona \(speaker) imports only its own optional style examples")
                     }
                 }
-                c.settings.sources = ["opencode": .init(enabled: true, projects: ["/Example/Project"]), "codex": .init(enabled: true, projects: ["/Example/Project"]), "claude": .init(enabled: true, projects: ["/Example/Project"])]
+                let legacySource = try JSONDecoder().decode(CompanionSourceSettings.self, from: Data(#"{"enabled":true,"projects":["/old/project"]}"#.utf8))
+                let migratedSource = String(decoding: try JSONEncoder().encode(legacySource), as: UTF8.self)
+                try check(legacySource.enabled && !migratedSource.contains("projects"), "Old project scopes migrate to source-wide toggles")
+                c.settings.sources = ["opencode": .init(enabled: true), "codex": .init(enabled: true), "claude": .init(enabled: true)]
                 let snapshots = manager.records.map(\.settings)
                 let originalLanguage = L10n.language
                 let window = status.settingsWindow
@@ -65,6 +68,19 @@ final class CompanionSelfTest {
                 window.window?.orderOut(nil)
                 c.settings.characters[a.settings.id.uuidString] = .init(enabled: true, gaze: true)
                 c.settings.characters[b.settings.id.uuidString] = .init(enabled: true, gaze: true)
+                try check(!c.canTrigger(a.settings.id), "Test button is unavailable when Companion is disabled")
+                c.settings.enabled = true; c.runtimeState = "running"
+                try check(c.canTrigger(a.settings.id) && c.canTrigger(b.settings.id), "Each visible Persona has its own test action")
+                c.settings.paused = true
+                try check(!c.canTrigger(a.settings.id), "Do Not Disturb disables the test button")
+                c.settings.paused = false; c.busy = true
+                try check(!c.canTrigger(b.settings.id), "Ongoing conversation disables repeated test triggers")
+                c.busy = false
+                c.trigger(b.settings.id)
+                try check(c.busy, "Manual trigger immediately blocks duplicate clicks")
+                c.receive(["type": "error", "requestType": "trigger", "message": "Test budget response"])
+                try check(!c.busy, "Rejected test command releases the busy state")
+                c.error = nil; c.settings.enabled = false
                 let topic = UUID().uuidString
                 c.receive(["type": "topic.start", "topicId": topic])
                 c.receive(["type": "conversation.focus", "topicId": topic, "speakerId": a.settings.id.uuidString, "listenerId": b.settings.id.uuidString,

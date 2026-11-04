@@ -243,11 +243,11 @@
 "companion.budget" = "每小時最多 {0} 次生成請求";
 "companion.interval_help" = "計時器只提供思考機會，角色可以保持安靜。關閉閒聊不影響工作事件觸發；冷卻和全域預算始終生效。";
 "companion.observers" = "工作觀察";
-"companion.observer_help" = "僅觀察所選專案目錄，工作樹需要單獨授權。篩選後的內容可能傳送至角色使用的模型服務。撤回授權停止後續讀取，不會自動清除已有上下文。";
+"companion.observer_help" = "開啟後觀察此來源在本機可讀取的全部對話，涵蓋所有專案與工作樹。篩選後的內容可能傳送給角色使用的模型服務。關閉後停止讀取，已有上下文仍會保留。";
 "companion.source.available" = "已連線";
 "companion.source.disabled" = "未觀察";
 "companion.source.unavailable" = "暫時無法使用";
-"companion.sessions" = "{0} 個近期會話";
+"companion.sessions" = "{0} 個對話";
 "companion.remove_project" = "撤回專案授權";
 "companion.add_project" = "授權專案目錄…";
 "companion.model" = "模型服務";
@@ -277,3 +277,11 @@
 "companion.reset_context_help" = "清空私有記憶並解除舊模型會話關聯。後續使用新會話；舊 OpenCode 歷史仍保留在其自身儲存空間中。";
 "companion.shared_settings_help" = "模型服務、觀察授權和閒聊頻率由所有角色共用，在通用設定中配置。";
 "companion.reaction_motion" = "發話時的動作群組";
+
+"companion.all_sessions" = "全部對話 · 跨專案與工作樹";
+
+"companion.trigger" = "觸發一次對話";
+
+"companion.trigger_help" = "立即測試此角色，無需等待計時器。需開啟陪伴和此角色、顯示模型並關閉勿擾，仍計入共用模型預算。";
+
+"companion.test_skipped" = "角色這次選擇保持安靜。可以稍後重試，或調整 Persona。";

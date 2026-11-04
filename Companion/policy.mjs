@@ -10,8 +10,9 @@ export function clean(value, limit = 4000) {
     .slice(0, limit);
 }
 export function authorized(project, roots) {
-  // An exact project grant never silently includes sibling projects or worktrees.
-  return typeof project === 'string' && roots.includes(project);
+  // Enabled backends now cover all locally available sessions, including ones
+  // without a recorded project. An explicit legacy scope still remains exact.
+  return roots === undefined || (typeof project === 'string' && roots.includes(project));
 }
 export function textOf(message) {
   if (!message) return '';
@@ -32,7 +33,6 @@ export function validConfig(input = {}) {
     model: typeof input.model === 'string' ? input.model.slice(0, 200) : '',
     sources: Object.fromEntries(BACKENDS.map(backend => [backend, {
       enabled: input.sources?.[backend]?.enabled === true,
-      projects: [...new Set((input.sources?.[backend]?.projects ?? []).filter(x => typeof x === 'string' && x.startsWith('/')))],
     }])),
     characters: (input.characters ?? []).filter(c => /^[\da-f-]{36}$/i.test(c.id)).map(c => ({
       id: c.id, name: clean(c.name, 100), enabled: c.enabled === true, visible: c.visible === true,

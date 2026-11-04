@@ -4,13 +4,11 @@ import UniformTypeIdentifiers
 
 struct CompanionSourceSettings: Codable, Equatable {
     var enabled = false
-    var projects: [String] = []
-    enum CodingKeys: String, CodingKey { case enabled, projects }
-    init(enabled: Bool = false, projects: [String] = []) { self.enabled = enabled; self.projects = projects }
+    enum CodingKeys: String, CodingKey { case enabled }
+    init(enabled: Bool = false) { self.enabled = enabled }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
-        projects = (try? c.decodeIfPresent([String].self, forKey: .projects)) ?? []
     }
 }
 struct CompanionCharacterSettings: Codable, Equatable {
@@ -237,7 +235,11 @@ final class CompanionCoordinator: ObservableObject {
         if type == "history" { loadHistory(event) }
         if type == "records" { records = event["records"] as? [[String: String]] ?? [] }
         if type == "memory", let id = event["characterId"] as? String, let content = event["content"] as? String { memoryContents[id] = content }
-        if type == "error" { error = event["message"] as? String; append(event) }
+        if type == "error" {
+            error = event["message"] as? String; append(event)
+            if event["requestType"] as? String == "trigger" { busy = false }
+        }
+        if type == "test.result", event["result"] as? String == "skipped" { error = L10n.text("companion.test_skipped") }
         if type == "utterance" {
             append(event)
             if let topic = event["topicId"] as? String, cancelledTopics.contains(topic) { return }
@@ -277,7 +279,7 @@ final class CompanionCoordinator: ObservableObject {
         }
         let value: [String: Any] = ["enabled": settings.enabled, "paused": settings.paused || manager.sleeping,
             "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model,
-            "sources": settings.sources.mapValues { ["enabled": $0.enabled, "projects": $0.projects] as [String: Any] }, "characters": characters]
+            "sources": settings.sources.mapValues { ["enabled": $0.enabled] as [String: Any] }, "characters": characters]
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: .sortedKeys), let encoded = String(data: data, encoding: .utf8) else { return }
         if force || encoded != lastSync { lastSync = encoded; send(["type": "configure", "config": value]) }
     }
@@ -343,6 +345,16 @@ final class CompanionCoordinator: ObservableObject {
     }
     private func cancelPresentation() { pending.removeAll(); for bubble in bubbles.values { bubble.hide() }; restoreExpressions(); bubbleUntil = .distantPast; clearGaze() }
     func stopTopic() { send(["type": "stop"]); cancelPresentation() }
+    func canTrigger(_ id: UUID) -> Bool {
+        guard settings.enabled, !settings.paused, runtimeState == "running", !busy,
+              character(id).enabled, hasPersona(id), let record = manager?.record(id) else { return false }
+        return visible(record)
+    }
+    func trigger(_ id: UUID) {
+        guard canTrigger(id) else { return }
+        error = nil; busy = true
+        sync(force: true); send(["type": "trigger", "characterId": id.uuidString])
+    }
     func retry() { stopProcess(); if settings.enabled { reconcile() } }
     func showHistory() {
         if process == nil { reconcile(readOnly: true) }
