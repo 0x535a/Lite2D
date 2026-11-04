@@ -6,6 +6,7 @@ import { Store } from './store.mjs';
 import { Roles } from './roles.mjs';
 import { Observers } from './adapters.mjs';
 import { BACKENDS, clean, hash, parseUtterance, validConfig } from './policy.mjs';
+import { TURN_INTENT, MANUAL_TEST_PROMPT } from './prompt.mjs';
 
 export class Controller {
   constructor({ root, send, opencode, codex, observers, roles, now = () => Date.now() }) {
@@ -126,8 +127,8 @@ export class Controller {
     if (envelope) this.store.db.prepare("UPDATE deliveries SET status='delivering' WHERE id=?").run(envelope.id);
     const context = {
       topicId: topic.id, ...input, quotedEvidence: true,
-      intent: 'Choose whether you have a worthwhile, new thing to say: interest in work, celebration/concern supported by evidence, curiosity, shared experience, or follow-up. You may skip. Do not invent user feelings or facts. Never ask the user to type a reply.',
-      ...(input.reason === 'manual_test' ? { manualTest: 'The user pressed your test button. Say one short visible greeting in your own Persona, or send a short message to an available companion. This is a presentation test: avoid skip unless you cannot safely respond. No user chat input is expected.' } : {}),
+      intent: TURN_INTENT,
+      ...(input.reason === 'manual_test' ? { manualTest: MANUAL_TEST_PROMPT } : {}),
       recentConversation: this.store.history(16).filter(e => e.type === 'utterance').map(e => ({ from: e.characterId, text: e.text })),
       sharedMemory: this.store.listRecords().slice(0, 10).map(r => ({ path: r.path, ...this.store.readRecord(r.path), content: clean(this.store.readRecord(r.path).content, 1200) })),
       privateMemory: clean(this.store.get(`memory:${character.id}`, ''), 3000),

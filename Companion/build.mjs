@@ -8,10 +8,11 @@ const out = process.argv[2];
 if (!out) throw new Error('Output directory required');
 await mkdir(out, { recursive: true });
 const result = await build({ entryPoints: [path.join(source, 'main.mjs')], outfile: path.join(out, 'main.mjs'), bundle: true, metafile: true,
-  platform: 'node', format: 'esm', target: 'node24', minify: false,
+  platform: 'node', format: 'esm', target: 'node24', minify: false, external: ['./prompt.mjs'],
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
   legalComments: 'eof', logLevel: 'warning' });
 await copyFile(path.join(source, 'mcp.mjs'), path.join(out, 'mcp.mjs'));
+await copyFile(path.join(source, 'prompt.mjs'), path.join(out, 'prompt.mjs'));
 const packageRoots = new Set();
 for (const input of Object.keys(result.metafile.inputs)) {
   const marker = input.lastIndexOf('node_modules/'); if (marker < 0) continue;
