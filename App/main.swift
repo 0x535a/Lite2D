@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var exitCode: Int32 = 0
     var selfTest: SelfTestRunner?
     var benchmark: BenchmarkRunner?
+    var companionTest: CompanionSelfTest?
     private var terminating = false
     private var languageObserver: NSObjectProtocol?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,6 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { _ = try manager.add(URL(fileURLWithPath: path)) }
             catch { NSLog("模型载入失败：%@", error.localizedDescription); exitCode = 2 }
         }
+        if CommandLine.arguments.contains("--companion-self-test") {
+            let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LITE2D_TEST_OUTPUT"] ?? ".local/verification/companion")
+            let test = CompanionSelfTest(manager: manager, status: status, output: output) { [weak self] code in self?.exitCode = code; NSApp.terminate(nil) }
+            companionTest = test; test.run(); return
+        }
         if CommandLine.arguments.contains("--self-test") || CommandLine.arguments.contains("--verify-restore") {
             let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["LITE2D_TEST_OUTPUT"] ?? ".local/verification/integration")
             let runner = SelfTestRunner(manager: manager, status: status, output: output) { [weak self] code in
@@ -72,6 +78,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.exitCode = code; NSApp.terminate(nil)
             }
             benchmark = runner; runner.run(); return
+        }
+        if probeDirectory == nil {
+            let companion = CompanionCoordinator(manager: manager)
+            manager.companion = companion
+            companion.start()
         }
         if CommandLine.arguments.contains("--show-settings") { status.settingsWindow.show() }
         if let directory = probeDirectory {

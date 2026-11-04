@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(Lite2D LANGUAGES C CXX OBJCXX Swift)
+find_program(LITE2D_NODE node REQUIRED)
 set(LITE2D_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Local app bundle output directory")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_OBJCXX_STANDARD 17)
@@ -64,7 +65,10 @@ add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/FrameworkShaders"
   COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/legacy-host.js"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Localizations" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
+  COMMAND "${LITE2D_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/build.mjs" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/Companion"
   COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")
+file(GLOB COMPANION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Companion/*.mjs" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/package-lock.json")
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS ${COMPANION_SOURCES})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")
   set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")
   add_custom_command(TARGET Lite2D PRE_LINK

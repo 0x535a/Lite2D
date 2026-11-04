@@ -86,6 +86,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(item(importInProgress ? L10n.text("import.busy_menu") : L10n.text("role.add"), enabled: !importInProgress) { [weak self] in self?.chooseModels() })
         let preferences = item(L10n.text("settings.open")) { [weak self] in self?.settingsWindow.show() }
         preferences.keyEquivalent = ","; menu.addItem(preferences)
+        if let companion = manager.companion {
+            menu.addItem(item(L10n.text("companion.history")) { companion.showHistory() })
+            if companion.settings.enabled {
+                menu.addItem(item(L10n.text("companion.paused"), checked: companion.settings.paused) {
+                    companion.settings.paused.toggle(); companion.changed()
+                })
+                menu.addItem(item(L10n.text("companion.stop"), enabled: companion.busy) { companion.stopTopic() })
+            }
+        }
         menu.addItem(.separator())
         let quit = item(L10n.text("app.quit")) { NSApp.terminate(nil) }; quit.keyEquivalent = "q"; menu.addItem(quit)
     }
