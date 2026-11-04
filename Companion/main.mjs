@@ -15,8 +15,8 @@ input.on('line', line => {
   if (line.length > 1024 * 1024) return;
   try {
     const command = JSON.parse(line);
-    if (command.type === 'stop' || command.type === 'configure') controller.command(command).catch(e => send({ type: 'error', message: clean(e.message, 200) }));
-    else chain = chain.then(() => controller.command(command)).catch(e => send({ type: 'error', message: clean(e.message, 200) }));
+    if (command.type === 'stop' || command.type === 'configure') controller.command(command).catch(e => send({ type: 'error', requestType: command.type, message: clean(e.message, 200) }));
+    else chain = chain.then(() => controller.command(command)).catch(e => send({ type: 'error', requestType: command.type, message: clean(e.message, 200) }));
   } catch { send({ type: 'error', message: 'Invalid host message' }); }
 });
 let closing = false;

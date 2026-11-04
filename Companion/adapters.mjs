@@ -39,25 +39,44 @@ export class Observers {
     return OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) });
   }
   async list(backend, roots) {
-    if (!roots.length) return [];
+    if (roots && !roots.length) return [];
     const result = [];
     if (backend === 'opencode') {
       const client = await this.openCode();
-      for (const directory of roots) {
-        const page = await client.session.list({ directory, limit: 12, order: 'desc' }, { signal: AbortSignal.timeout(12000) });
-        for (const s of page.data) if (authorized(s.location?.directory, roots)) result.push({ backend, id: s.id, project: s.location.directory, title: clean(s.title ?? 'OpenCode', 150), updated: s.time.updated });
+      for (const directory of roots ?? [undefined]) for (const archived of [false, true]) {
+        let cursor; const seen = new Set();
+        do {
+          const page = await client.session.list({ directory, archived, limit: 100, ...(cursor ? { cursor } : { order: 'desc' }) }, { signal: AbortSignal.timeout(12000) });
+          for (const s of page.data) if (authorized(s.location?.directory, roots) && !s.metadata?.lite2dCompanion && !/^Lite2D [\da-f-]{36}$/i.test(s.title ?? '')) result.push({ backend, id: s.id, project: s.location?.directory, title: clean(s.title ?? 'OpenCode', 150), updated: s.time.updated });
+          cursor = page.cursor?.next;
+          if (cursor && seen.has(cursor)) throw new Error('OpenCode pagination did not advance');
+          if (cursor) seen.add(cursor);
+        } while (cursor);
       }
     } else if (backend === 'codex') {
       await this.codex.start();
-      const page = await this.codex.call('thread/list', { cwd: roots, limit: 24, sortKey: 'updated_at', sortDirection: 'desc', modelProviders: [], useStateDbOnly: true });
-      for (const s of page.data) if (authorized(s.cwd, roots)) result.push({ backend, id: s.id, project: s.cwd, title: clean(s.name ?? s.preview ?? 'Codex', 150), updated: s.updatedAt * 1000 });
+      for (const archived of [false, true]) {
+        let cursor; const seen = new Set();
+        do {
+          const page = await this.codex.call('thread/list', { ...(roots ? { cwd: roots } : {}), archived, cursor, limit: 100,
+            sourceKinds: ['cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown'],
+            sortKey: 'updated_at', sortDirection: 'desc', modelProviders: [], useStateDbOnly: true });
+          for (const s of page.data) if (authorized(s.cwd, roots)) result.push({ backend, id: s.id, project: s.cwd, title: clean(s.name ?? s.preview ?? 'Codex', 150), updated: s.updatedAt * 1000 });
+          cursor = page.nextCursor;
+          if (cursor && seen.has(cursor)) throw new Error('Codex pagination did not advance');
+          if (cursor) seen.add(cursor);
+        } while (cursor);
+      }
     } else if (backend === 'claude') {
-      for (const dir of roots) {
-        const page = await listSessions({ dir, limit: 12, includeWorktrees: false, includeProgrammatic: true });
-        for (const s of page) if (authorized(s.cwd, roots)) result.push({ backend, id: s.sessionId, project: s.cwd, title: clean(s.customTitle ?? s.summary, 150), updated: s.lastModified });
+      for (const dir of roots ?? [undefined]) {
+        for (let offset = 0; ; offset += 100) {
+          const page = await listSessions({ ...(dir ? { dir, includeWorktrees: false } : {}), limit: 100, offset, includeProgrammatic: true });
+          for (const s of page) if (authorized(s.cwd, roots)) result.push({ backend, id: s.sessionId, project: s.cwd, title: clean(s.customTitle ?? s.summary, 150), updated: s.lastModified });
+          if (page.length < 100) break;
+        }
       }
     } else throw new Error('Unknown observer');
-    return result;
+    return [...new Map(result.map(s => [s.id, s])).values()].sort((a, b) => b.updated - a.updated);
   }
   async recent(session, roots) {
     if (!authorized(session.project, roots)) throw new Error('Project not authorized');
@@ -74,7 +93,7 @@ export class Observers {
       messages = (await this.codex.call('thread/turns/list', { threadId: session.id, limit: 2, sortDirection: 'desc', itemsView: 'summary' })).data;
     } else {
       const check = await getSessionInfo(session.id, { dir: session.project });
-      if (!check || !authorized(check.cwd, roots)) throw new Error('Project changed');
+      if (!check || !authorized(check.cwd, roots)) throw new Error('Session no longer available');
       // SDK has offset-from-start pagination, not a tail API. Cache by modification below.
       messages = (await getSessionMessages(session.id, { dir: session.project })).slice(-8);
     }
@@ -83,19 +102,30 @@ export class Observers {
   async poll(backend, roots, excluded = []) {
     const sessions = (await this.list(backend, roots)).filter(s => !excluded.includes(s.id));
     const changes = [];
+    // Enumerate all metadata, but never reread every old transcript per poll.
+    // Changed tails take priority; a small recent window catches streaming text
+    // whose backend timestamp has not advanced. On-demand tools can read others.
+    const changed = sessions.filter(s => this.baselines.has(`${backend}:${s.id}`) && this.baselines.get(`${backend}:${s.id}`) !== s.updated);
+    const newcomers = this.initialized.has(backend) ? sessions.filter(s => !this.baselines.has(`${backend}:${s.id}`)) : [];
+    const activeWindow = sessions.slice(0, 6);
+    const targets = new Set([...changed, ...newcomers, ...activeWindow].slice(0, 12).map(s => s.id));
     for (const s of sessions) {
       const key = `${backend}:${s.id}`; const previous = this.baselines.get(key);
+      if (!targets.has(s.id)) { if (previous === undefined && !this.initialized.has(backend)) this.baselines.set(key, s.updated); continue; }
       if (backend === 'claude' && previous === s.updated && this.activity.has(key)) continue;
       // Active threads can persist text without changing list.updatedAt. Read only
       // the newest authorized tails each poll and compare normalized content.
       const messages = await this.recent(s, roots);
       this.baselines.set(key, s.updated);
       const digest = hash(JSON.stringify(messages));
-      if (this.activity.get(key)?.digest === digest) continue;
+      const previousActivity = this.activity.get(key);
+      if (previousActivity?.digest === digest) continue;
       const activity = { ...s, sessionRef: key, sourceRef: `${key}:${s.updated}`, messages, digest };
       this.activity.set(key, activity);
-      if (previous !== undefined || this.initialized.has(backend)) changes.push(activity);
+      if (previousActivity || (previous !== undefined && previous !== s.updated) || (previous === undefined && this.initialized.has(backend))) changes.push(activity);
     }
+    const live = new Set(sessions.map(s => `${backend}:${s.id}`));
+    for (const key of this.activity.keys()) if (key.startsWith(`${backend}:`) && !live.has(key)) this.activity.delete(key);
     this.initialized.add(backend);
     return { sessions, changes };
   }

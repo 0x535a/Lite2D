@@ -30,6 +30,9 @@ struct CompanionRoleSections: View {
         } header: { Text(L10n.text("companion.personality")) } footer: { Text(L10n.text("companion.persona_help")).fixedSize(horizontal: false, vertical: true) }
         if let error = companion.roleErrors[id.uuidString] { Section { Text(error).foregroundStyle(.orange).textSelection(.enabled) } }
         Section {
+            Button(L10n.text("companion.trigger"), systemImage: "bubble.left.and.text.bubble.right") { companion.trigger(id) }
+                .disabled(!companion.canTrigger(id))
+            Text(L10n.text("companion.trigger_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Button(L10n.text("companion.history")) { companion.showHistory() }
             Text(L10n.text("companion.role_help")).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         } header: { Text(L10n.text("companion.continuity")) }
@@ -115,23 +118,7 @@ private struct CompanionSourceRow: View {
                     if let count = companion.sources[backend]?["count"] as? Int { Text(L10n.text("companion.sessions", String(count))) }
                 }.font(.caption).foregroundStyle(state == "unavailable" ? Color.orange : Color.secondary)
                 if let message = companion.sources[backend]?["message"] as? String { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-                ForEach(value.projects, id: \.self) { project in
-                    HStack {
-                        Text((project as NSString).abbreviatingWithTildeInPath).lineLimit(1).truncationMode(.middle).help(project)
-                        Spacer()
-                        Button { var copy = value; copy.projects.removeAll { $0 == project }; companion.settings.sources[backend] = copy; companion.changed() } label: { Image(systemName: "minus.circle") }
-                            .buttonStyle(.borderless).accessibilityLabel(L10n.text("companion.remove_project"))
-                    }
-                }
-                Button(L10n.text("companion.add_project")) {
-                    let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
-                    panel.message = L10n.text("companion.observer_help")
-                    if panel.runModal() == .OK, let url = panel.url {
-                        let project = url.resolvingSymlinksInPath().standardizedFileURL.path
-                        var copy = value; if !copy.projects.contains(project) { copy.projects.append(project) }
-                        companion.settings.sources[backend] = copy; companion.changed()
-                    }
-                }
+                Text(L10n.text("companion.all_sessions")).font(.caption).foregroundStyle(.secondary)
             }
         }.padding(.vertical, 5)
     }

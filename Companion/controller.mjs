@@ -60,9 +60,10 @@ export class Controller {
       try {
         await Promise.allSettled(BACKENDS.map(async backend => {
           const source = this.config.sources[backend];
-          if (!source.enabled || !source.projects.length) { this.sources[backend] = { state: 'disabled' }; return; }
+          if (!source.enabled) { this.sources[backend] = { state: 'disabled' }; return; }
           try {
-            const result = await this.observers.poll(backend, source.projects, this.config.characters.map(c => this.store.get(`session:${c.id}`)).filter(Boolean));
+            const ownSessions = this.store.db.prepare("SELECT value FROM state WHERE key LIKE 'session:%'").all().map(row => JSON.parse(row.value)).filter(Boolean);
+            const result = await this.observers.poll(backend, undefined, ownSessions);
             if (JSON.stringify(source) !== JSON.stringify(this.config.sources[backend])) return;
             this.sessions = [...this.sessions.filter(s => s.backend !== backend), ...result.sessions];
             this.sources[backend] = { state: 'available', count: result.sessions.length, checkedAt: this.now() };
@@ -81,9 +82,11 @@ export class Controller {
       void this.begin({ reason: 'idle_opportunity' });
     }
   }
-  async begin({ reason, evidence, source }) {
+  async begin({ reason, evidence, source, characterId }) {
     if (this.topic || this.config.paused || !this.config.enabled) return;
     let choices = this.visible(); if (!choices.length) return;
+    if (characterId) choices = choices.filter(c => c.id === characterId);
+    if (!choices.length) throw new Error('Selected character is unavailable');
     const watching = evidence?.sessionRef ? choices.filter(c => this.store.get(`watches:${c.id}`, []).includes(evidence.sessionRef)) : [];
     if (watching.length) choices = watching;
     const index = this.store.get('speakerIndex', 0) % choices.length; this.store.set('speakerIndex', index + 1);
@@ -124,6 +127,7 @@ export class Controller {
     const context = {
       topicId: topic.id, ...input, quotedEvidence: true,
       intent: 'Choose whether you have a worthwhile, new thing to say: interest in work, celebration/concern supported by evidence, curiosity, shared experience, or follow-up. You may skip. Do not invent user feelings or facts. Never ask the user to type a reply.',
+      ...(input.reason === 'manual_test' ? { manualTest: 'The user pressed your test button. Say one short visible greeting in your own Persona, or send a short message to an available companion. This is a presentation test: avoid skip unless you cannot safely respond. No user chat input is expected.' } : {}),
       recentConversation: this.store.history(16).filter(e => e.type === 'utterance').map(e => ({ from: e.characterId, text: e.text })),
       sharedMemory: this.store.listRecords().slice(0, 10).map(r => ({ path: r.path, ...this.store.readRecord(r.path), content: clean(this.store.readRecord(r.path).content, 1200) })),
       privateMemory: clean(this.store.get(`memory:${character.id}`, ''), 3000),
@@ -135,7 +139,10 @@ export class Controller {
     if (envelope) this.store.db.prepare("UPDATE deliveries SET status='delivered' WHERE id=?").run(envelope.id);
     const parsed = parseUtterance(output);
     if (topic.sentBy.has(character.id)) { topic.sentBy.delete(character.id); return; }
-    if (parsed.skip || !parsed.text) return;
+    if (parsed.skip || !parsed.text) {
+      if (input.reason === 'manual_test') this.emit('test.result', { characterId: character.id, result: 'skipped' });
+      return;
+    }
     this.say(character.id, parsed.text, topic, { emotion: parsed.emotion, to: envelope?.from });
     if (envelope) {
       const sender = this.visible().find(c => c.id === envelope.from);
@@ -158,10 +165,10 @@ export class Controller {
     await this.roles.nextStep?.(actor);
     if (name === 'companion_list_characters') return this.visible().filter(c => c.id !== actor).map(c => ({ id: c.id, name: c.name }));
     if (name === 'observer_list_sessions') return this.sessions;
-    if (name === 'observer_get_recent_work') return [...this.observers.activity.values()].filter(a => this.config.sources[a.backend].enabled && this.config.sources[a.backend].projects.includes(a.project)).slice(-8);
+    if (name === 'observer_get_recent_work') return [...this.observers.activity.values()].filter(a => this.config.sources[a.backend].enabled).slice(-8);
     if (name === 'observer_watch_session' || name === 'observer_unwatch_session') {
       const session = this.sessions.find(s => `${s.backend}:${s.id}` === args.sessionRef);
-      if (!session || !this.config.sources[session.backend].enabled || !this.config.sources[session.backend].projects.includes(session.project)) throw new Error('Session not authorized');
+      if (!session || !this.config.sources[session.backend].enabled) throw new Error('Session not authorized');
       const watched = this.store.get(`watches:${actor}`, []).filter(x => x !== args.sessionRef);
       if (name === 'observer_watch_session') watched.push(args.sessionRef);
       this.store.set(`watches:${actor}`, watched.slice(-24)); return { watching: name === 'observer_watch_session' };
@@ -169,9 +176,10 @@ export class Controller {
     if (name === 'observer_get_activity' || name === 'observer_get_session_summary') {
       let activity = this.observers.activity.get(args.sessionRef);
       const session = this.sessions.find(s => `${s.backend}:${s.id}` === args.sessionRef);
-      if (!session || !this.config.sources[session.backend].enabled || !this.config.sources[session.backend].projects.includes(session.project)) throw new Error('Activity not authorized or unavailable');
+      if (!session || !this.config.sources[session.backend].enabled) throw new Error('Activity not authorized or unavailable');
       if (!activity) {
-        activity = { ...session, sessionRef: args.sessionRef, sourceRef: `${args.sessionRef}:${session.updated}`, messages: await this.observers.recent(session, this.config.sources[session.backend].projects) };
+        activity = { ...session, sessionRef: args.sessionRef, sourceRef: `${args.sessionRef}:${session.updated}`, messages: await this.observers.recent(session) };
+        if (!this.config.sources[session.backend].enabled) throw new Error('Source access revoked');
         this.observers.activity.set(args.sessionRef, activity);
       }
       return activity;
@@ -209,6 +217,14 @@ export class Controller {
   async command(command) {
     if (command.type === 'configure') { this.configure(command.config); return; }
     if (command.type === 'stop') { this.stop(); return; }
+    if (command.type === 'trigger') {
+      if (!this.config.enabled || this.config.paused) throw new Error('Companion is disabled or in Do Not Disturb');
+      if (this.topic) throw new Error('A conversation is already running');
+      if (!this.visible().some(c => c.id === command.characterId)) throw new Error('Enable and show this character before testing');
+      const used = this.store.db.prepare('SELECT COUNT(*) AS n FROM requests WHERE at>=?').get(this.now() - 3600000).n;
+      if (used >= this.config.hourlyRequests) throw new Error('Hourly model budget reached');
+      return this.begin({ reason: 'manual_test', characterId: command.characterId });
+    }
     if (command.type === 'history') { this.emit('history', { history: this.store.history(400) }); return; }
     if (command.type === 'records') {
       this.emit('records', { records: this.store.listRecords().map(r => ({ path: r.path, ...this.store.readRecord(r.path) })) }); return;

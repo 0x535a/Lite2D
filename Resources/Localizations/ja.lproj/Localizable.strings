@@ -243,11 +243,11 @@
 "companion.budget" = "1 時間に最大 {0} 回の生成";
 "companion.interval_help" = "タイマーは考える機会を与えるだけで、発言を強制しません。オフでも作業に応じた発言は続きます。クールダウンと共有予算は常に適用されます。";
 "companion.observers" = "作業の観察";
-"companion.observer_help" = "選んだプロジェクトのみを観察し、ワークツリーには別途許可が必要です。抜粋はキャラクターのモデルサービスに送信される場合があります。許可の取り消しで新たな読み取りは止まりますが、以前の文脈は残ります。";
+"companion.observer_help" = "有効にすると、このソースからローカルで読める全プロジェクトとワークツリーの会話を観察します。抜粋はキャラクターのモデルサービスに送信される場合があります。オフにすると以後の読み取りは停止しますが、既存の文脈は残ります。";
 "companion.source.available" = "接続済み";
 "companion.source.disabled" = "観察していません";
 "companion.source.unavailable" = "利用できません";
-"companion.sessions" = "最近のセッション {0} 件";
+"companion.sessions" = "会話 {0} 件";
 "companion.remove_project" = "プロジェクトの許可を取り消す";
 "companion.add_project" = "プロジェクトフォルダを許可…";
 "companion.model" = "モデル";
@@ -277,3 +277,11 @@
 "companion.reset_context_help" = "個別のメモを消去し、古いモデルセッションとの関連付けを解除します。次回は新規セッションを使います。古い OpenCode 履歴は元の保存先に残ります。";
 "companion.shared_settings_help" = "モデル接続、観察の許可、雑談の間隔は全キャラクター共通です。一般設定で変更できます。";
 "companion.reaction_motion" = "発言時のモーショングループ";
+
+"companion.all_sessions" = "すべての会話・全プロジェクトとワークツリー";
+
+"companion.trigger" = "会話を開始してテスト";
+
+"companion.trigger_help" = "タイマーを待たずにこのキャラクターをテストします。コンパニオンとキャラクターを有効にし、モデルを表示しておやすみモードを解除してください。共有予算を使用します。";
+
+"companion.test_skipped" = "キャラクターは今回は静かにすることを選びました。後でもう一度試すか、ペルソナを調整してください。";

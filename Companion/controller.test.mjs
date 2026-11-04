@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, persona } from './store.mjs';
-import { clean, textOf, parseUtterance } from './policy.mjs';
+import { clean, textOf, parseUtterance, validConfig } from './policy.mjs';
 import { Controller } from './controller.mjs';
 import { Observers, CodexRPC } from './adapters.mjs';
 
@@ -118,5 +118,68 @@ test('active turn text updates are detected even when the list timestamp does no
     text = 'first plus new progress';
     assert.equal((await observer.poll('codex', ['/allowed'])).changes.length, 1);
     assert.equal((await observer.poll('codex', ['/allowed'])).changes.length, 0);
+  } finally { observer.close(); }
+});
+test('manual trigger targets the selected character and bypasses timer, but respects pause, visibility, busy state and budget', async () => {
+  const calls = []; let release;
+  const f = await fixture({ async generate(c, context) {
+    calls.push({ id: c.id, reason: context.reason, test: context.manualTest });
+    if (release) await new Promise(resolve => { release = resolve; });
+    return '{"text":"Test greeting"}';
+  }, async interrupt() {}, close() {} });
+  try {
+    f.c.lastTopic = f.c.now();
+    await f.c.command({ type: 'trigger', characterId: B });
+    assert.equal(calls.length, 1); assert.equal(calls[0].id, B); assert.equal(calls[0].reason, 'manual_test'); assert.ok(calls[0].test);
+    assert.equal(f.events.filter(e => e.type === 'utterance')[0].characterId, B);
+    f.c.configure({ enabled: true, paused: true, characters: chars });
+    await assert.rejects(f.c.command({ type: 'trigger', characterId: B }), /Do Not Disturb/);
+    f.c.configure({ enabled: true, characters: chars.map(c => ({ ...c, visible: c.id === A })) });
+    await assert.rejects(f.c.command({ type: 'trigger', characterId: B }), /Enable and show/);
+    f.c.configure({ enabled: true, characters: chars, hourlyRequests: 1 });
+    await assert.rejects(f.c.command({ type: 'trigger', characterId: A }), /budget/);
+    f.c.configure({ enabled: true, characters: chars, hourlyRequests: 12 });
+    release = true;
+    const first = f.c.command({ type: 'trigger', characterId: A });
+    await new Promise(r => setTimeout(r, 5));
+    await assert.rejects(f.c.command({ type: 'trigger', characterId: B }), /already running/);
+    release(); await first;
+  } finally { await f.close(); }
+});
+test('all-conversation scope migrates old project lists away; disabling a source revokes tool access', async () => {
+  const config = validConfig({ sources: { codex: { enabled: true, projects: ['/old/project'] } } });
+  assert.deepEqual(config.sources.codex, { enabled: true });
+  const f = await fixture({ async generate() { return 'skip'; }, async interrupt() {}, close() {} });
+  try {
+    f.c.configure({ enabled: true, characters: chars, sources: { codex: { enabled: true } } });
+    const session = { backend: 'codex', id: 'outside', project: '/other/project' };
+    f.c.sessions = [session];
+    f.c.observers.activity.set('codex:outside', { ...session, sessionRef: 'codex:outside', messages: [{text:'recent'}] });
+    assert.equal((await f.c.tool(A, 'observer_get_activity', { sessionRef: 'codex:outside' })).project, '/other/project');
+    f.c.configure({ enabled: true, characters: chars, sources: { codex: { enabled: false } } });
+    await assert.rejects(f.c.tool(A, 'observer_get_activity', { sessionRef: 'codex:outside' }), /not authorized/);
+  } finally { await f.close(); }
+});
+test('all-source pagination includes archived conversations and omits project filters', async () => {
+  const observer = new Observers(); const inputs = [];
+  const row = (id, project) => ({ id, cwd: project, location: {directory: project}, time: {updated: 1}, updatedAt: 1 });
+  observer.openCode = async () => ({ session: { async list(input) {
+    inputs.push(input);
+    if (input.archived) return {data:[row('archived', '/archived'), {...row('private-role', '/private'), metadata:{lite2dCompanion:true}}, {...row('old-role','/old/private'),title:`Lite2D ${A}`}], cursor:{}};
+    return input.cursor ? {data:[row('second', '/worktree')],cursor:{}} : {data:[row('first','/one')],cursor:{next:'next'}};
+  } } });
+  observer.codex.start = async () => {};
+  observer.codex.call = async (_, input) => {
+    inputs.push(input);
+    if(input.archived) return {data:[row('archived','/archived')]};
+    return input.cursor ? {data:[row('second','/worktree')]} : {data:[row('first','/one')],nextCursor:'next'};
+  };
+  try {
+    for (const backend of ['opencode','codex']) {
+      inputs.length = 0;
+      assert.deepEqual((await observer.list(backend)).map(s=>s.id), ['first','second','archived']);
+      assert.ok(inputs.every(i=>i.directory===undefined && i.cwd===undefined));
+      assert.equal(inputs.length,3);
+    }
   } finally { observer.close(); }
 });

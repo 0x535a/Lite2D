@@ -82,6 +82,7 @@ export class Roles {
     }
     if (!sessionID) {
       const session = await client.session.create({ title: `Lite2D ${character.id}`, agent: 'companion', location: { directory: p.dir }, permissions: RULES,
+        metadata: { lite2dCompanion: true, characterId: character.id },
         ...(model && model.includes('/') ? { model: { providerID: model.split('/')[0], id: model.slice(model.indexOf('/') + 1) } } : {}) });
       sessionID = session.id; this.store.set(`session:${character.id}`, sessionID);
     } else if (model && model.includes('/')) {
