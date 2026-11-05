@@ -10,13 +10,19 @@ struct CompanionRoleSections: View {
     var body: some View {
         Section {
             Toggle(L10n.text("companion.character_enabled"), isOn: enabled).disabled(!companion.hasPersona(id))
-            LabeledContent(L10n.text("companion.persona")) {
+            LabeledContent {
                 HStack {
                     Button(companion.hasPersona(id) ? L10n.text("companion.replace_persona") : L10n.text("companion.import_persona")) { companion.importPersona(id) }
                     if companion.hasPersona(id) { Button(L10n.text("companion.edit_persona")) { companion.editPersona(id) } }
                 }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.text("companion.persona"))
+                    if companion.hasPersona(id) { Text("persona.md").font(.caption).foregroundStyle(.secondary) }
+                }
             }
-            if companion.hasPersona(id) { Text("persona.md").font(.caption).foregroundStyle(.secondary) }
+        } header: { Text(L10n.text("companion.personality")) } footer: { Text(L10n.text("companion.persona_help")).fixedSize(horizontal: false, vertical: true) }
+        Section {
             Toggle(L10n.text("companion.gaze"), isOn: Binding(get: { companion.character(id).gaze }, set: { value in companion.updateCharacter(id) { $0.gaze = value } }))
             let groups = (companion.manager?.record(id)?.controller?.view.bridge.motionGroups ?? [:]).keys.sorted()
             if !groups.isEmpty {
@@ -27,14 +33,17 @@ struct CompanionRoleSections: View {
                     ForEach(groups, id: \.self) { Text($0).tag($0) }
                 }
             }
-        } header: { Text(L10n.text("companion.personality")) } footer: { Text(L10n.text("companion.persona_help")).fixedSize(horizontal: false, vertical: true) }
+        }
         if let error = companion.roleErrors[id.uuidString] { Section { Text(error).foregroundStyle(.orange).textSelection(.enabled) } }
         Section {
-            Button(L10n.text("companion.trigger"), systemImage: "bubble.left.and.text.bubble.right") { companion.trigger(id) }
-                .disabled(!companion.canTrigger(id))
+            LabeledContent(L10n.text("companion.trigger")) {
+                Button(L10n.text("companion.trigger_action")) { companion.trigger(id) }.disabled(!companion.canTrigger(id))
+            }
             Text(L10n.text("companion.trigger_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Button(L10n.text("companion.history")) { companion.showHistory() }
-            Text(L10n.text("companion.role_help")).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            LabeledContent(L10n.text("companion.history")) {
+                Button(L10n.text("companion.open_history")) { companion.showHistory() }
+            }
+            Text(L10n.text("companion.role_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         } header: { Text(L10n.text("companion.continuity")) }
         Section {
             LabeledContent(L10n.text("companion.bubble_position")) {
@@ -54,11 +63,17 @@ struct CompanionRoleSections: View {
                 .font(.caption).foregroundStyle(companion.bubbleEditingID == id ? Color.accentColor : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } header: { Text(L10n.text("companion.bubble_section")) }
-        Section(L10n.text("companion.section")) {
+        Section {
             LabeledContent(L10n.text("companion.state")) { Text(L10n.text("companion.state." + companion.runtimeState)).foregroundStyle(.secondary) }
-            Button(L10n.text("settings.general"), action: openGeneral)
+            Button(action: openGeneral) {
+                HStack {
+                    Text(L10n.text("settings.general"))
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain)
             Text(L10n.text("companion.shared_settings_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
+        } header: { Text(L10n.text("companion.shared_section")) }
     }
 }
 
@@ -99,13 +114,6 @@ struct CompanionGeneralSections: View {
                 HStack {
                     Text(companion.settings.intervalMinutes == 0 ? L10n.text("companion.off") : L10n.text("companion.minutes", String(companion.settings.intervalMinutes))).monospacedDigit().foregroundStyle(.secondary)
                     Stepper(L10n.text("companion.interval"), value: binding(\.intervalMinutes), in: 0...1440, step: 1).labelsHidden()
-                }
-            }
-            HStack {
-                ForEach([0, 5, 15, 30, 60], id: \.self) { minutes in
-                    Button(minutes == 0 ? L10n.text("companion.off") : L10n.text("companion.minutes", String(minutes))) {
-                        companion.settings.intervalMinutes = minutes; companion.changed()
-                    }
                 }
             }
             Stepper(L10n.text("companion.budget", String(companion.settings.hourlyRequests)), value: binding(\.hourlyRequests), in: 1...120)
@@ -164,18 +172,14 @@ struct CompanionHistoryView: View {
     @State private var memorySelection: CompanionMemorySelection?
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(L10n.text("companion.history")).font(.title2.bold())
-                Spacer()
-                Button(L10n.text("companion.stop")) { companion.stopTopic() }.disabled(!companion.busy)
-            }.padding(20)
             Picker(L10n.text("companion.history"), selection: $page) {
                 Text(L10n.text("companion.conversation")).tag("history")
                 Text(L10n.text("companion.public_memory")).tag("memory")
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 20).padding(.bottom, 12)
+            }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 320).padding(.horizontal, 20).padding(.vertical, 14)
             if page == "history" {
                 if companion.entries.isEmpty {
                     ContentUnavailableView(L10n.text("companion.empty_history"), systemImage: "bubble.left.and.bubble.right")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(companion.entries) { entry in
                         VStack(alignment: .leading, spacing: 5) {
@@ -218,8 +222,8 @@ struct CompanionHistoryView: View {
                 Text(L10n.text("companion.no_input")).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(L10n.text("companion.clear"), role: .destructive) { clearing = true }
-            }.padding(16)
-        }.frame(minWidth: 560, minHeight: 440)
+            }.padding(.horizontal, 20).padding(.vertical, 12)
+        }.frame(minWidth: 560, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
         .onChange(of: page) { _, value in if value == "memory" { companion.send(["type": "records"]) } }
         .sheet(item: $memorySelection) { selection in CompanionMemoryEditor(companion: companion, selection: selection) }
         .confirmationDialog(L10n.text("companion.clear_confirm"), isPresented: $clearing, titleVisibility: .visible) {
@@ -227,9 +231,13 @@ struct CompanionHistoryView: View {
         } message: { Text(L10n.text("companion.clear_help")) }
     }
     static func makeWindow(coordinator: CompanionCoordinator) -> NSWindow {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: CompanionHistoryView(companion: coordinator)))
+        let host = NSHostingController(rootView: CompanionHistoryView(companion: coordinator))
+        // The window owns its size; otherwise the content's minimum shrinks it below the requested height.
+        host.sizingOptions = []
+        let window = NSWindow(contentViewController: host)
         window.title = L10n.text("companion.history"); window.isReleasedWhenClosed = false
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.contentMinSize = NSSize(width: 560, height: 440)
         window.setContentSize(NSSize(width: 680, height: 560)); window.center(); return window
     }
 }

@@ -2,8 +2,8 @@
 "role.section" = "Characters";
 "settings.general" = "General";
 "settings.title" = "Lite2D Settings";
-"settings.appearance" = "Appearance & Placement";
-"settings.interaction" = "Motion & Interaction";
+"settings.appearance" = "Appearance";
+"settings.interaction" = "Motion";
 "settings.advanced" = "Advanced";
 "role.name" = "Character name";
 "settings.autosave" = "Saved automatically";
@@ -234,7 +234,7 @@
 "companion.persona_help" = "Choose a UTF-8 Markdown file describing personality, interests and speaking style. A private copy belongs to this model instance. Edits apply to the next turn.";
 "companion.invalid_persona" = "Choose a nonempty UTF-8 Markdown file under 64 KB.";
 "companion.gaze" = "Look at each other during conversations";
-"companion.continuity" = "Conversation & Memory";
+"companion.continuity" = "Conversation";
 "companion.role_help" = "This instance has its own conversation and private memory. Outfits keep them; duplicated instances do not share them.";
 "companion.initiative" = "Spontaneous Topics";
 "companion.interval" = "Idle conversation interval";
@@ -304,3 +304,6 @@
 "companion.service.start_failed" = "OpenCode could not be started. Check the executable and service configuration; automatic retries use backoff.";
 "companion.service.executable_missing" = "OpenCode executable was not found. Set its location and reconnect.";
 "companion.service_help" = "While Companion is enabled, OpenCode is checked every 5 seconds and started automatically if stopped. Disabling Companion stops monitoring but leaves OpenCode running for your work sessions.";
+"companion.trigger_action" = "Trigger";
+"companion.open_history" = "Open…";
+"companion.shared_section" = "Shared Settings";
