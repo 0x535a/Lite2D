@@ -7,12 +7,14 @@ const source = path.dirname(fileURLToPath(import.meta.url));
 const out = process.argv[2];
 if (!out) throw new Error('Output directory required');
 await mkdir(out, { recursive: true });
-const result = await build({ entryPoints: [path.join(source, 'main.mjs')], outfile: path.join(out, 'main.mjs'), bundle: true, metafile: true,
-  platform: 'node', format: 'esm', target: 'node24', minify: false, external: ['./prompt.mjs'],
+const result = await build({ entryPoints: [path.join(source, 'claude-helper.mjs')], outfile: path.join(out, 'claude-helper.mjs'), bundle: true, metafile: true,
+  platform: 'node', format: 'esm', target: 'node24', minify: false,
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
   legalComments: 'eof', logLevel: 'warning' });
-await copyFile(path.join(source, 'mcp.mjs'), path.join(out, 'mcp.mjs'));
-await copyFile(path.join(source, 'prompt.mjs'), path.join(out, 'prompt.mjs'));
+const prompts = await import('./prompt.mjs');
+await writeFile(path.join(out, 'prompt.json'), JSON.stringify({system: prompts.SYSTEM_PROMPT, turnIntent: prompts.TURN_INTENT,
+  manualTest: prompts.MANUAL_TEST_PROMPT, peerReceipt: prompts.PEER_RECEIPT_PROMPT, styleExample: prompts.STYLE_EXAMPLE_PROVENANCE,
+  toolDescriptions: prompts.TOOL_DESCRIPTIONS}, null, 2) + '\n');
 const packageRoots = new Set();
 for (const input of Object.keys(result.metafile.inputs)) {
   const marker = input.lastIndexOf('node_modules/'); if (marker < 0) continue;

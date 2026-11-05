@@ -36,7 +36,7 @@ EX 包按已验证的清单布局兼容；部分加密工坊 LPK 需要同目录
 
 OpenCode、Codex、Claude Code 三种来源按来源启用后，可观察本机可读取的全部会话，覆盖所有项目、工作树与可枚举的归档记录；无需逐个选择项目。筛选后的会话内容可能发送给角色配置的模型服务。角色不能执行 Shell、通用代码或修改用户项目，只能通过专用工具观察、交流和管理记忆。关闭对应来源可停止后续读取，清除记录和重置会话是另外的操作。
 
-需要本机 Node.js 24+ 和 OpenCode 2.2.5；观察 Codex 使用本机 CLI，Claude 历史读取函数随应用客户端组件提供。程序位置会自动从 PATH、Homebrew 和 nvm 检测，也可手动指定。模型访问沿用 OpenCode provider 配置；可填写 `provider/model`，留空使用其默认模型。额度、网络或模型访问失败会显示错误，不生成替代台词。
+调度、预算、记忆和状态管理在应用内以 Swift 运行。OpenCode/Codex 使用原生 HTTP/JSON-RPC 接入；仅 Claude 历史读取需要 Node.js 24+ 和官方 SDK 助手，按需启动、连续请求复用，空闲 60 秒后退出。角色交流不需要 Node。角色服务使用本机 OpenCode 2.2.5；观察 Codex 使用本机 CLI。程序位置会自动从 PATH、Homebrew 和 nvm 检测，也可手动指定。模型访问沿用 OpenCode provider 配置；可填写 `provider/model`，留空使用其默认模型。额度、网络或模型访问失败会显示错误，不生成替代台词。
 
 ## 显示器绑定
 

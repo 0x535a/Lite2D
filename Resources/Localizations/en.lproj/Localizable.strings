@@ -253,10 +253,10 @@
 "companion.model" = "Model";
 "companion.dependencies" = "Executable Locations";
 "companion.not_found" = "Not found";
-"companion.dependencies_help" = "Detected automatically. Use an absolute path to override, then reconnect. Node.js 24 or later is required.";
+"companion.dependencies_help" = "OpenCode and Codex use native connections. Node.js is only needed for the on-demand Claude history SDK helper; it exits after 60 seconds of idle time. Override paths if needed, then reconnect.";
 "companion.runtime" = "Model Runtime";
 "companion.model_help" = "Uses OpenCode model access. Leave empty for its default model, or enter provider/model. Observation itself does not generate model requests.";
-"companion.dependencies_missing" = "Node.js or OpenCode was not found. Check executable locations.";
+"companion.dependencies_missing" = "OpenCode was not found. Check executable locations.";
 "companion.runtime_missing" = "Companion resources are missing. Reinstall this build.";
 "companion.runtime_exited" = "Companion stopped unexpectedly. Reconnect to try again.";
 "companion.conversation" = "Conversation";
@@ -293,3 +293,5 @@
 "companion.bubble_help" = "Bubbles stay above the model by default. Drag the preview to place them near this character; the saved position follows the model when it moves.";
 "companion.bubble_dragging" = "Drag the preview bubble to the desired position, then click Done.";
 "companion.bubble_preview" = "I can talk here, right? Drag me to choose where my words will appear.";
+
+"companion.claude_node" = "Node.js for Claude history";
