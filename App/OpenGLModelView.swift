@@ -12,6 +12,9 @@ struct RenderedFrame {
 
 final class OpenGLModelView: NSOpenGLView {
     let bridge = L2DBridge()
+    // Runtime-only target; never changes the user's persisted mouse-follow preference.
+    var companionLookTarget: NSPoint?
+    var manualMotionUntil = Date.distantPast
     var settings: ModelInstanceSettings
     var onZoom: ((Double) -> Void)?
     var onDragFinished: ((NSRect) -> Void)?
@@ -132,8 +135,8 @@ final class OpenGLModelView: NSOpenGLView {
     func renderFrame(deltaTime: Double, now: Double = ProcessInfo.processInfo.systemUptime) {
         guard loaded, active, let window else { return }
         openGLContext?.makeCurrentContext()
-        let point = window.convertPoint(fromScreen: SharedMouseTracker.shared.point(at: now))
-        let raw = settings.trackingEnabled ? NSPoint(
+        let point = window.convertPoint(fromScreen: companionLookTarget ?? SharedMouseTracker.shared.point(at: now))
+        let raw = (companionLookTarget != nil || settings.trackingEnabled) ? NSPoint(
             x: min(max((point.x - bounds.midX) / max(bounds.width * 0.5, 1), -1), 1),
             y: min(max((point.y - bounds.height * 0.7) / max(bounds.height * 0.35, 1), -1), 1)
         ) : .zero

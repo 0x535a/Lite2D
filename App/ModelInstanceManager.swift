@@ -1,6 +1,7 @@
 import AppKit
 
 final class ModelInstanceManager {
+    var companion: CompanionCoordinator?
     let store: SettingsStore
     let displayRegistry: DisplayRegistry
     private(set) var records: [ModelRecord] = []
@@ -257,6 +258,7 @@ final class ModelInstanceManager {
     }
     func play(_ id: UUID, group: String, index: Int) {
         guard let controller = record(id)?.controller else { return }
+        controller.view.manualMotionUntil = Date().addingTimeInterval(10)
         controller.view.openGLContext?.makeCurrentContext()
         _ = controller.view.bridge.play(group: group, index: Int32(index))
     }
@@ -356,6 +358,7 @@ final class ModelInstanceManager {
     func changed() { store.schedule(snapshot()); onChange?() }
     func save() { store.save(snapshot()) }
     func shutdown() {
+        companion?.shutdown()
         if let globalClickMonitor { NSEvent.removeMonitor(globalClickMonitor) }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
         globalClickMonitor = nil; localClickMonitor = nil; clickStart = nil

@@ -135,6 +135,16 @@ xcrun swiftc -parse-as-library Tests/LegacyMotionLifecycleTests.swift -o .local/
 
 模型应存放在稳定的数据目录，例如 `~/Library/Application Support/Lite2D/Models/`，不依赖项目目录。部署时备份现有设置，按现有 schema 追加模型实例并绑定显示器，不把私人资产或配置加入 git。登录启动沿用系统设置，不因安装而自动开启。
 
+## Companion 构建依赖（2026-11-05）
+
+生产 Controller 为 `App/NativeCompanion*.swift`，链接系统 SQLite3、Network 和 CoreServices。OpenCode HTTP、Codex JSON-RPC、调度、记忆和 MCP 都在 Swift 侧；Node.js 24+ 仅用于构建资源和按需读取 Claude 历史。
+
+依赖锁定在 `Companion/package-lock.json`。`sh scripts/build.sh` 发现 `Companion/node_modules/esbuild` 缺失时先执行 `npm ci --prefix Companion --ignore-scripts`，随后通过 `Companion/build.mjs` 将官方 Claude 历史 SDK 打包为 `Contents/Resources/Companion/claude-helper.mjs`，并从 `prompt.mjs` 生成 `prompt.json` 和依赖许可清单。不会在用户机器上安装依赖，不打包常驻 Node Controller 或 Claude 可执行文件。助手连续读取复用，默认空闲 60 秒退出。
+
+执行 `python3 scripts/test_native_companion.py`（或 `npm test --prefix Companion`）验证原生 Controller、SDK 助手、真实 OpenCode 与原生 MCP；执行 `python3 scripts/test_companion.py` 验证应用内界面与呈现，不驱动桌面输入。测试需要先构建 `dist/Lite2D.app`。
+
+旧 JavaScript 实现、测试及专属依赖已移除，历史基线可从 `007efd1` 的独立 checkout 获取。`scripts/profile_companion_runtime.py` 默认测量当前运行时；`scripts/profile_companion_app.py` 默认测量当前应用，可通过 `--baseline-app /path/to/old/Lite2D.app/Contents/MacOS/Lite2D` 显式加入历史应用对比。两者均支持 `--app` 指定当前可执行文件。历史数据与测量限制见 `docs/COMPANION_RUNTIME.md`。
+
 
 ## 设置窗口与快捷菜单（2026-11-03）
 

@@ -215,3 +215,64 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 构建产物、分发暂存副本和 ZIP 解压后的应用均通过 `codesign --verify --deep --strict`；版本与 ZIP 完整性检查通过，应用附件无模型、个人配置、日志或 Finder 元数据。
 - 发布日志与应用 README 同步为 build 6；源码附件使用发布提交的 Git 快照生成，应用包与源码包重新计算 SHA-256。日志与暂存产物保留于忽略目录 `.local/release-1.0.0-build6/`。
 - 本次未重复完整集成、压力或性能测试，未覆盖 `/Applications` 安装版和日常角色配置。
+
+## Companion v1.1（2026-11-04，build 7）
+
+**交付：** 新增按模型实例绑定 Persona Markdown 的主动陪伴功能，三种工作来源、主动评论/低频闲聊、真实双 Session 角色交流、公共/私有记忆、原生气泡、交流记录、停止与对视。无 TTS、音频、口型或用户聊天输入；角色工具层禁用 Shell、execute、edit、write、external_directory。应用包 1.1.0（build 7），controller 客户端随包提供，Claude 可执行文件不随包分发给用户。
+
+**实际运行验收：**
+
+- `node --test Companion/controller.test.mjs Companion/native.test.mjs`：11 项通过，覆盖记录事务/冲突/作者、Persona 校验、输出隔离、工具宿主即时返回、独立 Session 与 MCP 消息、私聊回送、预算/持续工具调用/重试计费、停止、频率、缓存重置、文本更新检测、重启恢复及上下文消费；权限检查覆盖 shell/execute/edit/write/external_directory 均为 deny。
+- 真实 OpenCode 2.2.5 + 本地确定性 OpenAI-compatible 上游：两个角色各自的 Session，A 调工具后 B 独立执行记忆工具并回复，A 以非生成 inbox 接纳；应用重启恢复同一 Session 和私有记忆；不修改用户 Session。
+- **真实外部模型**：`homo/gpt-5.6-sol` + 提供的 22/33 人设完成一次双角色消息往来。A 说「三三，晚上好呀！我来看看姐妹频道有没有顺利接通～」，B 说「晚上好，姐姐。姐妹频道已经顺利接通了——这次没被你弄成单向广播，做得不错。」，无错误、两个独立 Session。此次不宣称长期外网可用性；本机默认免费模型额度耗尽、其他几项 provider 返回 502/503 是外部服务状态。
+- `LITE2D_CAPTURE_OWN_WINDOW=1 python3 scripts/test_companion.py`：12 项通过，含普通 Markdown、22/33 示例按说话人筛选、四语页面状态、原生窗口、双向视线渲染值、拖动更新、取消/迟到事件释放、气泡非激活面板。截图仅为本测试窗口。
+- `python3 scripts/test_localization.py`：276 键 × 4 语言通过，占位符一致。设置单元测试通过（使用 `.local/models` 隔离复制，不含用户模型变化）。
+- 构建应用包 7.3 MB，通过 `codesign --verify --deep --strict`，内置 controller 为 1.4 MB。
+- 安装后再次从 `/Applications` 内置 bundle 启动隔离 Controller：三种来源状态均为 available（本项目 OpenCode 0、Claude 2、Codex 12 个近期会话），正常关闭且无遗留观察进程。运行中的日常应用通过 ready/status 事件确认 Companion 已成功加载；用户项目授权列表保持空。
+
+**已知边界：** OpenCode MCP 在 “connected” 后有一定注册时延；已在连接后等待工具注册完成再启动。共享小时预算基于请求数，无法覆盖 OpenCode 内部 provider 精确计费。Claude 历史读取不是文件尾部增量，跨进程更新时延与读取成本按实际 SDK 表现。工作来源默认不授权目录；观察内容可能发送给角色所用模型服务。对视脸部锚点仍是按窗口约 50%/70% 的默认估计，不同模型可能有偏差。
+
+安装验证修正了两项问题：Companion 设置解码支持缺省字段，避免旧配置整份失效；移除 jsonc-parser 的 UMD 打包路径，provider 配置通过本机 OpenCode 接口读取，已重验实际安装版 Controller 启动。
+
+**安装：** `/Applications/Lite2D.app` 已同步为 1.1.0（build 7），严格签名校验与运行中进程核对通过。已按现有模型实例 UUID 绑定用户提供的 22/33 Persona 与各 152 条可选原创风格示例；启用 30 分钟闲聊间隔，使用已实际验证的 `homo/gpt-5.6-sol`。三种工作来源默认不授权目录，原有播放器设置未修改。安装版已记录 Controller 的 ready/status 事件。
+
+## Companion v1.1.1（2026-11-04，build 8）
+
+- 观察范围改为来源级开关，开启后跨项目/工作树分页枚举本机全部可读取对话，包括接口可枚举的归档。移除项目选择，旧项目设置迁移为来源开关；排除新旧角色 Session（包含重置/移除的历史），避免将自己的台词当作工作进展。
+- 每轮限定近期/变化尾部读取，全部历史元数据分页列出，不把大量旧对话全部读入角色。初次建立基线不触发台词；关闭来源撤回缓存与工具访问。
+- 每个模型的陪伴页增加「触发一次对话」。手动触发只选择对应模型实例，跳过定时/冷却等待，仍遵守陪伴开关、角色启用、可见性、勿扰、忙碌和共享预算。不增加聊天输入框。
+- `node --test Companion/controller.test.mjs Companion/native.test.mjs`：14 项通过，新增目标角色、冷却跳过、勿扰/隐藏/重复点击/预算拒绝、来源授权撤回、跨项目与归档分页、角色 Session 过滤验证。
+- 原生专项验收 19 项通过，包含旧项目设置迁移、每角色测试按钮的启用条件及拒绝后忙碌状态释放。四语 280 键校验通过，新增页面维持原生分组表单。
+- 全局接口实际枚举到 OpenCode 344、Codex 344、Claude 17 个会话，覆盖 58/50/6 个项目标识；数目为该次探测统计，随后排除本应用角色 Session 后数量可能下降。三个来源初始 poll 的变化数均为 0，各只缓存 6 个近期尾部。
+- 使用 `homo/gpt-5.6-sol` 和提供的两份 Persona，分别执行所选角色的 trigger 命令，22/33 均真实生成简短问候，无 skip 或错误。测试不依赖 computer use。
+- 已更新并启动 `/Applications/Lite2D.app` 1.1.1（build 8），保留两角色 Persona/记忆与原有布局，按本次指令开启三种来源的全部会话观察。安装后实时状态为 available：OpenCode 302、Codex 344、Claude 17；OpenCode 数量排除了保留在原存储中的本应用角色测试/历史 Session。安装文件哈希与构建一致，严格签名校验通过。
+
+## Companion v1.1.2（2026-11-04，build 9）
+
+- 每个模型新增气泡位置编辑：设置页「调整位置…」显示可拖动预览气泡，「完成」保存相对模型窗口的偏移，「取消」放弃，「重置」恢复默认上方位置。
+- 刷新循环同步相对位置，不会把正在拖动的预览拉回旧位置；模型移动后气泡跟随。普通气泡保持不激活和点击穿透，仅预览接受鼠标。
+- 原生专项验收新增 5 项：预览可交互、拖动结果保存、后台刷新不改位置、正常台词采用保存偏移、设置编解码与重置；合计 25 项通过。14 项 Controller/协议测试、四语 288 键检查通过。
+- 已更新并启动 `/Applications/Lite2D.app` 1.1.2（build 9），保留 Companion 设置与全部会话观察授权；安装文件与构建哈希一致，严格签名校验通过，实时状态 OpenCode 302 / Codex 344 / Claude 17 均 available。
+
+## Companion v1.1.3（2026-11-04，build 10）
+
+- 将共享 System、每轮行为要求、手动测试、同伴消息回送、风格示例说明和 13 个工具描述统一到 `Companion/prompt.mjs`，并纳入用户修改后的提示词。Persona Markdown 与工具权限保持独立。
+- `prompt.mjs` 作为独立文件随应用打包，Controller 和 MCP 入口共用；14 项 Controller/真实 OpenCode 协议测试通过。打包后的 Controller 独立启动/退出、MCP 13 个工具描述加载以及严格签名校验通过。
+- `/Applications/Lite2D.app` 已更新为 1.1.3（build 10）并重启，安装的二进制与 Controller/MCP 资源和构建一致；安装包内提示词与用户编辑文件逐字一致。保留现有模型、Persona、记忆与开关设置；用户当前关闭了陪伴功能，安装未自动开启。
+
+## Companion v1.2.0（2026-11-05，build 11）
+
+- 常驻 Controller 迁入应用内 Swift actor；SQLite、预算、队列、状态、OpenCode HTTP、Codex JSON-RPC 与 MCP 为原生实现。Claude 仍使用官方 SDK 按需助手：连续查询复用、并发去重、默认空闲 60 秒退出，无变化轮询不唤醒。Swift FSEvents 只监听变化，不解析 JSONL 正文。
+- `python3 scripts/test_native_companion.py`：28 项原生检查通过，覆盖 SDK 生命周期/变化检测/撤回/崩溃退避、数据格式、事务、预算、触发与取消；真实 OpenCode＋原生 MCP 双角色、独立工具、重启/记忆/上下文消费通过，5 次模型夹具调用与预算一致，交流期间 Node 助手启动次数为 0。
+- 提供的两份 Persona 与当前真实配置模型 `homo/fast-model` 在原生链路上生成两条独立问候，无错误；三种来源全局观察均 available，SDK 助手一次启动后退出。原生界面/气泡/对视 26 项回归与四语 289 键通过，无 computer use。
+- 旧数据库约 275 MiB 的一致性快照经新运行时打开/关闭，state、records、events、changes 行数与内容哈希不变，含 3861 条旧事件。读取既有记录不需要 Node。原有 Persona、共享提示词、会话 ID 与权限边界保留。
+- 同 SDK/数据/请求序列的 90 秒 Controller 短测：空闲 footprint 合计均值 49.4 → 5.1 MiB；活跃 footprint 峰值 54.0 → 47.3 MiB，但活跃 RSS 峰值 78.1 → 95.1 MiB。SDK 助手首读约 88 ms、复用约 1 ms，14 次 SDK 请求仅启动一次，空闲 Node 数为 0。
+- 同两个模型、30 FPS、关闭鼠标跟随、相同隔离会话夹具的整应用各 75 秒顺序短测：空闲进程树 footprint 合计 253.9 → 204.8 MiB，减少约 49.1 MiB（约 19%）；RSS 合计 191.5 → 139.1 MiB。末段约 9 秒 CPU 3.25 → 3.38 秒，渲染占主导，未证实 CPU 改善。数据为本机单轮比较，不保证所有环境；详细方法和折衷见 `docs/COMPANION_RUNTIME.md`。
+- `/Applications/Lite2D.app` 已更新为 1.2.0（build 11），安装前保留旧应用和一致性数据库备份；模型设置、Companion 设置和 Persona 哈希保持不变。安装文件与构建一致，严格签名校验通过。安装后持续 72 秒的进程核对确认应用在运行，旧 Node Controller 为 0，空闲 Claude 助手为 0，未出现周期重启。
+
+## Companion v1.2.1（2026-11-05，build 12）
+
+- OpenCode 服务生命周期与只读观察隔离：Companion 开启时每 5 秒检查注册 PID/版本与 health API；停止、注册失效或不可达时自动调用官方 `opencode service start`，启动期间 UI 显示进度，失败显示原因并指数退避。关闭 Companion 停止监控，但不停止 OpenCode。
+- 专项检查新增 7 项：缺失注册显示 stopped 而非文件异常、拒绝非 loopback 注册、并发请求只启动一次、服务关闭自动恢复、关闭监控不停止服务、关闭后不重启、失败状态可见与退避，共 35 项原生检查；真实协议和 SDK 会话测试继续通过。
+- 安装版真实恢复：更新前 OpenCode 后台服务为 stopped 且 `service.json` 不存在；安装 1.2.1 后在 Companion 开启状态确认自动启动、服务状态与设置显示一致。安装后又主动执行 `opencode service stop`，约 10 秒内由监控恢复为 running。
+- 角色专用服务记录 PID，正常关闭清除；应用启动验证会读取旧 PID 与进程命令，只回收精确匹配的内部 ephemeral-port 命令，不触碰用户的 `opencode serve --service`。此前未记录 PID 的遗留角色服务已在本机一次性安全清理。

@@ -44,7 +44,7 @@ final class SettingsWindowModel: ObservableObject {
 }
 
 enum RoleSettingsPage: String, CaseIterable, Identifiable {
-    case appearance, interaction, advanced
+    case appearance, interaction, companion, advanced
     var title: String { L10n.text("settings." + rawValue) }
     var id: String { rawValue }
 }
@@ -119,7 +119,7 @@ private struct SettingsRootView: View {
                     Label(model.status.importInProgress ? L10n.text("import.busy") : L10n.text("role.add"), systemImage: "plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderless).padding(16).disabled(model.status.importInProgress)
+                .buttonStyle(.borderless).padding(.horizontal, 14).padding(.vertical, 12).disabled(model.status.importInProgress)
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
         } detail: {
@@ -140,6 +140,7 @@ private struct SettingsRootView: View {
 }
 
 private struct RoleSettingsView: View {
+    @ObservedObject private var language = LanguageStore.shared
     @ObservedObject var model: SettingsWindowModel
     let record: ModelRecord
     @State private var name: String
@@ -147,6 +148,7 @@ private struct RoleSettingsView: View {
     @State private var removing = false
     @State private var previewGroup = ""
     @State private var previewIndex = 0
+    @State private var hoveringName = false
     @FocusState private var editingName: Bool
     init(model: SettingsWindowModel, record: ModelRecord) {
         self.model = model; self.record = record
@@ -169,6 +171,13 @@ private struct RoleSettingsView: View {
                     .textFieldStyle(.plain).font(.system(size: 25, weight: .semibold))
                     .focused($editingName).onSubmit(commitName)
                     .accessibilityLabel(L10n.text("role.name"))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(editingName || hoveringName ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(alignment: .trailing) {
+                        if !editingName { Image(systemName: "pencil").font(.callout).foregroundStyle(.tertiary).padding(.trailing, 8).allowsHitTesting(false) }
+                    }
+                    .padding(.horizontal, -6)
+                    .onHover { hoveringName = $0 }
                 HStack(spacing: 6) {
                     Circle().fill(record.error != nil ? Color.orange : canAdjust ? .green : .secondary).frame(width: 7, height: 7)
                     Text(model.status.roleStatus(record))
@@ -179,7 +188,7 @@ private struct RoleSettingsView: View {
             }.padding(24)
             Picker(L10n.text("settings.group"), selection: $model.page) {
                 ForEach(RoleSettingsPage.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 16)
+            }.id(language.revision).pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 16)
             if let error = record.error {
                 notice(L10n.text("role.load_failure", L10n.error(error)), button: L10n.text("model.replace")) { model.status.chooseReplacement(id) }
             } else if !manager.isDisplayConnected(record) {
@@ -191,6 +200,8 @@ private struct RoleSettingsView: View {
                 switch model.page {
                 case .appearance: appearance
                 case .interaction: interaction
+                case .companion:
+                    if let companion = manager.companion { CompanionRoleSections(companion: companion, id: id, openGeneral: { model.selection = "general" }) }
                 case .advanced: advanced
                 }
             }.formStyle(.grouped)
@@ -432,6 +443,7 @@ private struct GeneralSettingsView: View {
                         Button(L10n.text("startup.open_settings")) { model.login.openSystemSettings() }
                     }
                 }
+                if let companion = model.manager.companion { CompanionGeneralSections(companion: companion) }
                 Section {
                     Button(model.manager.allHidden ? L10n.text("role.restore_all") : L10n.text("role.hide_all")) { model.manager.toggleAllHidden() }.disabled(model.manager.records.isEmpty)
                     Button(L10n.text("role.undo_remove")) { model.manager.undoRemove() }.disabled(model.manager.removedSettings == nil)
