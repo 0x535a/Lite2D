@@ -1,6 +1,6 @@
 // All shared model-facing instructions live here. Persona Markdown remains
-// user-owned content and is appended verbatim by buildSystemPrompt.
-// Changing wording does not change tool permissions enforced in roles/policy.
+// user-owned content and is appended verbatim by NativeCompanionPrompt in Swift.
+// Changing wording does not change tool permissions enforced by the Swift runtime.
 
 // Persistent System: identity, vibe, boundaries, messaging and output protocol.
 export const SYSTEM_PROMPT = [
@@ -22,10 +22,6 @@ export const SYSTEM_PROMPT = [
   "Never output reasoning, markdown blocks around the JSON, or out-of-character explanations.",
 ].join(' ');
 
-export function buildSystemPrompt(personaText) {
-  return `${SYSTEM_PROMPT}\n\nPERSONA:\n${personaText}`;
-}
-
 // Per-wake instructions passed alongside runtime evidence and memory.
 export const TURN_INTENT = [
   "You just perked your ears up and glanced at the screen.",
@@ -42,7 +38,7 @@ export const PEER_RECEIPT_PROMPT = 'You overheard a fellow companion say this (f
 export const STYLE_EXAMPLE_PROVENANCE = 'Style inspiration only (to capture the cute/lively tone)—not real facts, memory, or prior chat';
 
 // Tool descriptions are also part of the model-visible prompt. Schemas and
-// execution stay in mcp.mjs; only their wording is centralized here.
+// execution stay in App/NativeCompanionTransport.swift; only their wording is centralized here.
 export const TOOL_DESCRIPTIONS = Object.freeze({
   companion_list_characters: 'Look around the desktop to see which other companions are nearby to chat with.',
   companion_send_message: 'Say a short, visible message to another companion. Queues delivery; never waits for a reply.',

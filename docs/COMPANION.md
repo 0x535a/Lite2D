@@ -48,7 +48,7 @@ Persona 使用自由 UTF-8 Markdown，不需要 front matter；上限 64 KB。�
 
 ## 验证
 
-- `python3 scripts/test_native_companion.py`：Swift 调度、存储、SDK 助手生命周期与 FSEvents、真实 OpenCode/原生 MCP、独立 Session、预算、非生成回送与重启。旧 JavaScript 测试保留作基线，不作为新运行时验收。
+- `python3 scripts/test_native_companion.py`：Swift 调度、存储、SDK 助手生命周期与 FSEvents、真实 OpenCode/原生 MCP、独立 Session、预算、非生成回送与重启。旧 JavaScript 实现和测试已移除；历史基线见提交 `007efd1`。
 - `python3 scripts/test_companion.py`：应用内加载模型、四语页面、气泡、双方对视、拖动、取消与持久设置保持；不使用 computer use 或外部应用自动化。
 - `LITE2D_CAPTURE_OWN_WINDOW=1 python3 scripts/test_companion.py`：额外记录仅本应用测试窗口的系统合成截图，用于核对原生控件布局；不操作桌面输入。
 - `python3 scripts/test_localization.py`：四语资源、占位符与即时切换。

@@ -64,7 +64,7 @@ SDK 助手按 `stopped → starting → ready/busy → idle grace → stopped` �
 
 此场景减少约 49.1 MiB footprint 合计（约 19%）；渲染占主要 CPU，未证实 CPU 改善。SDK 冷启动/活跃 RSS 的折衷保留在表中，不能用“语言更原生”代替实测。
 
-复现：
+当前版本验证与采样：
 
 ```sh
 sh scripts/build.sh
@@ -75,6 +75,8 @@ python3 scripts/profile_companion_runtime.py --seconds 90
 python3 scripts/profile_companion_app.py --seconds 75
 ```
 
-原始计数、逐进程采样与数据兼容哈希在忽略目录 `.local/verification/swift-migration/`。旧 JavaScript Controller 与其测试暂保留作行为/性能基线，但不进入应用包，也不参与新运行时。
+原始计数、逐进程采样与数据兼容哈希在忽略目录 `.local/verification/swift-migration/`。上述表格是迁移时的历史测量，当前清理未重新采集对比数据。旧 JavaScript Controller、测试及其专属依赖已移除；需要复现旧侧时，请在提交 `007efd1` 的独立 checkout 中使用当时的脚本与锁文件。
+
+当前 `profile_companion_runtime.py` 只测量 Swift 运行时，`profile_companion_app.py` 默认只测量当前应用，不再依赖隐含的旧应用路径。两者支持 `--app /path/to/Lite2D`；整个应用对比可额外传入 `--baseline-app /path/to/old/Lite2D`。采样结果仍写入上述忽略目录。
 
 安装到 `/Applications/Lite2D.app` 后，核对了资源/可执行文件哈希与签名，原设置和 Persona 未改写；旧应用和数据库可从 `.local/installation-backups/` 回退。连续 72 秒观察中，应用仍在运行，没有旧 Node Controller，也没有空闲后重启的 Claude 助手。
