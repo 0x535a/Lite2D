@@ -33,6 +33,10 @@ final class CompanionSelfTest {
                 try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
                 try check(manager.records.count >= 2, "Two model instances loaded")
                 let c = CompanionCoordinator(manager: manager); manager.companion = c
+                c.receive(["type": "status", "sources": [:], "busy": false,
+                    "openCodeService": ["state": "running", "pid": 42, "version": "2.2.5"]])
+                try check(c.openCodeService["state"] as? String == "running" && c.openCodeService["pid"] as? Int == 42,
+                    "Companion settings receive OpenCode service lifecycle status")
                 let a = manager.records[0], b = manager.records[1]
                 let plain = output.appendingPathComponent("plain-persona.md")
                 try "A quiet companion, defined only by this Markdown.".write(to: plain, atomically: true, encoding: .utf8)

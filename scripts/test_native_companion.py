@@ -27,7 +27,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 def main():
     sources = ['NativeCompanionStore.swift', 'NativeCompanionTransport.swift', 'NativeClaudeHelper.swift',
-               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeCompanionRuntime.swift']
+               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift']
     unit = OUT / 'native-tests'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *[str(ROOT / 'App' / name) for name in sources],
                     str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)

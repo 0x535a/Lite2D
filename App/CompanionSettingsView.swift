@@ -75,6 +75,18 @@ struct CompanionGeneralSections: View {
             LabeledContent(L10n.text("companion.state")) {
                 Text(L10n.text("companion.state." + companion.runtimeState)).foregroundStyle(.secondary)
             }
+            LabeledContent(L10n.text("companion.opencode_service")) {
+                let state = companion.openCodeService["state"] as? String ?? "disabled"
+                HStack(spacing: 6) {
+                    if state == "checking" || state == "starting" { ProgressView().controlSize(.small) }
+                    Text(L10n.text("companion.service." + state))
+                        .foregroundStyle(state == "failed" ? Color.orange : Color.secondary)
+                }
+            }
+            if let reason = companion.openCodeService["reason"] as? String {
+                Text(L10n.text("companion.service." + reason)).font(.caption).foregroundStyle(.orange)
+            }
+            Text(L10n.text("companion.service_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button(L10n.text("companion.stop")) { companion.stopTopic() }.disabled(!companion.busy)
                 Button(L10n.text("companion.history")) { companion.showHistory() }

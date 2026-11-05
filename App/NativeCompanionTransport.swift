@@ -1,6 +1,20 @@
 import Foundation
 import Network
 
+enum NativeOpenCodeServiceError: LocalizedError, Equatable {
+    case stopped, invalidRegistration, unreachable, startFailed, executableMissing, monitoringDisabled
+    var errorDescription: String? {
+        switch self {
+        case .stopped: return "OpenCode background service is stopped."
+        case .invalidRegistration: return "OpenCode service registration is invalid or out of date."
+        case .unreachable: return "OpenCode background service is not responding."
+        case .startFailed: return "OpenCode could not be started. Companion will retry automatically."
+        case .executableMissing: return "OpenCode executable was not found. Check its location in settings."
+        case .monitoringDisabled: return "OpenCode service monitoring is disabled."
+        }
+    }
+}
+
 final class NativeAsyncValue<Value> {
     private let lock = NSLock()
     private var result: Result<Value, Error>?
@@ -28,6 +42,8 @@ final class NativeAsyncValue<Value> {
 struct NativeCompanionHTTP {
     let baseURL: URL
     var authorization: String?
+    var registeredPID: Int?
+    var registeredVersion: String?
     func request(_ method: String, _ path: String, query: [String: String] = [:], body: CompanionObject? = nil, timeout: Double = 20) async throws -> Any {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) } }
@@ -45,12 +61,27 @@ struct NativeCompanionHTTP {
     }
     func get(_ path: String, _ query: [String: String] = [:]) async throws -> CompanionObject { NativeCompanionData.object(try await request("GET", path, query: query)) }
     func post(_ path: String, _ body: CompanionObject = [:]) async throws -> CompanionObject { NativeCompanionData.object(try await request("POST", path, body: body)) }
-    static func discover() throws -> Self {
+    static func registrationURL() -> URL {
         let base = ProcessInfo.processInfo.environment["XDG_STATE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/state")
-        let info = NativeCompanionData.object(try NativeCompanionData.decode(Data(contentsOf: base.appendingPathComponent("opencode/service.json"))))
-        guard let value = info["url"] as? String, let url = URL(string: value), ["127.0.0.1", "localhost", "::1"].contains(url.host ?? ""), ["http", "https"].contains(url.scheme ?? "") else { throw NativeCompanionData.error("OpenCode local service unavailable") }
+        return base.appendingPathComponent("opencode/service.json")
+    }
+    static func discover(registration: URL? = nil) throws -> Self {
+        let file = registration ?? registrationURL()
+        guard FileManager.default.fileExists(atPath: file.path) else { throw NativeOpenCodeServiceError.stopped }
+        guard let data = try? Data(contentsOf: file), let decoded = try? NativeCompanionData.decode(data), let info = decoded as? CompanionObject,
+              let value = info["url"] as? String, let url = URL(string: value), url.user == nil, url.password == nil,
+              ["127.0.0.1", "localhost", "::1"].contains(url.host ?? ""), ["http", "https"].contains(url.scheme ?? ""), let pid = info["pid"] as? Int, pid > 0 else { throw NativeOpenCodeServiceError.invalidRegistration }
         let auth = (info["password"] as? String).map { "Basic " + Data("opencode:\($0)".utf8).base64EncodedString() }
-        return Self(baseURL: url, authorization: auth)
+        return Self(baseURL: url, authorization: auth, registeredPID: pid, registeredVersion: info["version"] as? String)
+    }
+    static func availableService(registration: URL? = nil) async throws -> Self {
+        let client = try discover(registration: registration)
+        let info: CompanionObject
+        do { info = NativeCompanionData.object(try await client.request("GET", "api/info", timeout: 2)) }
+        catch { throw NativeOpenCodeServiceError.unreachable }
+        guard info["pid"] as? Int == client.registeredPID, let version = info["version"] as? String,
+              client.registeredVersion == nil || version == client.registeredVersion else { throw NativeOpenCodeServiceError.invalidRegistration }
+        return client
     }
 }
 

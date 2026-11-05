@@ -295,3 +295,12 @@
 "companion.bubble_preview" = "I can talk here, right? Drag me to choose where my words will appear.";
 
 "companion.claude_node" = "Node.js for Claude history";
+"companion.opencode_service" = "OpenCode background service";
+"companion.service.disabled" = "Not monitored";
+"companion.service.checking" = "Checking…";
+"companion.service.starting" = "Starting automatically…";
+"companion.service.running" = "Running";
+"companion.service.failed" = "Start failed · Retrying";
+"companion.service.start_failed" = "OpenCode could not be started. Check the executable and service configuration; automatic retries use backoff.";
+"companion.service.executable_missing" = "OpenCode executable was not found. Set its location and reconnect.";
+"companion.service_help" = "While Companion is enabled, OpenCode is checked every 5 seconds and started automatically if stopped. Disabling Companion stops monitoring but leaves OpenCode running for your work sessions.";

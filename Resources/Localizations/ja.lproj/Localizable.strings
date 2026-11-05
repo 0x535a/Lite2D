@@ -295,3 +295,12 @@
 "companion.bubble_preview" = "ここで話しても大丈夫？ドラッグして台詞の表示位置を決めてね。";
 
 "companion.claude_node" = "Claude 履歴用 Node.js";
+"companion.opencode_service" = "OpenCode バックグラウンドサービス";
+"companion.service.disabled" = "監視していません";
+"companion.service.checking" = "確認中…";
+"companion.service.starting" = "自動起動中…";
+"companion.service.running" = "実行中";
+"companion.service.failed" = "起動できません・再試行予定";
+"companion.service.start_failed" = "OpenCode を起動できません。実行ファイルとサービス設定を確認してください。間隔を空けて再試行します。";
+"companion.service.executable_missing" = "OpenCode が見つかりません。実行ファイルの場所を設定して再接続してください。";
+"companion.service_help" = "コンパニオン有効時は 5 秒ごとに OpenCode を確認し、停止していれば自動起動します。コンパニオンを無効にしても作業中の OpenCode は停止しません。";

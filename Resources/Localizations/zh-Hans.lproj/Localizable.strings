@@ -295,3 +295,12 @@
 "companion.bubble_preview" = "我可以在这里说话吧？拖动我，选择台词显示的位置。";
 
 "companion.claude_node" = "Claude 历史助手的 Node.js";
+"companion.opencode_service" = "OpenCode 后台服务";
+"companion.service.disabled" = "未监控";
+"companion.service.checking" = "检查中…";
+"companion.service.starting" = "正在自动启动…";
+"companion.service.running" = "运行中";
+"companion.service.failed" = "启动失败 · 将自动重试";
+"companion.service.start_failed" = "OpenCode 未能启动，请检查程序位置和服务配置；将延迟自动重试。";
+"companion.service.executable_missing" = "未找到 OpenCode 程序，请设置运行程序位置并重新连接。";
+"companion.service_help" = "开启陪伴时每 5 秒检查 OpenCode，服务停止后自动启动。关闭陪伴会停止监控，但保留 OpenCode 运行，不中断工作会话。";
