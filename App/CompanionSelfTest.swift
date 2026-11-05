@@ -41,6 +41,7 @@ final class CompanionSelfTest {
                 let plain = output.appendingPathComponent("plain-persona.md")
                 try "A quiet companion, defined only by this Markdown.".write(to: plain, atomically: true, encoding: .utf8)
                 try c.installPersona(from: plain, for: a.settings.id)
+                try c.installPersona(from: plain, for: b.settings.id)
                 try check(c.hasPersona(a.settings.id) && (try? String(contentsOf: c.personaURL(a.settings.id), encoding: .utf8)) == "A quiet companion, defined only by this Markdown.", "Plain Markdown imports as this model instance's independent Persona")
                 if let packPath = ProcessInfo.processInfo.environment["LITE2D_PERSONA_PACK"] {
                     for (record, speaker) in [(a, "22"), (b, "33")] {
