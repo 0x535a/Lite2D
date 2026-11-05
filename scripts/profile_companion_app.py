@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sequential whole-app idle comparison with identical isolated model settings.
+"""Whole-app idle profile, optionally compared with an explicit baseline executable.
 
 No mouse/keyboard/window automation. Models are loaded from existing local assets;
 only copied settings and synthetic Claude history are written under temporary roots.
@@ -81,6 +81,15 @@ def measure(kind, executable, seconds):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seconds', type=int, default=75)
+    parser.add_argument('--app', type=Path, default=ROOT / 'dist/Lite2D.app/Contents/MacOS/Lite2D', help='Path to the current app executable')
+    parser.add_argument('--baseline-app', type=Path, help='Optional historical app executable, measured first')
     args = parser.parse_args()
-    for kind, app in [('old-node', OUT / 'baseline-app/Lite2D.app/Contents/MacOS/Lite2D'), ('new-swift', ROOT / 'dist/Lite2D.app/Contents/MacOS/Lite2D')]:
-        measure(kind, app, args.seconds)
+    if args.seconds < 2:
+        parser.error('--seconds must be at least 2')
+    apps = ([('old-node', args.baseline_app)] if args.baseline_app else []) + [('new-swift', args.app)]
+    for _, app in apps:
+        if not app.is_file():
+            parser.error(f'App executable not found: {app}')
+    OUT.mkdir(parents=True, exist_ok=True)
+    for kind, app in apps:
+        measure(kind, app.resolve(), args.seconds)

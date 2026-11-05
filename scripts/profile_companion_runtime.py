@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Bounded old/new Controller process-tree comparison; no UI automation.
+"""Bounded current Swift runtime process-tree profile; no UI automation.
 
-Same SDK version, isolated transcript fixture, identical request burst/source
-configuration. Report launch/RPC latency and per-process RSS/physical footprint
-and cumulative CPU. Summed footprint is labelled, not treated as unique RAM.
+Uses an isolated transcript fixture and a bounded SDK request burst. Reports
+launch/RPC latency, per-process RSS/physical footprint and cumulative CPU.
+Summed footprint is labelled, not treated as unique RAM.
 """
 import argparse
 import ctypes
@@ -69,27 +69,14 @@ def fixture(directory):
     return directory / 'claude'
 
 
-def measure(kind, seconds):
+def measure(seconds):
+    kind = 'new-swift'
     with tempfile.TemporaryDirectory(prefix=f'lite2d-profile-{kind}-') as tmp:
         root = Path(tmp)
         claude = fixture(root)
         env = dict(os.environ, CLAUDE_CONFIG_DIR=str(claude), LITE2D_NATIVE_PROBE_ROOT=str(root / 'state'),
                    LITE2D_COMPANION_ROOT=str(root / 'state'), LITE2D_NODE=shutil.which('node'))
-        if kind == 'old-node':
-            wrapper = root / 'baseline.mjs'
-            module = (ROOT / 'Companion/controller.mjs').as_uri()
-            wrapper.write_text(f'''import {{Controller}} from {json.dumps(module)};
-import {{createInterface}} from 'node:readline';
-import {{mkdir}} from 'node:fs/promises';
-await mkdir(process.env.LITE2D_COMPANION_ROOT,{{recursive:true}});
-const c=new Controller({{root:process.env.LITE2D_COMPANION_ROOT,send:e=>process.stdout.write(JSON.stringify(e)+'\\n')}});
-await c.start();const lines=createInterface({{input:process.stdin}});let chain=Promise.resolve();
-lines.on('line',line=>{{const m=JSON.parse(line);chain=chain.then(async()=>{{if(m.type==='sdk-list'){{const t=performance.now();const r=await c.observers.list('claude');process.stdout.write(JSON.stringify({{type:'sdk.result',count:r.length,durationMs:performance.now()-t}})+'\\n');}}else await c.command(m);}});}});
-lines.on('close',async()=>{{await chain;await c.close();process.exit(0);}});
-''')
-            command = [shutil.which('node'), '--disable-warning=ExperimentalWarning', str(wrapper)]
-        else:
-            command = [str(APP), '--companion-runtime-probe']
+        command = [str(APP), '--companion-runtime-probe']
         launched = time.monotonic()
         child = subprocess.Popen(command, cwd=ROOT, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         mailbox = queue.Queue()
@@ -126,7 +113,7 @@ lines.on('close',async()=>{{await chain;await c.close();process.exit(0);}});
             burst = 0
             while time.monotonic() - start < seconds:
                 elapsed = time.monotonic() - start
-                if kind == 'new-swift' and (not samples or int(elapsed) % 15 == 0):
+                if not samples or int(elapsed) % 15 == 0:
                     send({'type': 'poll'})
                 if 5 <= elapsed < 10 and burst < 5:
                     send({'type': 'sdk-list'}); wait('sdk.result'); burst += 1
@@ -134,10 +121,7 @@ lines.on('close',async()=>{{await chain;await c.close();process.exit(0);}});
                 samples.append({'elapsed': elapsed, 'processes': rows, 'rssSum': sum(r['rss'] for r in rows),
                                 'footprintSum': sum(r['footprint'] for r in rows), 'cpuSum': sum(r['cpuSeconds'] for r in rows)})
                 time.sleep(1)
-            if kind == 'new-swift':
-                send({'type': 'diagnostics'}); helper = wait('diagnostics')['data']['helper']
-            else:
-                helper = {'running': True, 'starts': 1}
+            send({'type': 'diagnostics'}); helper = wait('diagnostics')['data']['helper']
             active = [s for s in samples if 5 <= s['elapsed'] <= 11]
             quiet = samples[-min(10, len(samples)):]
             summary = {'kind': kind, 'seconds': seconds, 'controllerReadyMs': ready_ms,
@@ -163,8 +147,14 @@ lines.on('close',async()=>{{await chain;await c.close();process.exit(0);}});
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seconds', type=int, default=90)
-    parser.add_argument('--kind', choices=['old-node', 'new-swift', 'both'], default='both')
+    parser.add_argument('--app', type=Path, default=APP, help='Path to the current app executable')
     args = parser.parse_args()
+    if args.seconds < 12:
+        parser.error('--seconds must be at least 12 to sample the request burst')
+    APP = args.app.resolve()
+    if not APP.is_file():
+        parser.error(f'App executable not found: {APP}; run sh scripts/build.sh first')
+    if not shutil.which('node'):
+        parser.error('Node.js 24+ is required for the Claude SDK profile')
     OUT.mkdir(parents=True, exist_ok=True)
-    for kind in ['old-node', 'new-swift'] if args.kind == 'both' else [args.kind]:
-        measure(kind, args.seconds)
+    measure(args.seconds)
