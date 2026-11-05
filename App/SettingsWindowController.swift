@@ -119,7 +119,7 @@ private struct SettingsRootView: View {
                     Label(model.status.importInProgress ? L10n.text("import.busy") : L10n.text("role.add"), systemImage: "plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderless).padding(16).disabled(model.status.importInProgress)
+                .buttonStyle(.borderless).padding(.horizontal, 14).padding(.vertical, 12).disabled(model.status.importInProgress)
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
         } detail: {
@@ -148,6 +148,7 @@ private struct RoleSettingsView: View {
     @State private var removing = false
     @State private var previewGroup = ""
     @State private var previewIndex = 0
+    @State private var hoveringName = false
     @FocusState private var editingName: Bool
     init(model: SettingsWindowModel, record: ModelRecord) {
         self.model = model; self.record = record
@@ -170,6 +171,13 @@ private struct RoleSettingsView: View {
                     .textFieldStyle(.plain).font(.system(size: 25, weight: .semibold))
                     .focused($editingName).onSubmit(commitName)
                     .accessibilityLabel(L10n.text("role.name"))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(editingName || hoveringName ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(alignment: .trailing) {
+                        if !editingName { Image(systemName: "pencil").font(.callout).foregroundStyle(.tertiary).padding(.trailing, 8).allowsHitTesting(false) }
+                    }
+                    .padding(.horizontal, -6)
+                    .onHover { hoveringName = $0 }
                 HStack(spacing: 6) {
                     Circle().fill(record.error != nil ? Color.orange : canAdjust ? .green : .secondary).frame(width: 7, height: 7)
                     Text(model.status.roleStatus(record))

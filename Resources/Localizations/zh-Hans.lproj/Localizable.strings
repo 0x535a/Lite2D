@@ -2,8 +2,8 @@
 "role.section" = "角色";
 "settings.general" = "通用设置";
 "settings.title" = "Lite2D 设置";
-"settings.appearance" = "外观与摆放";
-"settings.interaction" = "动作与互动";
+"settings.appearance" = "外观";
+"settings.interaction" = "动作";
 "settings.advanced" = "高级";
 "role.name" = "角色名称";
 "settings.autosave" = "自动保存";
@@ -234,7 +234,7 @@
 "companion.persona_help" = "提供一份 UTF-8 Markdown 描述性格、兴趣和说话方式。文件复制到此模型实例的独立目录，编辑后下一回合生效。";
 "companion.invalid_persona" = "请选择非空且不超过 64 KB 的 UTF-8 Markdown 文件。";
 "companion.gaze" = "交流时注视对方";
-"companion.continuity" = "交流与记忆";
+"companion.continuity" = "交流";
 "companion.role_help" = "此实例有独立的会话和私有记忆。换装保留，复制实例不共享。";
 "companion.initiative" = "自主话题";
 "companion.interval" = "主动闲聊间隔";
@@ -304,3 +304,6 @@
 "companion.service.start_failed" = "OpenCode 未能启动，请检查程序位置和服务配置；将延迟自动重试。";
 "companion.service.executable_missing" = "未找到 OpenCode 程序，请设置运行程序位置并重新连接。";
 "companion.service_help" = "开启陪伴时每 5 秒检查 OpenCode，服务停止后自动启动。关闭陪伴会停止监控，但保留 OpenCode 运行，不中断工作会话。";
+"companion.trigger_action" = "触发";
+"companion.open_history" = "打开…";
+"companion.shared_section" = "共享设置";

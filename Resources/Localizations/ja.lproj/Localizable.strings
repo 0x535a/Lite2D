@@ -2,8 +2,8 @@
 "role.section" = "キャラクター";
 "settings.general" = "一般設定";
 "settings.title" = "Lite2D 設定";
-"settings.appearance" = "外観と配置";
-"settings.interaction" = "モーションとインタラクション";
+"settings.appearance" = "外観";
+"settings.interaction" = "モーション";
 "settings.advanced" = "詳細";
 "role.name" = "キャラクター名";
 "settings.autosave" = "自動保存";
@@ -234,7 +234,7 @@
 "companion.persona_help" = "性格、興味、話し方を UTF-8 の Markdown に記述します。このモデル専用のコピーを保存し、編集は次のターンから反映します。";
 "companion.invalid_persona" = "64 KB 以下の空でない UTF-8 Markdown ファイルを選んでください。";
 "companion.gaze" = "会話中は相手を見る";
-"companion.continuity" = "会話と記憶";
+"companion.continuity" = "会話";
 "companion.role_help" = "このモデル専用の会話と記憶を保存します。衣装変更時も維持し、複製したモデルとは共有しません。";
 "companion.initiative" = "自発的な話題";
 "companion.interval" = "雑談を考える間隔";
@@ -304,3 +304,6 @@
 "companion.service.start_failed" = "OpenCode を起動できません。実行ファイルとサービス設定を確認してください。間隔を空けて再試行します。";
 "companion.service.executable_missing" = "OpenCode が見つかりません。実行ファイルの場所を設定して再接続してください。";
 "companion.service_help" = "コンパニオン有効時は 5 秒ごとに OpenCode を確認し、停止していれば自動起動します。コンパニオンを無効にしても作業中の OpenCode は停止しません。";
+"companion.trigger_action" = "開始";
+"companion.open_history" = "開く…";
+"companion.shared_section" = "共通設定";
