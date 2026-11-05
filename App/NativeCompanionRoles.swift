@@ -6,6 +6,7 @@ protocol NativeCompanionRoleClient: AnyObject {
     func reserveContinuation(_ id: String) async throws
     func forget(_ id: String) async
     func interrupt() async
+    func reapStale() async
     func close() async
 }
 
@@ -40,6 +41,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         if let client, child?.process.isRunning == true { return client }
         if let starting { return try await starting.value }
         let task = Task<NativeCompanionHTTP, Error> {
+            await reapStaleRoleService()
             let configDir = root.appendingPathComponent("runtime-config")
             try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             var providers = providersOverride ?? [:]
@@ -60,6 +62,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"; env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] = "1"
             env["OPENCODE_SERVER_PASSWORD"] = password; env["OPENCODE_CONFIG_CONTENT"] = NativeCompanionData.string(["providers": providers])
             try process.start(executable, arguments: ["serve", "--hostname", "127.0.0.1", "--port", "0"], environment: env, directory: root)
+            try store.set("roleServicePid", process.process.processIdentifier)
             child = process
             do {
                 let url = try await address.wait(seconds: 20)
@@ -71,6 +74,21 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         starting = task
         do { let result = try await task.value; starting = nil; return result } catch { starting = nil; throw error }
     }
+    private func reapStaleRoleService() async {
+        guard let old = store.get("roleServicePid") as? Int, old > 1, old != Int(getpid()) else { return }
+        // Match only this internal ephemeral-port role service, never the user's
+        // registered `opencode serve --service` process.
+        let check = Process(); check.executableURL = URL(fileURLWithPath: "/bin/ps"); check.arguments = ["-p", String(old), "-o", "command="]
+        let pipe = Pipe(); check.standardOutput = pipe; check.standardError = FileHandle.nullDevice
+        guard (try? check.run()) != nil else { return }; check.waitUntilExit()
+        let command = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if check.terminationStatus == 0, command == "\(executable) serve --hostname 127.0.0.1 --port 0" {
+            kill(pid_t(old), SIGTERM)
+            for _ in 0..<20 { if kill(pid_t(old), 0) != 0 { break }; try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        try? store.set("roleServicePid", NSNull())
+    }
+    func reapStale() async { await reapStaleRoleService() }
     func prepare(id: String, model: String) async throws -> Instance {
         guard NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
         let client = try await server(), directory = root.appendingPathComponent("characters/\(id)")
@@ -204,5 +222,9 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         guard let client else { return }
         for instance in instances.values { _ = try? await client.request("POST", "api/session/\(instance.session)/interrupt", body: ["resume": false], timeout: 2.5) }
     }
-    func close() async { stopped = true; await interrupt(); child?.close(); child = nil; client = nil; starting?.cancel(); starting = nil; instances = [:] }
+    func close() async {
+        stopped = true; await interrupt()
+        if let pid = store.get("roleServicePid") as? Int32, pid == child?.process.processIdentifier { try? store.set("roleServicePid", NSNull()) }
+        child?.close(); child = nil; client = nil; starting?.cancel(); starting = nil; instances = [:]
+    }
 }

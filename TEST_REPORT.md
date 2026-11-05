@@ -269,3 +269,10 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 同 SDK/数据/请求序列的 90 秒 Controller 短测：空闲 footprint 合计均值 49.4 → 5.1 MiB；活跃 footprint 峰值 54.0 → 47.3 MiB，但活跃 RSS 峰值 78.1 → 95.1 MiB。SDK 助手首读约 88 ms、复用约 1 ms，14 次 SDK 请求仅启动一次，空闲 Node 数为 0。
 - 同两个模型、30 FPS、关闭鼠标跟随、相同隔离会话夹具的整应用各 75 秒顺序短测：空闲进程树 footprint 合计 253.9 → 204.8 MiB，减少约 49.1 MiB（约 19%）；RSS 合计 191.5 → 139.1 MiB。末段约 9 秒 CPU 3.25 → 3.38 秒，渲染占主导，未证实 CPU 改善。数据为本机单轮比较，不保证所有环境；详细方法和折衷见 `docs/COMPANION_RUNTIME.md`。
 - `/Applications/Lite2D.app` 已更新为 1.2.0（build 11），安装前保留旧应用和一致性数据库备份；模型设置、Companion 设置和 Persona 哈希保持不变。安装文件与构建一致，严格签名校验通过。安装后持续 72 秒的进程核对确认应用在运行，旧 Node Controller 为 0，空闲 Claude 助手为 0，未出现周期重启。
+
+## Companion v1.2.1（2026-11-05，build 12）
+
+- OpenCode 服务生命周期与只读观察隔离：Companion 开启时每 5 秒检查注册 PID/版本与 health API；停止、注册失效或不可达时自动调用官方 `opencode service start`，启动期间 UI 显示进度，失败显示原因并指数退避。关闭 Companion 停止监控，但不停止 OpenCode。
+- 专项检查新增 7 项：缺失注册显示 stopped 而非文件异常、拒绝非 loopback 注册、并发请求只启动一次、服务关闭自动恢复、关闭监控不停止服务、关闭后不重启、失败状态可见与退避，共 35 项原生检查；真实协议和 SDK 会话测试继续通过。
+- 安装版真实恢复：更新前 OpenCode 后台服务为 stopped 且 `service.json` 不存在；安装 1.2.1 后在 Companion 开启状态确认自动启动、服务状态与设置显示一致。安装后又主动执行 `opencode service stop`，约 10 秒内由监控恢复为 running。
+- 角色专用服务记录 PID，正常关闭清除；应用启动验证会读取旧 PID 与进程命令，只回收精确匹配的内部 ephemeral-port 命令，不触碰用户的 `opencode serve --service`。此前未记录 PID 的遗留角色服务已在本机一次性安全清理。

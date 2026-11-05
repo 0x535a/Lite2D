@@ -14,7 +14,8 @@ enum NativeCompanionProbe {
             let runtime = NativeCompanionRuntime(root: root, promptFile: resources.appendingPathComponent("Companion/prompt.json"),
                 opencode: env["LITE2D_OPENCODE"] ?? "/opt/homebrew/bin/opencode", codex: env["LITE2D_CODEX"] ?? "/opt/homebrew/bin/codex",
                 node: env["LITE2D_NODE"] ?? "/opt/homebrew/bin/node", helperScript: resources.appendingPathComponent("Companion/claude-helper.mjs"), executable: executable,
-                idleSeconds: Double(env["LITE2D_HELPER_IDLE_SECONDS"] ?? "60") ?? 60, providers: providers) { event in
+                idleSeconds: Double(env["LITE2D_HELPER_IDLE_SECONDS"] ?? "60") ?? 60, providers: providers,
+                manageOpenCodeService: env["LITE2D_PROBE_MANAGE_OPENCODE_SERVICE"] == "1") { event in
                     print(NativeCompanionData.string(event)); fflush(stdout)
                 }
             do {

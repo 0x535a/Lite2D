@@ -78,6 +78,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var runtimeState = "stopped"
     @Published var error: String?
     @Published var sources: [String: [String: Any]] = [:]
+    @Published var openCodeService: [String: Any] = ["state": "disabled"]
     @Published var entries: [CompanionEntry] = []
     @Published var busy = false
     @Published var roleErrors: [String: String] = [:]
@@ -218,6 +219,7 @@ final class CompanionCoordinator: ObservableObject {
         if type == "ready" { runtimeState = settings.enabled ? "running" : "stopped"; error = nil; loadHistory(event); sync(force: true) }
         if type == "status" {
             sources = event["sources"] as? [String: [String: Any]] ?? [:]; busy = event["busy"] as? Bool ?? false
+            openCodeService = event["openCodeService"] as? [String: Any] ?? ["state": "disabled"]
             roleErrors = event["roleErrors"] as? [String: String] ?? [:]
         }
         if type == "topic.start" { busy = true }
@@ -424,7 +426,7 @@ final class CompanionCoordinator: ObservableObject {
             let previous = closingRuntime
             closingRuntime = Task { await previous?.value; await old.close() }
         }
-        runtimeState = "stopped"; busy = false; sources = [:]
+        runtimeState = "stopped"; busy = false; sources = [:]; openCodeService = ["state": "disabled"]
     }
     func shutdown() {
         shutdownRequested = true; timer?.invalidate(); timer = nil; stopProcess()

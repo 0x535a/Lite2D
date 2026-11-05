@@ -1,6 +1,6 @@
 # Companion 按需 SDK 架构与资源验证
 
-2026-11-05，已安装版本 1.2.0（build 11）。目标是降低常驻成本，保留原有功能，不要求所有源码改为 Swift。
+2026-11-05，候选版本 1.2.1（build 12）。目标是降低常驻成本，保留原有功能，不要求所有源码改为 Swift。
 
 ## 实际运行结构
 
@@ -11,6 +11,10 @@
 - Swift 使用 FSEvents 监听目录路径和文件变化，不自行解析 JSONL 正文。SDK 负责会话链、compaction 与历史读取的兼容性。
 
 Node 仍是 Claude 历史读取的可选运行依赖。未启用 Claude 时，OpenCode/Codex、角色交流、记忆和界面可以不安装 Node。OpenCode/Codex 自身的服务进程仍存在，不能将其资源计入“已消除的 Node 开销”。
+
+OpenCode 后台服务监控与只读会话观察分开管理。只要 Companion 主开关开启，Swift 每 5 秒检查已注册服务 PID/版本和 `/api/info`；缺失、失效或不可达时调用官方 `opencode service start`，不通过读取底层数据库或恢复文本来假装可用。启动期间设置显示进度，成功后刷新观察状态；失败显示可见原因并指数退避。关闭 Companion 停止监控，但**不会停止**已经运行的 OpenCode，以免中断用户工作。
+
+角色生成使用的专用 OpenCode 服务 PID 单独记录。应用启动时只回收命令精确匹配内部 `serve --hostname 127.0.0.1 --port 0` 的旧 PID；用户注册的 `serve --service` 不匹配，不能被误停。正常关闭会清除记录并停止自有角色服务。
 
 ## 生命周期与变化检测
 

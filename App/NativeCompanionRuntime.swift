@@ -25,6 +25,9 @@ actor NativeCompanionRuntime {
     let emitToHost: (CompanionObject) -> Void
     private let providers: CompanionObject?
     private let injectedRoles: NativeCompanionRoleClient?
+    private let manageOpenCodeService: Bool
+    private var serviceMonitor: NativeOpenCodeServiceMonitor?
+    private var openCodeService: CompanionObject = ["state": "disabled"]
     private var store: NativeCompanionStore!
     private var prompt: NativeCompanionPrompt!
     private var roles: NativeCompanionRoleClient!
@@ -46,8 +49,9 @@ actor NativeCompanionRuntime {
     private var sourceRevision: [String: Int] = [:]
     init(root: URL, promptFile: URL, opencode: String, codex: String, node: String, helperScript: URL, executable: String,
          idleSeconds: Double = 60, claudeRoot: URL? = nil, providers: CompanionObject? = nil,
-         roles: NativeCompanionRoleClient? = nil, emit: @escaping (CompanionObject) -> Void) {
+         roles: NativeCompanionRoleClient? = nil, manageOpenCodeService: Bool = true, emit: @escaping (CompanionObject) -> Void) {
         self.root = root; self.promptFile = promptFile; self.opencode = opencode; self.executable = executable; self.providers = providers; injectedRoles = roles; emitToHost = emit
+        self.manageOpenCodeService = manageOpenCodeService
         var env = ProcessInfo.processInfo.environment
         if let claudeRoot { env["CLAUDE_CONFIG_DIR"] = claudeRoot.path }
         helper = NativeClaudeHelper(node: node, script: helperScript, idleSeconds: idleSeconds, environment: env)
@@ -66,6 +70,10 @@ actor NativeCompanionRuntime {
         guard !stopped else { broker.close(); throw CancellationError() }
         roles = injectedRoles ?? NativeCompanionRoles(root: root, store: store, prompt: prompt, promptFile: promptFile,
             executable: opencode, helper: executable, toolEndpoint: endpoint, providers: providers, register: { [weak self] id in await self?.register(id) ?? "" })
+        await roles.reapStale()
+        if manageOpenCodeService {
+            serviceMonitor = NativeOpenCodeServiceMonitor(executable: opencode) { [weak self] state in await self?.serviceChanged(state) }
+        }
         ready = true
         emit("ready", ["history": (try? store.history()) ?? []])
         if automatic {
@@ -95,12 +103,20 @@ actor NativeCompanionRuntime {
     private var visible: [CompanionObject] { characters.filter { $0["enabled"] as? Bool == true && $0["visible"] as? Bool == true } }
     private func sourceEnabled(_ backend: String) -> Bool { enabled && NativeCompanionData.object(NativeCompanionData.object(config["sources"])[backend])["enabled"] as? Bool == true }
     private func status() {
-        emit("status", ["sources": sources, "busy": topic != nil, "roleErrors": roleErrors, "nextIdle": nextIdle.isFinite ? nextIdle : NSNull()])
+        emit("status", ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil, "roleErrors": roleErrors, "nextIdle": nextIdle.isFinite ? nextIdle : NSNull()])
+    }
+    private func serviceChanged(_ state: CompanionObject) {
+        guard !stopped else { return }
+        let wasRunning = openCodeService["state"] as? String == "running"
+        openCodeService = state
+        if !wasRunning && state["state"] as? String == "running" { pollAt = .distantPast }
+        status()
     }
     func configure(_ next: CompanionObject) async {
         let previousInterval = interval, previousEnabled = enabled, previousPaused = paused
         let old = Dictionary(uniqueKeysWithValues: NativeCompanionData.backends.map { ($0, sourceEnabled($0)) })
         config = next
+        await serviceMonitor?.setEnabled(enabled)
         if interval != previousInterval || (!previousEnabled && enabled) || (previousPaused && !paused) { scheduleIdle() }
         for backend in NativeCompanionData.backends where old[backend] != sourceEnabled(backend) {
             sourceRevision[backend, default: 0] += 1
@@ -130,6 +146,7 @@ actor NativeCompanionRuntime {
                 if backend == "claude", paused || (visible.isEmpty && sources[backend] != nil) || ((try? store.requestCount()) ?? 0) >= hourly { continue }
                 let revision = sourceRevision[backend, default: 0]
                 do {
+                    if backend == "opencode", let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
                     let result = try await observers.poll(backend, excluded: own)
                     guard !stopped, sourceEnabled(backend), sourceRevision[backend, default: 0] == revision else { continue }
                     sessions.removeAll { $0.backend == backend }; sessions += result.sessions
@@ -205,6 +222,7 @@ actor NativeCompanionRuntime {
         context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }
         context["privateMemory"] = NativeCompanionData.clean(store.get("memory:\(id)") as? String ?? "", limit: 3000)
         context["characters"] = visible.map { ["id": $0["id"] ?? "", "name": $0["name"] ?? ""] }; context["remainingUtterances"] = 4 - topic.utterances
+        if let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
         let output = try await roles.generate(id: id, context: context, model: model, reserve: { [weak self] in try await self?.reserveRequest() ?? false })
         try Task.checkCancellation(); guard !topic.cancelled else { return }
         roleErrors.removeValue(forKey: id)
@@ -316,11 +334,12 @@ actor NativeCompanionRuntime {
     }
     func waitForTopic() async { await topic?.task?.value }
     func helperDiagnostics() async -> CompanionObject { await helper.diagnostics() }
-    func diagnostics() async -> CompanionObject { ["sources": sources, "busy": topic != nil, "helper": await helper.diagnostics()] }
+    func diagnostics() async -> CompanionObject { ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil, "helper": await helper.diagnostics()] }
     func reconcileAfterWake() async { await observers.reconcileClaude(); pollAt = .distantPast }
     func close() async {
         guard !stopped else { return }
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
+        await serviceMonitor?.close(); serviceMonitor = nil
         await observers.close(); await roles?.close()
         await topic?.task?.value
         broker?.close(); broker = nil; try? store?.exportNotes()

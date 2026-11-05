@@ -20,10 +20,28 @@ private actor FakeRoles: NativeCompanionRoleClient {
     func reserveContinuation(_ id: String) async throws {}
     func forget(_ id: String) {}
     func interrupt() {}
+    func reapStale() {}
     func close() {}
     func setHandler(_ callback: @escaping (String, CompanionObject) async throws -> String) { handler = callback }
     func count() -> Int { calls.count }
     func last() -> String? { calls.last }
+}
+private actor ServiceFixture {
+    var running = false
+    var starts = 0
+    var fail = false
+    func health() throws -> NativeCompanionHTTP {
+        guard running else { throw NativeOpenCodeServiceError.stopped }
+        return NativeCompanionHTTP(baseURL: URL(string: "http://127.0.0.1:40000")!, registeredPID: 42, registeredVersion: "2.2.5")
+    }
+    func start() async throws {
+        starts += 1
+        try await Task.sleep(nanoseconds: 30_000_000)
+        if fail { throw NativeOpenCodeServiceError.startFailed }; running = true
+    }
+    func stopService() { running = false }
+    func setFail() { fail = true }
+    func stats() -> (running: Bool, starts: Int) { (running, starts) }
 }
 
 @main struct NativeCompanionTests {
@@ -56,6 +74,47 @@ private actor FakeRoles: NativeCompanionRoleClient {
             try check(NativeCompanionData.output("{\"command\":\"execute\"}")["skip"] as? Bool == true, "Malformed model JSON never becomes a command")
             let prompt = try NativeCompanionPrompt.load(promptFile)
             try check(NativeCompanionMCP.tools(prompt).count == 13 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 13 tool schemas and unchanged Persona composition load natively")
+
+            let registration = root.appendingPathComponent("service.json")
+            var absent = false
+            do { _ = try NativeCompanionHTTP.discover(registration: registration) } catch { absent = error as? NativeOpenCodeServiceError == .stopped }
+            try check(absent, "Missing service registration reports stopped rather than a file error")
+            try NativeCompanionData.json(["url": "http://example.com:40000", "pid": 42]).write(to: registration)
+            var nonlocal = false
+            do { _ = try NativeCompanionHTTP.discover(registration: registration) } catch { nonlocal = error as? NativeOpenCodeServiceError == .invalidRegistration }
+            try check(nonlocal, "Service discovery rejects non-loopback registrations")
+            let fixture = ServiceFixture(), serviceEvents = Events()
+            let monitor = NativeOpenCodeServiceMonitor(executable: "/missing/opencode", interval: 0.08,
+                health: { try await fixture.health() }, starter: { try await fixture.start() }, changed: { serviceEvents.add($0) })
+            await monitor.setEnabled(true)
+            async let client1 = monitor.ensureRunning()
+            async let client2 = monitor.ensureRunning()
+            _ = try await client1; _ = try await client2
+            let firstStart = await fixture.stats()
+            try check(firstStart.starts == 1 && serviceEvents.all().contains(where: { $0["state"] as? String == "starting" }), "Concurrent monitor and observer requests start the service only once")
+            await fixture.stopService()
+            for _ in 0..<30 {
+                if await fixture.stats().running { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            let recovered = await fixture.stats()
+            try check(recovered.running && recovered.starts == 2, "Monitor automatically restarts a stopped OpenCode service")
+            await monitor.setEnabled(false)
+            let leftRunning = await fixture.stats()
+            let disabledState = await monitor.snapshot()
+            try check(leftRunning.running && (disabledState["state"] as? String) == "disabled", "Disabling Companion stops monitoring without stopping OpenCode")
+            await fixture.stopService()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            try check(await fixture.stats().starts == 2, "Disabled monitoring never restarts the service")
+            let failing = ServiceFixture(); await failing.setFail()
+            let failedMonitor = NativeOpenCodeServiceMonitor(executable: "/missing/opencode", interval: 0.05,
+                health: { try await failing.health() }, starter: { try await failing.start() }, changed: { _ in })
+            await failedMonitor.setEnabled(true)
+            do { _ = try await failedMonitor.ensureRunning() } catch { }
+            do { _ = try await failedMonitor.ensureRunning() } catch { }
+            let failedState = await failedMonitor.snapshot(), failedStats = await failing.stats()
+            try check(failedState["state"] as? String == "failed" && failedStats.starts == 1, "Failed automatic startup is visible and retries use backoff")
+            await failedMonitor.close(); await monitor.close()
 
             let claudeRoot = root.appendingPathComponent("claude"), directory = claudeRoot.appendingPathComponent("projects/-fixture")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -131,7 +190,7 @@ private actor FakeRoles: NativeCompanionRoleClient {
             await observers.close()
 
             let events = Events(), fake = FakeRoles(), runtimeRoot = root.appendingPathComponent("runtime")
-            let runtime = NativeCompanionRuntime(root: runtimeRoot, promptFile: promptFile, opencode: "/missing/opencode", codex: "/missing/codex", node: node, helperScript: script, executable: executable, roles: fake, emit: events.add)
+            let runtime = NativeCompanionRuntime(root: runtimeRoot, promptFile: promptFile, opencode: "/missing/opencode", codex: "/missing/codex", node: node, helperScript: script, executable: executable, roles: fake, manageOpenCodeService: false, emit: events.add)
             try await runtime.start(automatic: false)
             let chars: [CompanionObject] = [["id": a, "name": "A", "enabled": true, "visible": true], ["id": b, "name": "B", "enabled": true, "visible": true]]
             await runtime.command(["type": "configure", "config": ["enabled": true, "characters": chars, "intervalMinutes": 0, "hourlyRequests": 12]])

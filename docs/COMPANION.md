@@ -11,6 +11,8 @@ Companion 是 Lite2D 的可选主动陪伴功能。原有模型实例、窗口�
 
 Swift 调度、SQLite、OpenCode HTTP、Codex JSON-RPC 和 MCP 在原生侧运行。仅 Claude 官方历史 SDK 使用按需 Node.js 24+ 助手，连续读取复用，空闲 60 秒后退出；没有变化不会每 15 秒重启。设置页可覆盖 Claude 助手的 Node 路径及 OpenCode/Codex 路径。CLI 更新后应重新验证协议。SDK 客户端随应用提供，不在用户机器上运行 npm install。
 
+Companion 主开关开启时，Swift 每 5 秒检查 OpenCode 后台服务；如果服务已停止或注册失效，会通过官方 CLI 自动启动，并在 **主动陪伴设置** 显示检查中、启动中、运行中、启动失败及 PID/版本。关闭 Companion 会停止监控但不关闭 OpenCode，工作会话不会被中断。服务启动失败显示原因并退避重试，不把“文件不存在”之类的内部错误直接暴露给用户。
+
 ## 人设与动机
 
 Persona 使用自由 UTF-8 Markdown，不需要 front matter；上限 64 KB。导入保存独立副本，通过「编辑 Markdown」修改，下一回合重新加载。修改人设不清空原有记忆。若同目录有本项目示例包的 `original_style_corpus.jsonl`，导入器可为已声明的 22/33 复制对应说话人的原创风格示例；每次生成只选少量相关场景，并标记为风格素材，不当作共同经历或官方原话。不会执行 Persona 包里的脚本或自动下载外部资料。
