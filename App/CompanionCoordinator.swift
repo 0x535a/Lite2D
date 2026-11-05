@@ -83,13 +83,11 @@ final class CompanionCoordinator: ObservableObject {
     @Published var roleErrors: [String: String] = [:]
     @Published var records: [[String: String]] = []
     @Published var memoryContents: [String: String] = [:]
-    private var process: Process?
-    private var input: FileHandle?
-    private var output: Pipe?
+    private var runtime: NativeCompanionRuntime?
+    private var closingRuntime: Task<Void, Never>?
+    private var runtimeGeneration = UUID()
     private var timer: Timer?
     private var lastSync = ""
-    private let queue = DispatchQueue(label: "Lite2D.Companion.IPC")
-    private var buffer = Data()
     private var gaze: (a: UUID, b: UUID, until: Date, topic: String)?
     private var bubbles: [UUID: CompanionBubble] = [:]
     private var bubblePreview: CompanionBubble?
@@ -103,6 +101,7 @@ final class CompanionCoordinator: ObservableObject {
     private var historyWindow: NSWindow?
     private var historyCloseObserver: NSObjectProtocol?
     private var shutdownRequested = false
+    private var previouslySleeping = false
 
     init(manager: ModelInstanceManager) {
         self.manager = manager
@@ -185,53 +184,34 @@ final class CompanionCoordinator: ObservableObject {
     private func reconcile(readOnly: Bool = false) {
         guard !shutdownRequested else { return }
         guard settings.enabled || readOnly else { stopProcess(); return }
-        guard process == nil else { return }
-        guard let node = executable("node", override: settings.nodePath),
-              let resources = Bundle.main.resourceURL else {
-            runtimeState = "unavailable"; error = L10n.text("companion.dependencies_missing"); return
-        }
-        let opencode = executable("opencode", override: settings.opencodePath) ?? "/nonexistent/opencode"
-        if !readOnly && opencode == "/nonexistent/opencode" { runtimeState = "unavailable"; error = L10n.text("companion.dependencies_missing"); return }
-        let entry = resources.appendingPathComponent("Companion/main.mjs")
-        guard FileManager.default.fileExists(atPath: entry.path) else { runtimeState = "unavailable"; error = L10n.text("companion.runtime_missing"); return }
-        do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let child = Process(); child.executableURL = URL(fileURLWithPath: node); child.arguments = ["--disable-warning=ExperimentalWarning", entry.path]
-            var env = ProcessInfo.processInfo.environment
-            env["LITE2D_COMPANION_ROOT"] = root.path; env["LITE2D_OPENCODE"] = opencode
-            env["LITE2D_CODEX"] = executable("codex", override: settings.codexPath) ?? "/nonexistent/codex"
-            env["PATH"] = "\((node as NSString).deletingLastPathComponent):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-            child.environment = env; child.currentDirectoryURL = root
-            let incoming = Pipe(), outgoing = Pipe()
-            child.standardInput = incoming; child.standardOutput = outgoing; child.standardError = FileHandle.nullDevice
-            input = incoming.fileHandleForWriting; output = outgoing
-            outgoing.fileHandleForReading.readabilityHandler = { [weak self] handle in
-                let data = handle.availableData
-                guard !data.isEmpty else { return }
-                self?.queue.async { [weak self] in self?.consume(data) }
+        guard runtime == nil, let resources = Bundle.main.resourceURL, let executable = Bundle.main.executableURL else { return }
+        let prompt = resources.appendingPathComponent("Companion/prompt.json")
+        guard FileManager.default.fileExists(atPath: prompt.path) else { runtimeState = "unavailable"; error = L10n.text("companion.runtime_missing"); return }
+        let generation = UUID(); runtimeGeneration = generation
+        let next = NativeCompanionRuntime(root: root, promptFile: prompt,
+            opencode: self.executable("opencode", override: settings.opencodePath) ?? "/nonexistent/opencode",
+            codex: self.executable("codex", override: settings.codexPath) ?? "/nonexistent/codex",
+            node: self.executable("node", override: settings.nodePath) ?? "/nonexistent/node",
+            helperScript: resources.appendingPathComponent("Companion/claude-helper.mjs"), executable: executable.path) { [weak self] event in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.runtimeGeneration == generation else { return }
+                    self.receive(event)
+                }
             }
-            child.terminationHandler = { [weak self, weak child] _ in DispatchQueue.main.async {
-                guard let self, self.process === child else { return }
-                self.output?.fileHandleForReading.readabilityHandler = nil
-                self.process = nil; self.input = nil; self.runtimeState = "stopped"; self.busy = false
-                self.cancelPresentation(); if self.settings.enabled && !self.shutdownRequested { self.error = L10n.text("companion.runtime_exited") }
+        runtime = next; runtimeState = "starting"; lastSync = ""
+        let previous = closingRuntime
+        Task { [weak self] in
+            await previous?.value
+            do { try await next.start() }
+            catch { await MainActor.run { [weak self] in
+                guard let self, self.runtimeGeneration == generation else { return }
+                self.runtimeState = "unavailable"; self.error = error.localizedDescription
             } }
-            process = child; runtimeState = "starting"; try child.run(); lastSync = ""; sync()
-        } catch { process = nil; runtimeState = "unavailable"; self.error = error.localizedDescription }
-    }
-    private func consume(_ data: Data) {
-        buffer.append(data)
-        if buffer.count > 4 * 1024 * 1024 { buffer.removeAll(); return }
-        while let end = buffer.firstIndex(of: 10) {
-            let line = buffer.prefix(upTo: end); buffer.removeSubrange(...end)
-            guard let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
-            DispatchQueue.main.async { [weak self] in self?.receive(event) }
         }
     }
     func send(_ command: [String: Any]) {
-        guard process?.isRunning == true, let input, let data = try? JSONSerialization.data(withJSONObject: command) else { return }
-        var line = data; line.append(10)
-        queue.async { try? input.write(contentsOf: line) }
+        guard let runtime else { return }
+        Task { await runtime.command(command) }
     }
     func receive(_ event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
@@ -293,6 +273,9 @@ final class CompanionCoordinator: ObservableObject {
         if force || encoded != lastSync { lastSync = encoded; send(["type": "configure", "config": value]) }
     }
     func tick() {
+        let sleeping = manager?.sleeping == true
+        if previouslySleeping && !sleeping, let runtime { Task { await runtime.reconcileAfterWake() } }
+        previouslySleeping = sleeping
         sync(); updateGaze()
         for (id, bubble) in bubbles {
             if let record = manager?.record(id), let window = record.controller?.window, visible(record) { bubble.position(near: window) }
@@ -422,7 +405,7 @@ final class CompanionCoordinator: ObservableObject {
     }
     func retry() { stopProcess(); if settings.enabled { reconcile() } }
     func showHistory() {
-        if process == nil { reconcile(readOnly: true) }
+        if runtime == nil { reconcile(readOnly: true) }
         send(["type": "history"])
         if historyWindow == nil {
             historyWindow = CompanionHistoryView.makeWindow(coordinator: self)
@@ -435,13 +418,11 @@ final class CompanionCoordinator: ObservableObject {
     }
     func exportMemory(_ id: UUID) { send(["type": "memory", "characterId": id.uuidString]) }
     private func stopProcess() {
-        send(["type": "stop"]); cancelPresentation(); output?.fileHandleForReading.readabilityHandler = nil
-        try? input?.close(); input = nil
-        let child = process; process = nil; child?.terminate(); output = nil
-        if let child {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 7) {
-                if child.isRunning { kill(child.processIdentifier, SIGKILL) }
-            }
+        cancelPresentation(); runtimeGeneration = UUID()
+        if let old = runtime {
+            runtime = nil
+            let previous = closingRuntime
+            closingRuntime = Task { await previous?.value; await old.close() }
         }
         runtimeState = "stopped"; busy = false; sources = [:]
     }

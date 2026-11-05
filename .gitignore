@@ -4,6 +4,7 @@ doc/
 build/
 dist/
 .local/
+__pycache__/
 Companion/node_modules/
 *.xcuserstate
 xcuserdata/

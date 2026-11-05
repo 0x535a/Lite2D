@@ -253,10 +253,10 @@
 "companion.model" = "モデル";
 "companion.dependencies" = "実行ファイルの場所";
 "companion.not_found" = "見つかりません";
-"companion.dependencies_help" = "自動検出します。変更する場合は絶対パスを指定して再接続してください。Node.js 24 以降が必要です。";
+"companion.dependencies_help" = "OpenCode と Codex はネイティブ接続を使用します。Node.js は必要時のみ起動する Claude 履歴 SDK 用で、60 秒間の待機後に終了します。パス変更後は再接続してください。";
 "companion.runtime" = "モデル実行環境";
 "companion.model_help" = "OpenCode のモデル接続を使います。空欄で既定モデルを使用するか、provider/model を指定します。観察自体ではモデルを呼び出しません。";
-"companion.dependencies_missing" = "Node.js または OpenCode が見つかりません。実行ファイルの場所を確認してください。";
+"companion.dependencies_missing" = "OpenCode が見つかりません。実行ファイルの場所を確認してください。";
 "companion.runtime_missing" = "コンパニオンのリソースがありません。このビルドを再インストールしてください。";
 "companion.runtime_exited" = "コンパニオンが予期せず停止しました。再接続してください。";
 "companion.conversation" = "会話";
@@ -293,3 +293,5 @@
 "companion.bubble_help" = "既定ではモデルの上に表示されます。プレビューをドラッグしてこのキャラクターの近くに配置します。モデルを動かすと保存位置も追従します。";
 "companion.bubble_dragging" = "プレビューのバブルを目的の位置へドラッグし、「完了」をクリックします。";
 "companion.bubble_preview" = "ここで話しても大丈夫？ドラッグして台詞の表示位置を決めてね。";
+
+"companion.claude_node" = "Claude 履歴用 Node.js";

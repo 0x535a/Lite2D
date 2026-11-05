@@ -108,7 +108,7 @@ struct CompanionGeneralSections: View {
                 TextField("provider/model", text: binding(\.model)).labelsHidden().frame(maxWidth: 250)
             }
             DisclosureGroup(L10n.text("companion.dependencies")) {
-                TextField("Node.js", text: binding(\.nodePath), prompt: Text(companion.executable("node") ?? L10n.text("companion.not_found")))
+                TextField(L10n.text("companion.claude_node"), text: binding(\.nodePath), prompt: Text(companion.executable("node") ?? L10n.text("companion.not_found")))
                 TextField("OpenCode", text: binding(\.opencodePath), prompt: Text(companion.executable("opencode") ?? L10n.text("companion.not_found")))
                 TextField("Codex", text: binding(\.codexPath), prompt: Text(companion.executable("codex") ?? L10n.text("companion.not_found")))
                 Text(L10n.text("companion.dependencies_help")).font(.caption).foregroundStyle(.secondary)

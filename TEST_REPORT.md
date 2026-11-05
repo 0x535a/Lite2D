@@ -259,3 +259,13 @@ Activity Monitor 为独立短记录，取启动 4 秒后的样本，不替代长
 - 将共享 System、每轮行为要求、手动测试、同伴消息回送、风格示例说明和 13 个工具描述统一到 `Companion/prompt.mjs`，并纳入用户修改后的提示词。Persona Markdown 与工具权限保持独立。
 - `prompt.mjs` 作为独立文件随应用打包，Controller 和 MCP 入口共用；14 项 Controller/真实 OpenCode 协议测试通过。打包后的 Controller 独立启动/退出、MCP 13 个工具描述加载以及严格签名校验通过。
 - `/Applications/Lite2D.app` 已更新为 1.1.3（build 10）并重启，安装的二进制与 Controller/MCP 资源和构建一致；安装包内提示词与用户编辑文件逐字一致。保留现有模型、Persona、记忆与开关设置；用户当前关闭了陪伴功能，安装未自动开启。
+
+## Companion v1.2.0（2026-11-05，build 11）
+
+- 常驻 Controller 迁入应用内 Swift actor；SQLite、预算、队列、状态、OpenCode HTTP、Codex JSON-RPC 与 MCP 为原生实现。Claude 仍使用官方 SDK 按需助手：连续查询复用、并发去重、默认空闲 60 秒退出，无变化轮询不唤醒。Swift FSEvents 只监听变化，不解析 JSONL 正文。
+- `python3 scripts/test_native_companion.py`：28 项原生检查通过，覆盖 SDK 生命周期/变化检测/撤回/崩溃退避、数据格式、事务、预算、触发与取消；真实 OpenCode＋原生 MCP 双角色、独立工具、重启/记忆/上下文消费通过，5 次模型夹具调用与预算一致，交流期间 Node 助手启动次数为 0。
+- 提供的两份 Persona 与当前真实配置模型 `homo/fast-model` 在原生链路上生成两条独立问候，无错误；三种来源全局观察均 available，SDK 助手一次启动后退出。原生界面/气泡/对视 26 项回归与四语 289 键通过，无 computer use。
+- 旧数据库约 275 MiB 的一致性快照经新运行时打开/关闭，state、records、events、changes 行数与内容哈希不变，含 3861 条旧事件。读取既有记录不需要 Node。原有 Persona、共享提示词、会话 ID 与权限边界保留。
+- 同 SDK/数据/请求序列的 90 秒 Controller 短测：空闲 footprint 合计均值 49.4 → 5.1 MiB；活跃 footprint 峰值 54.0 → 47.3 MiB，但活跃 RSS 峰值 78.1 → 95.1 MiB。SDK 助手首读约 88 ms、复用约 1 ms，14 次 SDK 请求仅启动一次，空闲 Node 数为 0。
+- 同两个模型、30 FPS、关闭鼠标跟随、相同隔离会话夹具的整应用各 75 秒顺序短测：空闲进程树 footprint 合计 253.9 → 204.8 MiB，减少约 49.1 MiB（约 19%）；RSS 合计 191.5 → 139.1 MiB。末段约 9 秒 CPU 3.25 → 3.38 秒，渲染占主导，未证实 CPU 改善。数据为本机单轮比较，不保证所有环境；详细方法和折衷见 `docs/COMPANION_RUNTIME.md`。
+- `/Applications/Lite2D.app` 已更新为 1.2.0（build 11），安装前保留旧应用和一致性数据库备份；模型设置、Companion 设置和 Persona 哈希保持不变。安装文件与构建一致，严格签名校验通过。安装后持续 72 秒的进程核对确认应用在运行，旧 Node Controller 为 0，空闲 Claude 助手为 0，未出现周期重启。

@@ -9,7 +9,7 @@ Companion 是 Lite2D 的可选主动陪伴功能。原有模型实例、窗口�
 3. 在工作观察中分别启用 OpenCode、Codex、Claude Code。启用即覆盖该来源在本机可读取的全部会话，跨项目与 Git worktree，并包括接口可枚举的归档记录；旧版项目列表迁移为来源开关。默认新配置关闭来源。
 4. 设置闲聊间隔：0 为关闭，可选择快捷值或用步进器调整。关闭闲聊后，工作事件仍可产生评论；勿扰会停止生成和展示。
 
-需要 Node.js 24+、OpenCode 2.2.5。Node 会从 PATH、Homebrew 与 nvm 查找；设置页可覆盖 Node/OpenCode/Codex 的绝对路径并重新连接。CLI 更新后应重新验证协议。Controller 客户端打包进应用，不在用户机器上自动运行 npm install。
+Swift 调度、SQLite、OpenCode HTTP、Codex JSON-RPC 和 MCP 在原生侧运行。仅 Claude 官方历史 SDK 使用按需 Node.js 24+ 助手，连续读取复用，空闲 60 秒后退出；没有变化不会每 15 秒重启。设置页可覆盖 Claude 助手的 Node 路径及 OpenCode/Codex 路径。CLI 更新后应重新验证协议。SDK 客户端随应用提供，不在用户机器上运行 npm install。
 
 ## 人设与动机
 
@@ -31,7 +31,7 @@ Persona 使用自由 UTF-8 Markdown，不需要 front matter；上限 64 KB。�
 - provider 配置通过本机配置读取，服务连接头与 provider 认证不打印到台词、时间线或配置表单。角色目录中的 MCP 连接令牌为应用生成的本地工具令牌，权限绑定固定实例 UUID。
 - 只读适配器没有 prompt/resume/steer/abort/delete 等通用代理。Codex 使用 `useStateDbOnly:true` 和 turn 分页，不调用当前运行时不支持的 item 分页。
 - 三种来源每 15 秒轮询，分页枚举全部可用会话，排除本应用自己的角色 Session；每次读取有限近期/已变化的尾部，不全量加载所有正文，其他历史可通过只读工具按需查看。首次建立基线不补播旧历史。更新由有限近期内容的变化判断，不把 `notLoaded` 或目录更新时间解释为真实活动状态。
-- Claude SDK 会从 transcript 构建会话链，结果分页不是低成本文件 tail。大量历史的读取成本和跨进程落盘时延仍取决于 SDK/CLI。
+- Claude SDK 会从 transcript 构建会话链，结果分页不是低成本文件 tail。Swift 只监听路径变化、合并 dirty 标记，不自行解析 JSONL；确需读取时才唤醒 SDK 助手。大量历史的读取成本和跨进程落盘时延仍取决于 SDK/CLI。
 - 关闭来源后清除对应观察缓存与待触发话题。内容会做限长和常见凭证过滤，但这不能保证识别任何形式的秘密；请仅启用希望角色了解的来源。
 
 ## 呈现与恢复
@@ -46,9 +46,11 @@ Persona 使用自由 UTF-8 Markdown，不需要 front matter；上限 64 KB。�
 
 ## 验证
 
-- `node --test Companion/controller.test.mjs Companion/native.test.mjs`：调度、预算、授权边界、冲突、停止、真实 OpenCode/MCP、独立 Session、非生成回送与重启。
+- `python3 scripts/test_native_companion.py`：Swift 调度、存储、SDK 助手生命周期与 FSEvents、真实 OpenCode/原生 MCP、独立 Session、预算、非生成回送与重启。旧 JavaScript 测试保留作基线，不作为新运行时验收。
 - `python3 scripts/test_companion.py`：应用内加载模型、四语页面、气泡、双方对视、拖动、取消与持久设置保持；不使用 computer use 或外部应用自动化。
 - `LITE2D_CAPTURE_OWN_WINDOW=1 python3 scripts/test_companion.py`：额外记录仅本应用测试窗口的系统合成截图，用于核对原生控件布局；不操作桌面输入。
 - `python3 scripts/test_localization.py`：四语资源、占位符与即时切换。
 
 真实 provider 与提供的 22/33 人设的双角色验收另记于 `TEST_REPORT.md`。本地确定性模型夹具仅用于验证引擎协议，不冒充外部模型的实际生成。
+
+常驻结构、资源对比与已知折衷见 [COMPANION_RUNTIME.md](COMPANION_RUNTIME.md)。

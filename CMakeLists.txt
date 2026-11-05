@@ -41,7 +41,7 @@ target_link_libraries(Lite2DEngine PUBLIC Framework "-framework Foundation" "-fr
 file(GLOB APP_SOURCES CONFIGURE_DEPENDS "App/*.swift")
 add_executable(Lite2D MACOSX_BUNDLE ${APP_SOURCES})
 target_compile_options(Lite2D PRIVATE -import-objc-header "${CMAKE_CURRENT_SOURCE_DIR}/Bridge/Live2DBridge.h")
-target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framework SwiftUI" "-framework QuartzCore" "-framework OpenGL" "-framework ServiceManagement" "-lc++")
+target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framework SwiftUI" "-framework QuartzCore" "-framework OpenGL" "-framework ServiceManagement" "-framework Network" "-framework CoreServices" "-lsqlite3" "-lc++")
 set_target_properties(Lite2D PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
   RUNTIME_OUTPUT_DIRECTORY "${LITE2D_OUTPUT_ROOT}")
@@ -65,6 +65,7 @@ add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/FrameworkShaders"
   COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/legacy-host.js"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Localizations" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
+  COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/Companion"
   COMMAND "${LITE2D_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/build.mjs" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/Companion"
   COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")
 file(GLOB COMPANION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Companion/*.mjs" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/package-lock.json")

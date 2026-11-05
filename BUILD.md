@@ -139,6 +139,12 @@ xcrun swiftc -parse-as-library Tests/LegacyMotionLifecycleTests.swift -o .local/
 
 Companion Controller 使用 Node.js 24+ 和 `Companion/package-lock.json`。`sh scripts/build.sh` 发现 `Companion/node_modules/esbuild` 缺失时会先执行 `npm ci --prefix Companion --ignore-scripts`，然后用 esbuild 生成 `Contents/Resources/Companion/main.mjs`，不会在用户机器上安装依赖。Python 脚本 `scripts/test_companion.py` 使用本应用内置 controller 和 CLI 探测；不驱动桌面输入。
 
+### v1.2.0 更新（2026-11-05）
+
+生产 Controller 现为 `App/NativeCompanion*.swift`，链接系统 SQLite3、Network 和 CoreServices。构建阶段只将官方 Claude 历史 SDK 打包为 `claude-helper.mjs`，并从集中编辑的 `prompt.mjs` 生成 Swift 可读的 `prompt.json`；不会安装常驻 Node Controller 或 Claude 可执行文件。运行时只在需要 Claude SDK 读取时启动 Node，默认闲置 60 秒退出。旧 JavaScript Controller 保留作回归/资源基线，不进入应用包。
+
+执行 `python3 scripts/test_native_companion.py` 验证原生 Controller、SDK 助手、真实 OpenCode 与原生 MCP；`scripts/profile_companion_runtime.py` 和 `scripts/profile_companion_app.py` 提供有界资源对比，详见 `docs/COMPANION_RUNTIME.md`。
+
 
 ## 设置窗口与快捷菜单（2026-11-03）
 

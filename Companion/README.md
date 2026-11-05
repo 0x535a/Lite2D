@@ -1,24 +1,13 @@
-# Lite2D Companion controller
+# Companion shared prompts and on-demand Claude helper
 
-Node.js 24+ child process for the Swift/AppKit host. No browser, TTS or user chat input.
+The production Controller is a Swift actor inside the app (`App/NativeCompanionRuntime.swift`). OpenCode HTTP, Codex JSON-RPC, memory, quotas and MCP are native. `claude-helper.mjs` only wraps the official Claude history SDK; Swift owns request coalescing, FSEvents dirty tracking, timeout/backoff and 60-second idle shutdown. No permanent Node Controller is shipped.
+
+`prompt.mjs` remains the single editable source for shared wording. Build-time export creates `prompt.json` for Swift with verbatim strings; Persona Markdown stays user-owned and unchanged. The build bundles only the read-only Claude helper and its notices, never the Claude executable. OpenCode/Codex and role conversations do not require Node.
 
 ```sh
-npm ci --prefix Companion --ignore-scripts
-node --test Companion/controller.test.mjs Companion/native.test.mjs
 sh scripts/build.sh
+python3 scripts/test_native_companion.py
 python3 scripts/test_companion.py
 ```
 
-`main.mjs` accepts JSON lines on stdin and emits versioned events on stdout. Diagnostics use stderr. Closing stdin stops only its own Codex observer and OpenCode role service. The native host detects Node in PATH, Homebrew and nvm; executable overrides are available in General Settings.
-
-Role Personas are individual UTF-8 Markdown files. The Controller starts a dedicated authenticated OpenCode loopback service, inherits only provider configuration and allows only its per-character MCP tools. It never uses the user's work sessions for generation. Model requests are charged to a shared rolling-hour budget; tool continuations reserve their next request and provider retries are counted. OpenCode still controls its own compaction and inference internals, so this is not a billing guarantee.
-
-All shared model-facing wording lives in `prompt.mjs`: `SYSTEM_PROMPT` and `buildSystemPrompt` compose the System with the user's unchanged Persona Markdown; `TURN_INTENT`, `MANUAL_TEST_PROMPT`, `PEER_RECEIPT_PROMPT` and `STYLE_EXAMPLE_PROVENANCE` describe wake-ups and quoted material; `TOOL_DESCRIPTIONS` holds model-visible tool guidance. Edit this file to tune behavior. Tool permissions, schemas, routing and runtime data stay in their own modules. The app bundle keeps `prompt.mjs` as a separate resource shared by the Controller and MCP entrypoint. Rebuild and restart the Controller after editing source prompts; Persona files remain independent.
-
-Enabled source adapters enumerate all locally readable conversations across projects and worktrees, including archives exposed by each backend. Legacy project grants migrate to source toggles. Metadata pages are fully enumerated; bounded recent/changed tails are read per poll and other histories are available on demand. Codex uses `useStateDbOnly:true`, metadata reads and turn pagination; it never resumes an observed thread. Claude uses official SDK transcript functions without `query()`. Its pagination is not a filesystem-tail API. All sources are polled at 15-second intervals, and recent bounded content is compared even when list timestamps stay unchanged. Initial results establish a baseline without speaking. Per-model test buttons target one specific character and bypass the idle timer, while honoring pause, visibility, busy state and the shared request budget. Corpus examples, observed logs, shared records and peer messages are quoted context, never elevated instructions.
-
-SQLite is authoritative for memory versions, audit, delivery states, quotas and the visible timeline. Readable Markdown projections are written under `characters/<id>/memory.md`, `public/records` and `public/exchanges`. Change memory in the app's editor; these exports are not a second write channel. A crash during delivery becomes `delivery_unknown`, not an automatic resend. A reply accepted with `resume:false` stays in the source character's persistent inbox until its next allowed generation consumes it.
-
-`native.test.mjs` uses the real installed OpenCode engine and a local deterministic upstream to test separate sessions, direct scoped MCP tools, reply routing, budget accounting, restart and disabled shell/file/code execution. It does not claim that a remote model provider is available. Live-provider acceptance is recorded separately in `TEST_REPORT.md`.
-
-Private model data and provided Persona packs are not bundled in the app or source distribution. The build bundles only the controller's read-only client dependencies and MCP entrypoint; no Claude CLI binary is bundled.
+The former JS Controller, adapters and tests remain temporarily as the old/new behavioral and performance baseline. They are not bundled or started by the app. Details, measurements and limits: [runtime review](../docs/COMPANION_RUNTIME.md).

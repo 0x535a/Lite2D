@@ -129,6 +129,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if exitCode != 0 { exit(exitCode) }
     }
 }
+if CommandLine.arguments.contains("--companion-runtime-probe") { NativeCompanionProbe.run() }
+if CommandLine.arguments.contains("--companion-mcp") {
+    let prompt = ProcessInfo.processInfo.environment["LITE2D_PROMPT_PATH"].map { URL(fileURLWithPath: $0) }
+        ?? Bundle.main.resourceURL!.appendingPathComponent("Companion/prompt.json")
+    NativeCompanionMCP.run(promptFile: prompt)
+    exit(0)
+}
 L10n.configureSystemDialogs()
 let application = NSApplication.shared
 let delegate = AppDelegate()
