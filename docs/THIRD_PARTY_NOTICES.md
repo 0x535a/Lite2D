@@ -21,3 +21,9 @@
 ## v0.1.1 发布记录
 
 维护者已明确确认此次 `.app` 中专有 Core 与旧版运行库的发行授权，并要求发布不含模型、配置的应用包。v0.1.1 附带 MIT、第三方说明及相关上游许可文本；Git 源码仍不提交专有库。这是维护者的授权确认记录，不是本项目签发的 Live2D 官方许可证明，最终适用协议仍由维护者负责核实。
+
+## Companion 客户端组件（v1.2 起）
+
+本机应用包的 Companion JavaScript 组件仅包含 `@anthropic-ai/claude-agent-sdk@0.3.318` 的历史读取函数（Anthropic 许可和使用条款）。实际进入单文件 bundle 的包与许可记录在应用内 `Contents/Resources/Companion/THIRD_PARTY_NOTICES.md`。构建工具 esbuild 仅用于构建，不作为运行服务；Claude CLI/SDK 平台可执行文件、用户模型与 Persona 包均不随本次应用客户端打包。第三方客户端许可不因本项目 MIT 而改变，公开分发前应按所选版本条款核对。
+
+v1.2.0 起 OpenCode 客户端改为原生 HTTP 实现，`@opencode/client` 不再进入应用包；旧 JavaScript Controller 及其专属 `@opencode/client` 依赖已移除，当前 JavaScript 为按需 Claude 历史 SDK 助手，实际许可清单仍随该资源生成。SQLite3、Network 与 CoreServices 使用 macOS 系统组件。
