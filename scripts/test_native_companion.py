@@ -33,7 +33,7 @@ def main():
                     str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
-    state = {'calls': 0, 'sent': False, 'read': False, 'tools': set(), 'prompts': []}
+    state = {'calls': 0, 'sent': False, 'read': False, 'tools': set(), 'prompts': [], 'trySearch': False, 'searchDenied': False}
 
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -46,10 +46,17 @@ def main():
             names = [t.get('function', {}).get('name', t.get('name', '')) for t in request.get('tools', [])]
             state['tools'].update(names)
             state['prompts'].append(system)
+            for message in request.get('messages', []):
+                if message.get('role') == 'tool' and 'Web search is disabled by the user' in str(message.get('content', '')):
+                    state['searchDenied'] = True
             call = None
             send_name = next((n for n in names if n.endswith('companion_send_message')), None)
             read_name = next((n for n in names if n.endswith('private_memory_read')), None)
-            if 'TEST_CHARACTER_A' in system and not state['sent'] and send_name:
+            search_name = next((n for n in names if n.endswith('_web_search')), None)
+            if state['trySearch'] and search_name:
+                state['trySearch'] = False
+                call = {'name': search_name, 'arguments': json.dumps({'query': 'public fun trivia', 'objective': 'Find a public fact'})}
+            elif 'TEST_CHARACTER_A' in system and not state['sent'] and send_name:
                 state['sent'] = True
                 call = {'name': send_name, 'arguments': json.dumps({'to': B, 'text': 'Hello from native A'})}
             elif 'TEST_CHARACTER_B' in system and not state['read'] and read_name:
@@ -130,6 +137,7 @@ def main():
             assert state['read'] and state['sent']
             assert state['tools'] and all(t.startswith('companion_') for t in state['tools']), state['tools']
             assert state['calls'] == 4, state['calls']
+            assert 'companion_web_search' in state['tools'], state['tools']
             send({'type': 'diagnostics'})
             diagnostics = until('diagnostics')['data']
             assert diagnostics['helper']['starts'] == 0, diagnostics
@@ -150,6 +158,16 @@ def main():
         try:
             send({'type': 'trigger', 'characterId': A})
             until('topic.end', timeout=75)
+            assert state['calls'] == 5, state['calls']
+            # Revoke search on existing role sessions; the broker must enforce
+            # the setting even when the model still has the tool schema.
+            config['webSearchEnabled'] = False
+            send({'type': 'configure', 'config': config})
+            until('status')
+            state['trySearch'] = True
+            send({'type': 'trigger', 'characterId': A})
+            until('topic.end', timeout=75)
+            assert state['searchDenied'], 'Search revocation did not reach the tool result'
         finally:
             child.stdin.close()
             child.wait(timeout=15)
@@ -158,10 +176,11 @@ def main():
         assert json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{A}',)).fetchone()[0]) == session_a
         assert json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'memory:{A}',)).fetchone()[0]) == 'Only A remembers this.'
         assert db.execute("SELECT COUNT(*) FROM deliveries WHERE status='context_consumed'").fetchone()[0] == 1
-        assert state['calls'] == 5, state['calls']
+        assert state['calls'] == 7, state['calls']
         db.close()
         report = {'passed': True, 'upstreamCalls': state['calls'], 'toolCount': len(state['tools']), 'utterances': [e['text'] for e in all_events if e['type'] == 'utterance'],
-                  'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True}
+                  'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True,
+                  'searchRevocationEnforced': state['searchDenied']}
         (OUT / 'native-protocol.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
     server.shutdown()

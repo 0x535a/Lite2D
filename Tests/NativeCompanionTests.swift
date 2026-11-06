@@ -2,6 +2,30 @@ import Foundation
 
 private let a = "11111111-1111-4111-8111-111111111111"
 private let b = "22222222-2222-4222-8222-222222222222"
+private final class SearchProtocol: URLProtocol {
+    static var responseData = Data()
+    static var statusCode = 200
+    static var lastRequest: URLRequest?
+    static var lastBody = Data()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lastRequest = request
+        Self.lastBody = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }; Self.lastBody.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: Self.statusCode, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.responseData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
 private final class Events {
     private let lock = NSLock(); private var values: [CompanionObject] = []
     func add(_ event: CompanionObject) { lock.withLock { values.append(event) } }
@@ -73,7 +97,34 @@ private actor ServiceFixture {
             try check(NativeCompanionData.text(["type": "thinking", "text": "secret"]).isEmpty && NativeCompanionData.text(["type": "tool_result", "content": "secret output"]) == "[tool completed]", "Observer normalization excludes reasoning and raw tool output")
             try check(NativeCompanionData.output("{\"command\":\"execute\"}")["skip"] as? Bool == true, "Malformed model JSON never becomes a command")
             let prompt = try NativeCompanionPrompt.load(promptFile)
-            try check(NativeCompanionMCP.tools(prompt).count == 13 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 13 tool schemas and unchanged Persona composition load natively")
+            try check(NativeCompanionMCP.tools(prompt).count == 14 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 14 tool schemas and unchanged Persona composition load natively")
+            let searchResult: CompanionObject = ["jsonrpc": "2.0", "id": 1, "result": ["content": [["type": "text", "text": "Title: Example\nURL: https://example.com"]]]]
+            let searchJSON = try NativeCompanionData.json(searchResult)
+            let searchSSE = Data(("event: message\r\ndata: " + String(decoding: searchJSON, as: UTF8.self) + "\r\n\r\n").utf8)
+            try check(try NativeCompanionSearch.result(searchJSON) == NativeCompanionSearch.result(searchSSE), "Search decodes both JSON and MCP event streams while preserving source URLs")
+            let searchConfig = URLSessionConfiguration.ephemeral; searchConfig.protocolClasses = [SearchProtocol.self]
+            let searchSession = URLSession(configuration: searchConfig)
+            defer { searchSession.invalidateAndCancel() }
+            SearchProtocol.responseData = searchSSE
+            let searchText = try await NativeCompanionSearch.search(query: "public topic", objective: "find facts", session: searchSession)
+            let searchRequest = SearchProtocol.lastRequest!
+            let body = NativeCompanionData.object(try NativeCompanionData.decode(SearchProtocol.lastBody))
+            let searchParams = NativeCompanionData.object(body["params"])
+            try check(searchRequest.url?.absoluteString == "https://mcp.exa.ai/mcp?tools=web_search_exa" && searchRequest.value(forHTTPHeaderField: "Authorization") == nil && searchParams["name"] as? String == "web_search_exa" && searchText.contains("https://example.com"), "Search pins its upstream endpoint and tool without forwarding local credentials")
+            SearchProtocol.statusCode = 429
+            var rateLimited = false
+            do { _ = try await NativeCompanionSearch.search(query: "public topic", objective: "find facts", session: searchSession) } catch { rateLimited = true }
+            try check(rateLimited, "Search HTTP failures return errors instead of invented results")
+            let allowed = NativeCompanionRoles.rules.filter { $0["effect"] as? String == "allow" }.compactMap { $0["action"] as? String }
+            try check(allowed.count == 42 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
+            for invalid: CompanionObject in [["id": 1, "error": ["code": -1]], ["id": 1, "result": ["isError": true, "content": [["type": "text", "text": "failed"]]]], ["id": 2, "result": [:]]] {
+                var rejected = false
+                do { _ = try NativeCompanionSearch.result(NativeCompanionData.json(invalid)) } catch { rejected = true }
+                try check(rejected, "Search rejects MCP errors and unrelated responses")
+            }
+            var invalidQuery = false
+            do { _ = try await NativeCompanionSearch.search(query: " ", objective: "test") } catch { invalidQuery = true }
+            try check(invalidQuery, "Empty search queries are rejected before networking")
 
             let registration = root.appendingPathComponent("service.json")
             var absent = false

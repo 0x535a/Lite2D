@@ -34,6 +34,7 @@ actor NativeCompanionRuntime {
     private var broker: NativeCompanionBroker?
     private var config: CompanionObject = [:]
     private var tokens: [String: String] = [:]
+    private var searches: [UUID: Task<String, Error>] = [:]
     private var sessions: [NativeObservedSession] = []
     private var sources: [String: CompanionObject] = [:]
     private var roleErrors: [String: String] = [:]
@@ -116,6 +117,10 @@ actor NativeCompanionRuntime {
         let previousInterval = interval, previousEnabled = enabled, previousPaused = paused
         let old = Dictionary(uniqueKeysWithValues: NativeCompanionData.backends.map { ($0, sourceEnabled($0)) })
         config = next
+        if next["webSearchEnabled"] as? Bool == false {
+            for task in searches.values { task.cancel() }
+            searches.removeAll()
+        }
         await serviceMonitor?.setEnabled(enabled)
         if interval != previousInterval || (!previousEnabled && enabled) || (previousPaused && !paused) { scheduleIdle() }
         for backend in NativeCompanionData.backends where old[backend] != sourceEnabled(backend) {
@@ -259,6 +264,16 @@ actor NativeCompanionRuntime {
             guard let topic, !topic.cancelled, topic.speaker == actor else { throw NativeCompanionData.error("No active write context") }
         }
         switch name {
+        case "web_search":
+            guard config["webSearchEnabled"] as? Bool != false else { throw NativeCompanionData.error("Web search is disabled by the user") }
+            let id = UUID()
+            let task = Task { try await NativeCompanionSearch.search(query: args["query"] as? String ?? "", objective: args["objective"] as? String ?? "") }
+            searches[id] = task
+            defer { searches.removeValue(forKey: id) }
+            let text = try await task.value
+            guard !stopped, enabled, !paused, config["webSearchEnabled"] as? Bool != false,
+                  tokens[token] == actor, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Search access revoked") }
+            return ["source": "Exa web search", "untrustedContent": text]
         case "companion_list_characters": return visible.filter { $0["id"] as? String != actor }.map { ["id": $0["id"] ?? "", "name": $0["name"] ?? ""] }
         case "observer_list_sessions": return sessions.map(\.object)
         case "observer_get_recent_work": return await observers.recentWork().filter { sourceEnabled($0["backend"] as? String ?? "") }
@@ -290,6 +305,8 @@ actor NativeCompanionRuntime {
         }
     }
     func stop(reason: String = "cancelled") {
+        for task in searches.values { task.cancel() }
+        searches.removeAll()
         candidates = [:]; scheduleIdle()
         if let topic, !topic.cancelled {
             topic.cancelled = true; topic.task?.cancel(); topic.timeout?.cancel()

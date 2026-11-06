@@ -41,6 +41,7 @@ struct BubbleOffset: Codable, Equatable {
 struct CompanionSettings: Codable {
     var enabled = false
     var paused = false
+    var webSearchEnabled = true
     var bubbleRetentionSeconds = 8
     var intervalMinutes = 30
     var hourlyRequests = 12
@@ -52,13 +53,14 @@ struct CompanionSettings: Codable {
     var characters: [String: CompanionCharacterSettings] = [:]
     var groups: [CompanionGroupSettings] = []
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters, groups
+        case enabled, paused, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters, groups
     }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)) ?? false
+        webSearchEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .webSearchEnabled)) ?? true
         bubbleRetentionSeconds = min(max((try? c.decodeIfPresent(Int.self, forKey: .bubbleRetentionSeconds)) ?? 8, 1), 300)
         intervalMinutes = (try? c.decodeIfPresent(Int.self, forKey: .intervalMinutes)) ?? 30
         hourlyRequests = (try? c.decodeIfPresent(Int.self, forKey: .hourlyRequests)) ?? 12
@@ -447,6 +449,7 @@ final class CompanionCoordinator: ObservableObject {
                     "visible": record.settings.isVisible && !manager.allHidden && !manager.sleeping && manager.isDisplayConnected(record) && record.error == nil]
         }
         let value: [String: Any] = ["enabled": settings.enabled, "paused": settings.paused || manager.sleeping,
+            "webSearchEnabled": settings.webSearchEnabled,
             "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model,
             "sources": settings.sources.mapValues { ["enabled": $0.enabled] as [String: Any] }, "characters": characters]
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: .sortedKeys), let encoded = String(data: data, encoding: .utf8) else { return }

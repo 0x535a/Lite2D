@@ -231,13 +231,60 @@ final class NativeCompanionBroker {
     func close() { listener?.cancel(); listener = nil }
 }
 
+// Fixed search-only MCP bridge. Neither the endpoint nor the upstream tool name
+// is model-controlled; no user MCP configuration is imported here.
+enum NativeCompanionSearch {
+    static func search(query: String, objective: String, session: URLSession = .shared) async throws -> String {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let objective = objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, query.count <= 500, !objective.isEmpty, objective.count <= 1000 else {
+            throw NativeCompanionData.error("Search requires a query (1–500 characters) and objective (1–1000 characters)")
+        }
+        var request = URLRequest(url: URL(string: "https://mcp.exa.ai/mcp?tools=web_search_exa")!, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = try NativeCompanionData.json(["jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": ["name": "web_search_exa", "arguments": ["query": query, "objective": objective, "numResults": 3]]])
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+            throw NativeCompanionData.error("Web search is unavailable; try again later")
+        }
+        return try result(data)
+    }
+    static func result(_ data: Data) throws -> String {
+        guard data.count <= 1_000_000 else { throw NativeCompanionData.error("Search response is too large") }
+        var messages: [CompanionObject] = []
+        if let json = try? NativeCompanionData.decode(data) { messages = [NativeCompanionData.object(json)] }
+        else {
+            // Streamable HTTP MCP can return SSE, with multi-line data fields.
+            var fields: [String] = []
+            for line in (String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n") + "\n\n").components(separatedBy: "\n") {
+                if line.isEmpty {
+                    if let json = try? NativeCompanionData.decode(Data(fields.joined(separator: "\n").utf8)) { messages.append(NativeCompanionData.object(json)) }
+                    fields = []
+                } else if line.hasPrefix("data:") { fields.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)) }
+            }
+        }
+        guard let message = messages.last(where: { $0["id"] as? Int == 1 }), message["error"] == nil,
+              let result = message["result"] as? CompanionObject, result["isError"] as? Bool != true else {
+            throw NativeCompanionData.error("Web search failed; no search results are available")
+        }
+        let text = NativeCompanionData.array(result["content"]).filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        guard !text.isEmpty else { throw NativeCompanionData.error("Web search returned no text results") }
+        return String(text.prefix(12000))
+    }
+}
+
 enum NativeCompanionMCP {
-    static let toolNames = ["companion_list_characters", "companion_send_message", "observer_list_sessions", "observer_get_activity", "observer_get_recent_work", "observer_get_session_summary", "observer_watch_session", "observer_unwatch_session", "public_record_list", "public_record_read", "public_record_update", "private_memory_read", "private_memory_update"]
+    static let toolNames = ["web_search", "companion_list_characters", "companion_send_message", "observer_list_sessions", "observer_get_activity", "observer_get_recent_work", "observer_get_session_summary", "observer_watch_session", "observer_unwatch_session", "public_record_list", "public_record_read", "public_record_update", "private_memory_read", "private_memory_update"]
     static func tools(_ prompt: NativeCompanionPrompt) -> [CompanionObject] {
         func schema(_ properties: [String], _ required: [String]) -> CompanionObject {
             ["type": "object", "properties": Dictionary(uniqueKeysWithValues: properties.map { ($0, ["type": "string"]) }), "required": required, "additionalProperties": false]
         }
         let fields: [String: [String]] = [
+            "web_search": ["query", "objective"],
             "companion_send_message": ["to", "text"], "observer_get_activity": ["sessionRef"], "observer_get_session_summary": ["sessionRef"],
             "observer_watch_session": ["sessionRef"], "observer_unwatch_session": ["sessionRef"], "public_record_read": ["path"],
             "public_record_update": ["path", "content", "expectedRevision"], "private_memory_update": ["content"]
