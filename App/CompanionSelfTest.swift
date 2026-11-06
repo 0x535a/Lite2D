@@ -104,7 +104,7 @@ final class CompanionSelfTest {
                     let placed = CompanionBubble(); placed.offset = NSPoint(x: offset?.x ?? 0, y: offset?.y ?? 0)
                     placed.show(name: "22", text: "Bubble placement check", near: w)
                     let base = placed.baseOrigin(near: w)!, actual = placed.panel.frame.origin
-                    try check(abs((actual.x - base.x) - 40) < 0.6 && abs((actual.y - base.y) + 25) < 0.6, "Normal speech uses the saved per-model bubble position")
+                    try check(abs((actual.x - base.x) - 40) < 0.6 && abs((actual.y - base.y) + 25) < 0.6, "Normal speech uses the saved per-model bubble position: base=\(base) actual=\(actual) frame=\(placed.panel.frame) screen=\(w.screen?.visibleFrame ?? .zero)")
                     placed.hide()
                 }
                 c.resetBubblePlacement(a.settings.id)
@@ -137,10 +137,42 @@ final class CompanionSelfTest {
                     bubble.show(name: "22", text: "好耶，这次通过啦！三三，你也看到了吗？", near: w)
                     try await Task.sleep(nanoseconds: 100_000_000)
                     try check(bubble.panel.ignoresMouseEvents && !bubble.panel.isKeyWindow, "Speech bubble stays passive and does not steal focus")
-                    try capture(bubble.panel, "companion-bubble"); bubble.hide()
+                    try capture(bubble.panel, "companion-bubble")
+                    bubble.show(name: "ignored", text: "然后测一下快速切换；", near: w)
+                    bubble.show(name: "ignored", text: "最后检查播放器。", near: w)
+                    bubble.show(name: "ignored", text: "这句出现时，最旧的一句消失。", near: w)
+                    try await Task.sleep(nanoseconds: 250_000_000)
+                    try check(bubble.sentenceCount == 3 && bubble.displayedTexts.first == "然后测一下快速切换；", "Fourth sentence evicts the oldest bubble")
+                    try capture(bubble.panel, "companion-bubble-stack")
+                    let withoutAvatar = bubble.panel.frame.width
+                    try c.installAvatar(from: output.appendingPathComponent("companion-bubble.png"), for: a.settings.id)
+                    try check(c.avatar(a.settings.id)?.size == NSSize(width: 128, height: 128), "Avatar is normalized to a local cropped PNG")
+                    let avatarSettings = try JSONDecoder().decode(CompanionCharacterSettings.self, from: JSONEncoder().encode(c.character(a.settings.id)))
+                    try check(avatarSettings.avatarFile == "avatar.png", "Avatar setting survives serialization")
+                    bubble.configure(limit: 3, avatar: c.avatar(a.settings.id)); bubble.position(near: w)
+                    try check(bubble.panel.frame.width == withoutAvatar + 44, "Avatar adds space only when configured")
+                    try capture(bubble.panel, "companion-bubble-avatar")
+                    bubble.configure(limit: 2, avatar: nil); bubble.position(near: w)
+                    try check(bubble.sentenceCount == 2 && bubble.panel.frame.width <= withoutAvatar, "Limit changes trim existing sentences and missing avatars reserve no space")
+                    c.removeAvatar(a.settings.id)
+                    try check(c.avatar(a.settings.id) == nil && c.character(a.settings.id).avatarFile == nil, "Avatar removal restores bubble-only presentation")
+                    bubble.hide()
+
                 }
                 c.receive(["type": "utterance", "sequence": 1, "createdAt": "2026-11-04T00:00:00Z", "characterId": a.settings.id.uuidString, "text": "好耶，这次通过啦！"])
                 c.receive(["type": "utterance", "sequence": 2, "createdAt": "2026-11-04T00:00:01Z", "characterId": b.settings.id.uuidString, "text": "嗯，记录里这次确实通过了。姐姐，别忘了保留测试结果。"])
+                c.stopTopic()
+                let original = "第一句。第二句；第三句。第四句。"
+                c.receive(["type": "utterance", "sequence": 3, "characterId": a.settings.id.uuidString, "text": original])
+                try check(c.speechTexts(a.settings.id) == ["第一句。"], "First sentence appears immediately")
+                for _ in 0..<3 {
+                    try await Task.sleep(nanoseconds: 1_100_000_000); c.tick()
+                }
+                try check(c.speechTexts(a.settings.id) == ["第二句；", "第三句。", "第四句。"], "Sentence pacing queues speech and retains only three sentences")
+                try await Task.sleep(nanoseconds: 1_100_000_000); c.tick()
+                try check(c.speechTexts(a.settings.id).count == 3 && c.entries.last?.text == original, "Last sentences stay visible and history retains the complete utterance")
+                c.stopTopic()
+                try check(c.speechTexts(a.settings.id).isEmpty && !c.hasSpeech, "Stopping clears retained speech")
                 let history = CompanionHistoryView.makeWindow(coordinator: c)
                 history.makeKeyAndOrderFront(nil)
                 try await Task.sleep(nanoseconds: 160_000_000)
