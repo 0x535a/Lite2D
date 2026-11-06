@@ -330,7 +330,7 @@
 "companion.group_height" = "Height";
 "companion.group_x" = "X";
 "companion.group_y" = "Y";
-"companion.group_coordinates" = "Dimensions and global screen coordinates are in points, measured from the bottom-left.";
+"companion.group_coordinates" = "Dimensions are in points. X and Y are relative to the bottom-left of the assigned display.";
 "companion.group_adjust" = "Adjust Window…";
 "companion.group_adjust_help" = "Drag the title bar or resize the window, then click Done.";
 "companion.group_members" = "Members";
@@ -338,3 +338,11 @@
 "companion.group_delete_confirm" = "Delete this Group? Members will return to individual bubbles.";
 "companion.group_help" = "Groups collect member messages in a fixed window. Messages align to each model’s side and scroll vertically only.";
 "companion.group_member_help" = "Messages appear in {0}; individual bubble placement is inactive.";
+
+"companion.group_window" = "Window";
+"companion.group_management" = "Management";
+"companion.group_display_missing" = "Display disconnected";
+"companion.group_display_help" = "This Group stays bound to its display. Reconnect that display or choose another one to adjust the window.";
+"companion.group_preview_short" = "This is a chat bubble preview.";
+"companion.group_preview_long" = "Longer messages wrap inside this window, with the text always aligned to the left.";
+"companion.group_preview_resize" = "Drag or resize the window to preview its layout.";

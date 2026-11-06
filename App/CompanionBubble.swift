@@ -8,6 +8,7 @@ final class CompanionBubble {
         let id: UUID
         let text: String
         let speakerID: UUID?
+        let isPreview: Bool
         let avatar: NSImage?
         let side: CompanionBubbleSide
         let view: NSView
@@ -29,17 +30,20 @@ final class CompanionBubble {
     private var layingOut = false
     private var editing = false
     var isGroup: Bool { scroll != nil }
-    var speakerIDs: Set<UUID> { Set(rows.compactMap(\.speakerID)) }
+    private var actualRows: [Row] { rows.filter { !$0.isPreview } }
+    private var visibleRows: [Row] { rows.filter { $0.isPreview == editing } }
+    var groupPreviewTexts: [String] { rows.filter(\.isPreview).map(\.text) }
+    var speakerIDs: Set<UUID> { Set(actualRows.compactMap(\.speakerID)) }
     var scrollView: NSScrollView? { scroll }
-    var messageFrames: [NSRect] { rows.map { $0.view.frame } }
-    var messageSides: [CompanionBubbleSide] { rows.map(\.side) }
-    var messageAlignments: [NSTextAlignment] { rows.map { $0.label.alignment } }
+    var messageFrames: [NSRect] { visibleRows.map { $0.view.frame } }
+    var messageSides: [CompanionBubbleSide] { visibleRows.map(\.side) }
+    var messageAlignments: [NSTextAlignment] { visibleRows.map { $0.label.alignment } }
     var followsLatest: Bool { (scroll?.contentView.bounds.minY ?? 0) <= 2 }
-    func texts(for speaker: UUID) -> [String] { rows.filter { $0.speakerID == speaker }.map { $0.label.stringValue } }
+    func texts(for speaker: UUID) -> [String] { actualRows.filter { $0.speakerID == speaker }.map { $0.label.stringValue } }
     var offset = NSPoint.zero
     var onMoved: (() -> Void)?
-    var sentenceCount: Int { rows.count }
-    var displayedTexts: [String] { rows.map { $0.label.stringValue } }
+    var sentenceCount: Int { actualRows.count }
+    var displayedTexts: [String] { actualRows.map { $0.label.stringValue } }
     init(preview: Bool = false, groupFrame: NSRect? = nil) {
         self.preview = preview
         scroll = groupFrame == nil ? nil : NSScrollView()
@@ -89,7 +93,7 @@ final class CompanionBubble {
             var image = isGroup ? row.avatar : avatar
             var direction = isGroup ? row.side : side
             if let id = row.speakerID, let style { (image, direction) = style(id) }
-            append(row.text, speakerID: row.speakerID, avatar: image, side: direction, id: row.id)
+            append(row.text, speakerID: row.speakerID, avatar: image, side: direction, id: row.id, isPreview: row.isPreview)
             rows[rows.count - 1].playback = row.playback
             rows[rows.count - 1].playback?.setRetention(retention)
             rows.last?.label.stringValue = row.label.stringValue
@@ -101,7 +105,7 @@ final class CompanionBubble {
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         layout(animated: false)
     }
-    func beginGroupEditing(name: String) {
+    func beginGroupEditing(name: String, speakers: [CompanionGroupPreviewSpeaker] = []) {
         guard isGroup, !editing else { return }
         let frame = panel.frame
         editing = true
@@ -110,16 +114,33 @@ final class CompanionBubble {
         panel.setFrameOrigin(frame.origin)
         scroll?.wantsLayer = true
         scroll?.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.3).cgColor
-        panel.orderFrontRegardless()
+        updateGroupPreview(speakers)
+        panel.orderFrontRegardless(); panel.display()
     }
     @discardableResult func finishGroupEditing() -> NSRect {
         guard isGroup, editing else { return panel.frame }
         let frame = panel.convertToScreen(panel.contentView!.bounds)
+        rows.filter(\.isPreview).forEach { $0.view.removeFromSuperview() }
+        rows.removeAll(where: \.isPreview)
         editing = false; panel.styleMask = [.borderless, .nonactivatingPanel]
         scroll?.layer?.backgroundColor = NSColor.clear.cgColor
         panel.setFrame(frame, display: true)
+        layout(animated: false)
         if rows.isEmpty && !editing { panel.orderOut(nil) }
         return frame
+    }
+    func updateGroupPreview(_ speakers: [CompanionGroupPreviewSpeaker]) {
+        guard isGroup, editing else { return }
+        rows.filter(\.isPreview).forEach { $0.view.removeFromSuperview() }
+        rows.removeAll(where: \.isPreview)
+        let styles = speakers.isEmpty ? [CompanionGroupPreviewSpeaker(id: nil, avatar: nil, side: .left),
+                                        CompanionGroupPreviewSpeaker(id: nil, avatar: nil, side: .right)] : speakers
+        let messages = [L10n.text("companion.group_preview_short"), L10n.text("companion.group_preview_long"), L10n.text("companion.group_preview_resize")]
+        for index in 0..<max(3, styles.count) {
+            let style = styles[index % styles.count]
+            append(messages[index % messages.count], speakerID: style.id, avatar: style.avatar, side: style.side, isPreview: true)
+        }
+        layout(animated: false)
     }
     /// Static content is used only by the draggable placement preview.
     func show(name: String, text: String, near window: NSWindow, speakerID: UUID? = nil, avatar: NSImage? = nil, side: CompanionBubbleSide? = nil) {
@@ -160,7 +181,7 @@ final class CompanionBubble {
         updateHover(at: NSEvent.mouseLocation)
         completion?()
     }
-    private func append(_ text: String, speakerID: UUID? = nil, avatar: NSImage?, side: CompanionBubbleSide, id: UUID = UUID()) {
+    private func append(_ text: String, speakerID: UUID? = nil, avatar: NSImage?, side: CompanionBubbleSide, id: UUID = UUID(), isPreview: Bool = false) {
         let font = NSFont.systemFont(ofSize: 14)
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font; label.textColor = .labelColor; label.alignment = .left; label.baseWritingDirection = .leftToRight
@@ -210,11 +231,12 @@ final class CompanionBubble {
         close.connect { [weak self] in self?.dismiss(id) }
         row.addSubview(close)
         content.addSubview(row)
-        rows.append(Row(id: id, text: text, speakerID: speakerID, avatar: avatar, side: side, view: row, size: NSSize(width: avatarSpace + bodyWidth + 6, height: height), label: label, closeButton: close))
+        rows.append(Row(id: id, text: text, speakerID: speakerID, isPreview: isPreview, avatar: avatar, side: side, view: row, size: NSSize(width: avatarSpace + bodyWidth + 6, height: height), label: label, closeButton: close))
     }
     /// Polling also detects hover while the passive window ignores mouse events.
     func updateHover(at screenPoint: NSPoint) {
         guard !preview else { return }
+        if editing { rows.forEach { $0.closeButton.isHidden = true }; return }
         let point = content.convert(panel.convertPoint(fromScreen: screenPoint), from: nil)
         var overButton = false
         for row in rows {
@@ -230,7 +252,7 @@ final class CompanionBubble {
     private func dismiss(_ id: UUID) {
         removeRows { $0.id == id }
     }
-    func removeSpeaker(_ id: UUID) { removeRows { $0.speakerID == id } }
+    func removeSpeaker(_ id: UUID) { removeRows { !$0.isPreview && $0.speakerID == id } }
     private func removeRows(where predicate: (Row) -> Bool) {
         let anchor = scrollAnchor()
         rows.filter(predicate).forEach { $0.view.removeFromSuperview() }
@@ -253,7 +275,7 @@ final class CompanionBubble {
     private func scrollAnchor() -> ScrollAnchor? {
         guard let scroll else { return nil }
         let bounds = scroll.contentView.bounds
-        let first = rows.first { $0.view.frame.intersects(bounds) }
+        let first = visibleRows.first { $0.view.frame.intersects(bounds) }
         return ScrollAnchor(following: bounds.minY <= 2, id: first?.id,
                             offset: (first?.view.frame.minY ?? 0) - bounds.minY, oldOrigin: bounds.minY)
     }
@@ -261,14 +283,16 @@ final class CompanionBubble {
         guard !layingOut else { return }
         layingOut = true; defer { layingOut = false }
         let saved = anchor ?? scrollAnchor()
-        let width = scroll?.contentSize.width ?? (rows.map(\.size.width).max() ?? 0)
-        let height = rows.reduce(CGFloat(0)) { $0 + $1.size.height } + CGFloat(max(0, rows.count - 1)) * 8
+        for row in rows { row.view.isHidden = row.isPreview != editing }
+        let displayed = visibleRows
+        let width = scroll?.contentSize.width ?? (displayed.map(\.size.width).max() ?? 0)
+        let height = displayed.reduce(CGFloat(0)) { $0 + $1.size.height } + CGFloat(max(0, displayed.count - 1)) * 8
         if let scroll { content.setFrameSize(NSSize(width: width, height: max(height, scroll.contentSize.height))) }
         else { panel.setContentSize(NSSize(width: ceil(width / 2) * 2, height: ceil(height))) }
         var y = height
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animated ? 0.2 : 0
-            for row in rows {
+            for row in displayed {
                 y -= row.size.height
                 let x = row.side == .right ? max(0, width - row.size.width) : 0
                 let frame = NSRect(x: x, y: y, width: row.size.width, height: row.size.height)
@@ -280,7 +304,7 @@ final class CompanionBubble {
         if let scroll, let saved {
             let origin: CGFloat
             if saved.following { origin = 0 }
-            else if let row = rows.first(where: { $0.id == saved.id }) { origin = row.view.frame.minY - saved.offset }
+            else if let row = displayed.first(where: { $0.id == saved.id }) { origin = row.view.frame.minY - saved.offset }
             else { origin = saved.oldOrigin }
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, origin)))
             scroll.reflectScrolledClipView(scroll.contentView)
@@ -301,7 +325,9 @@ final class CompanionBubble {
     func hide() {
         timer?.invalidate(); timer = nil; typingCompleted = nil
         if !editing { panel.orderOut(nil) }
-        rows.forEach { $0.view.removeFromSuperview() }; rows.removeAll()
+        let removed = rows.filter { !editing || !$0.isPreview }
+        removed.forEach { $0.view.removeFromSuperview() }
+        rows.removeAll { !editing || !$0.isPreview }
         if editing { layout(animated: false) }
     }
 }

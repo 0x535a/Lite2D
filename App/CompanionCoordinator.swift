@@ -128,6 +128,12 @@ final class CompanionCoordinator: ObservableObject {
                 settings = try JSONDecoder().decode(CompanionSettings.self, from: Data(contentsOf: root.appendingPathComponent("settings.json")))
             }
         } catch { self.error = error.localizedDescription }
+        let previous = settings.groups
+        for index in settings.groups.indices { settings.groups[index].migrate(in: manager.displayRegistry.displays) }
+        if settings.groups != previous {
+            do { try JSONEncoder().encode(settings).write(to: root.appendingPathComponent("settings.json"), options: .atomic) }
+            catch { self.error = error.localizedDescription }
+        }
     }
     func start() {
         shutdownRequested = false
@@ -151,6 +157,7 @@ final class CompanionCoordinator: ObservableObject {
         if previous.groupID != value.groupID { presentNext() }
     }
     func changed() {
+        for index in settings.groups.indices { settings.groups[index].migrate(in: manager?.displayRegistry.displays ?? []) }
         settings.bubbleRetentionSeconds = min(max(settings.bubbleRetentionSeconds, 1), 300)
         for (id, bubble) in bubbles {
             bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds), side: character(id).bubbleSide)
@@ -166,9 +173,11 @@ final class CompanionCoordinator: ObservableObject {
         for group in settings.groups {
             if let bubble = groupBubbles[group.id] {
                 bubble.panel.title = group.name
-                bubble.setGroupFrame(group.reachableFrame())
+                if let frame = groupFrame(group) { bubble.setGroupFrame(frame) }
+                else { bubble.hide(); typingSpeakers.removeValue(forKey: group.id) }
                 bubble.configure(avatar: nil, retention: TimeInterval(settings.bubbleRetentionSeconds))
                 bubble.refreshSpeakers { (self.avatar($0), self.character($0).bubbleSide) }
+                if groupEditingID == group.id { bubble.updateGroupPreview(previewSpeakers(group.id)) }
             }
         }
         settings.intervalMinutes = min(max(settings.intervalMinutes, 0), 1440)
@@ -186,8 +195,11 @@ final class CompanionCoordinator: ObservableObject {
     @discardableResult func addGroup() -> UUID {
         var group = CompanionGroupSettings()
         group.name = L10n.text("companion.group_default", String(settings.groups.count + 1))
-        if let area = NSScreen.main?.visibleFrame {
-            group.x = area.midX - group.width / 2; group.y = area.midY - group.height / 2
+        if let display = manager?.displayRegistry.primary {
+            group.x = display.visibleFrame.midX - group.width / 2; group.y = display.visibleFrame.midY - group.height / 2
+            group.displayUUID = display.id; group.boundDisplayName = display.name
+            group.displayPosition = DisplayPosition(x: group.x - display.frame.minX, y: group.y - display.frame.minY)
+            group.displayBindingVersion = 1
         }
         settings.groups.append(group); changed(); return group.id
     }
@@ -210,22 +222,59 @@ final class CompanionCoordinator: ObservableObject {
         guard id == nil || settings.groups.contains(where: { $0.id == id }) else { return }
         updateCharacter(characterID) { $0.groupID = id }
     }
-    private func groupBubble(_ group: CompanionGroupSettings) -> CompanionBubble {
+    func groupFrame(_ group: CompanionGroupSettings) -> NSRect? {
+        group.windowFrame(in: manager?.displayRegistry.displays ?? [])
+    }
+    func isGroupDisplayConnected(_ id: UUID) -> Bool {
+        settings.groups.first(where: { $0.id == id }).flatMap { groupFrame($0) } != nil
+    }
+    func bindGroup(_ id: UUID, to displayID: String) {
+        guard let display = manager?.displayRegistry.displays.first(where: { $0.id == displayID }) else { return }
+        if groupEditingID == id { finishGroupPlacement(id, save: false) }
+        updateGroup(id) {
+            $0.displayUUID = display.id; $0.boundDisplayName = display.name; $0.displayBindingVersion = 1
+            if $0.displayPosition == nil {
+                $0.displayPosition = DisplayPosition(x: display.visibleFrame.minX - display.frame.minX + 60,
+                                                     y: display.visibleFrame.minY - display.frame.minY + 50)
+            }
+        }
+    }
+    private func moveGroup(_ id: UUID, to frame: NSRect) {
+        guard let group = settings.groups.first(where: { $0.id == id }) else { return }
+        let display = DisplayLayout.matching(frame, in: manager?.displayRegistry.displays ?? [])
+        updateGroup(id) {
+            $0.frame = frame
+            if let display {
+                $0.displayUUID = display.id; $0.boundDisplayName = display.name; $0.displayBindingVersion = 1
+                $0.displayPosition = DisplayPosition(x: frame.minX - display.frame.minX, y: frame.minY - display.frame.minY)
+            } else if let previous = group.displayPosition, let oldFrame = groupFrame(group) {
+                $0.displayPosition = DisplayPosition(x: previous.x + frame.minX - oldFrame.minX, y: previous.y + frame.minY - oldFrame.minY)
+            }
+        }
+    }
+    private func previewSpeakers(_ id: UUID) -> [CompanionGroupPreviewSpeaker] {
+        (manager?.records ?? []).filter { character($0.settings.id).groupID == id }.map {
+            CompanionGroupPreviewSpeaker(id: $0.settings.id, avatar: avatar($0.settings.id), side: character($0.settings.id).bubbleSide)
+        }
+    }
+    private func groupBubble(_ group: CompanionGroupSettings) -> CompanionBubble? {
+        guard let frame = groupFrame(group) else { return nil }
         if let bubble = groupBubbles[group.id] { return bubble }
-        let bubble = CompanionBubble(groupFrame: group.reachableFrame())
+        let bubble = CompanionBubble(groupFrame: frame)
         bubble.configure(avatar: nil, retention: TimeInterval(settings.bubbleRetentionSeconds))
         groupBubbles[group.id] = bubble; return bubble
     }
     func beginGroupPlacement(_ id: UUID) {
         if let current = groupEditingID, current != id { finishGroupPlacement(current, save: true) }
-        guard let group = settings.groups.first(where: { $0.id == id }), groupEditingID == nil else { return }
-        groupEditingID = id; groupBubble(group).beginGroupEditing(name: group.name)
+        guard let group = settings.groups.first(where: { $0.id == id }), groupEditingID == nil,
+              let bubble = groupBubble(group) else { return }
+        groupEditingID = id; bubble.beginGroupEditing(name: group.name, speakers: previewSpeakers(id))
     }
     func finishGroupPlacement(_ id: UUID, save: Bool) {
         guard groupEditingID == id, let bubble = groupBubbles[id] else { return }
         let frame = bubble.finishGroupEditing(); groupEditingID = nil
-        if save { updateGroup(id) { $0.frame = frame } }
-        else if let group = settings.groups.first(where: { $0.id == id }) { bubble.setGroupFrame(group.reachableFrame()) }
+        if save { moveGroup(id, to: frame) }
+        else if let group = settings.groups.first(where: { $0.id == id }), let frame = groupFrame(group) { bubble.setGroupFrame(frame) }
     }
     func groupWindow(_ id: UUID) -> CompanionBubble? { groupBubbles[id] }
     func avatar(_ id: UUID) -> NSImage? {
@@ -415,7 +464,16 @@ final class CompanionCoordinator: ObservableObject {
                 if typingSpeakers[id] == id { typingSpeakers.removeValue(forKey: id); restoreExpression(id) }
             }
         }
-        for bubble in Array(groupBubbles.values) {
+        for (groupID, bubble) in Array(groupBubbles) {
+            guard let group = settings.groups.first(where: { $0.id == groupID }), let frame = groupFrame(group) else {
+                if groupEditingID == groupID { finishGroupPlacement(groupID, save: false) }
+                bubble.hide(); typingSpeakers.removeValue(forKey: groupID)
+                pending.removeAll { event in
+                    (event["characterId"] as? String).flatMap(UUID.init(uuidString:)).flatMap { self.group(for: $0)?.id } == groupID
+                }
+                continue
+            }
+            bubble.setGroupFrame(frame)
             for id in bubble.speakerIDs {
                 if let record = manager?.record(id), visible(record) { continue }
                 pending.removeAll { $0["characterId"] as? String == id.uuidString }
@@ -448,7 +506,10 @@ final class CompanionCoordinator: ObservableObject {
             if typingSpeakers[channel] != nil { index += 1; continue }
             pending.remove(at: index)
             let bubble: CompanionBubble
-            if let group { bubble = groupBubble(group) }
+            if let group {
+                guard let shared = groupBubble(group) else { continue }
+                bubble = shared
+            }
             else {
                 bubble = bubbles[id] ?? CompanionBubble(); bubbles[id] = bubble
                 bubble.offset = bubblePoint(character(id).bubbleOffset)

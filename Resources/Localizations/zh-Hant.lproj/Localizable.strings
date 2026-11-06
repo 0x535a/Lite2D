@@ -330,7 +330,7 @@
 "companion.group_height" = "高度";
 "companion.group_x" = "X";
 "companion.group_y" = "Y";
-"companion.group_coordinates" = "尺寸及全域螢幕座標以點為單位，原點位於螢幕左下方。";
+"companion.group_coordinates" = "尺寸以點為單位，X、Y 相對於綁定顯示器的左下角。";
 "companion.group_adjust" = "調整視窗…";
 "companion.group_adjust_help" = "拖曳標題列或調整視窗大小，完成後按「完成」。";
 "companion.group_members" = "成員";
@@ -338,3 +338,11 @@
 "companion.group_delete_confirm" = "刪除此群組？成員將恢復在各自附近顯示氣泡。";
 "companion.group_help" = "群組成員的訊息集中於固定視窗，依各模型方向左右排列，僅支援垂直捲動。";
 "companion.group_member_help" = "訊息顯示於「{0}」，模型旁的獨立氣泡位置暫不生效。";
+
+"companion.group_window" = "視窗";
+"companion.group_management" = "管理";
+"companion.group_display_missing" = "顯示器已中斷連線";
+"companion.group_display_help" = "此群組保留原顯示器綁定。重新連接該顯示器，或選擇其他顯示器後即可調整視窗。";
+"companion.group_preview_short" = "這是一則聊天氣泡預覽。";
+"companion.group_preview_long" = "較長的訊息會在視窗內自動換行，文字始終靠左對齊。";
+"companion.group_preview_resize" = "拖曳或調整視窗大小，預覽會隨之變更。";

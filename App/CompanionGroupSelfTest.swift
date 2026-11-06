@@ -7,6 +7,14 @@ extension CompanionSelfTest {
         c.settings.groups = []
         let legacy = try JSONDecoder().decode(CompanionCharacterSettings.self, from: Data("{}".utf8))
         try check(legacy.bubbleSide == .left && legacy.groupID == nil, "Old character settings default to left-side individual bubbles")
+        let left = DisplayDescriptor(id: "left", name: "Left", frame: NSRect(x: -1200, y: 0, width: 1200, height: 900), visibleFrame: NSRect(x: -1200, y: 0, width: 1200, height: 880))
+        let primary = DisplayDescriptor(id: "main", name: "Main", frame: NSRect(x: 0, y: 0, width: 1920, height: 1080), visibleFrame: NSRect(x: 0, y: 0, width: 1920, height: 1040))
+        var oldGroup = try JSONDecoder().decode(CompanionGroupSettings.self, from: Data(#"{"x":-1100,"y":60,"width":480,"height":360,"name":"Legacy"}"#.utf8))
+        oldGroup.migrate(in: [left, primary])
+        try check(oldGroup.displayUUID == "left" && oldGroup.displayPosition == DisplayPosition(x: 100, y: 60), "Legacy global Group frames migrate to display-relative bindings")
+        let shifted = DisplayDescriptor(id: "left", name: "Left", frame: left.frame.offsetBy(dx: -300, dy: 200), visibleFrame: left.visibleFrame.offsetBy(dx: -300, dy: 200))
+        try check(oldGroup.windowFrame(in: [shifted, primary])?.origin == NSPoint(x: -1400, y: 260), "Group positioning follows display rearrangement without changing relative coordinates")
+        try check(oldGroup.windowFrame(in: [primary]) == nil && oldGroup.displayUUID == "left", "Disconnected Groups never fall back to another display")
         let solo = CompanionBubble()
         solo.configure(avatar: NSImage(systemSymbolName: "person.crop.circle.fill", accessibilityDescription: nil), side: .right)
         solo.show(name: "", text: "独立气泡也能朝右，文字左对齐。", near: near)
@@ -76,24 +84,27 @@ extension CompanionSelfTest {
         let persisted = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(c.settings))
         try check(persisted.groups.contains { $0.id == id } && persisted.characters[b.settings.id.uuidString]?.groupID == id && persisted.characters[b.settings.id.uuidString]?.bubbleSide == .right, "Group geometry, membership and per-model side survive serialization")
         try check(!c.canPlaceBubble(a.settings.id), "Grouped characters use Group placement instead of individual offsets")
-        let host = NSHostingController(rootView: Form {
-            CompanionGroupsSection(companion: c, initiallyExpanded: [id])
-        }.formStyle(.grouped).frame(width: 620, height: 620))
-        host.sizingOptions = []
-        let settingsPreview = NSWindow(contentViewController: host)
-        settingsPreview.isReleasedWhenClosed = false
-        settingsPreview.setContentSize(NSSize(width: 620, height: 620)); settingsPreview.center(); settingsPreview.orderFront(nil)
+        let settingsWindow = status.settingsWindow
+        settingsWindow.show(); settingsWindow.model.selection = CompanionGroupSelection.tag(id)
+        manager.onChange?()
+        try check(settingsWindow.model.selection == CompanionGroupSelection.tag(id) && settingsWindow.model.isValidSelection(CompanionGroupSelection.tag(id)), "Group sidebar selection survives character and display updates")
         try await Task.sleep(nanoseconds: 180_000_000)
-        try capture(settingsPreview, "companion-group-settings"); settingsPreview.close()
+        if let window = settingsWindow.window { try capture(window, "companion-group-settings") }
+        settingsWindow.window?.orderOut(nil)
         c.beginGroupPlacement(id)
         guard let shared = c.groupWindow(id) else { throw CocoaError(.validationMissingMandatoryProperty) }
+        let historyBeforePreview = c.entries.count
+        try check(shared.groupPreviewTexts.count >= 3 && shared.sentenceCount == 0 && Set(shared.messageSides) == Set([.left, .right]), "Adjustment mode shows a complete preview using member directions")
+        try capture(shared.panel, "companion-group-placement-preview")
+        shared.advance(to: Date().addingTimeInterval(600))
+        try check(shared.groupPreviewTexts.count >= 3 && c.entries.count == historyBeforePreview, "Preview stays visible without expiring or writing fake history")
         c.updateGroup(id) { $0.name = "Group Test" }
         try check(shared.panel.isVisible, "Changing settings while Companion is disabled preserves the adjustment window")
         try check(shared.panel.styleMask.contains(.titled) && shared.panel.styleMask.contains(.resizable), "Adjustment mode exposes native window dragging and resizing")
         shared.panel.setContentSize(NSSize(width: 420, height: 240)); shared.panel.setFrameOrigin(NSPoint(x: 240, y: 200))
         c.finishGroupPlacement(id, save: true)
-        let saved = c.settings.groups.first { $0.id == id }!.frame
-        try check(saved.size == NSSize(width: 420, height: 240) && !shared.panel.styleMask.contains(.titled), "Finishing adjustment saves content dimensions and restores the frameless window")
+        let saved = c.groupFrame(c.settings.groups.first { $0.id == id }!)!
+        try check(saved.size == NSSize(width: 420, height: 240) && !shared.panel.styleMask.contains(.titled) && shared.groupPreviewTexts.isEmpty, "Finishing adjustment saves content dimensions and restores the frameless window")
         c.beginGroupPlacement(id); shared.panel.setContentSize(NSSize(width: 500, height: 320))
         c.finishGroupPlacement(id, save: false)
         try check(shared.panel.frame == saved, "Cancelling Group adjustment restores the previous frame")
@@ -117,12 +128,40 @@ extension CompanionSelfTest {
         try await Task.sleep(nanoseconds: 150_000_000)
         try check(shared.displayedTexts == ["乙。"], "Hiding a typing member releases the shared queue for the next speaker")
         a.settings.isVisible = originalVisibility; c.stopTopic()
+        c.receive(["type": "utterance", "sequence": 107, "characterId": b.settings.id.uuidString, "text": "正在调整时，真实消息也会继续播放。"])
+        c.beginGroupPlacement(id)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try check(shared.groupPreviewTexts.count >= 3 && !shared.displayedTexts.isEmpty && (shared.displayedTexts.first?.count ?? 0) > 1, "Full preview leaves real typing and its deadlines running independently")
+        c.finishGroupPlacement(id, save: false)
+        try check(shared.groupPreviewTexts.isEmpty && shared.sentenceCount == 1, "Leaving adjustment restores real messages and removes only preview content")
+        c.stopTopic()
         let other = c.addGroup(); c.assignGroup(b.settings.id, to: other)
         c.receive(["type": "utterance", "sequence": 103, "characterId": a.settings.id.uuidString, "text": String(repeating: "甲", count: 20)])
         c.receive(["type": "utterance", "sequence": 104, "characterId": b.settings.id.uuidString, "text": "乙。"])
         try await Task.sleep(nanoseconds: 250_000_000)
         try check(c.speechTexts(b.settings.id) == ["乙。"] && (c.speechTexts(a.settings.id).first?.count ?? 0) < 20, "Independent Groups type concurrently without blocking each other")
-        c.stopTopic(); c.deleteGroup(id); c.deleteGroup(other)
+        c.stopTopic()
+        let originalTopology = manager.displayRegistry.testingDisplays
+        let displays = manager.displayRegistry.displays
+        if let physical = displays.first(where: { $0.id == c.settings.groups.first(where: { $0.id == id })?.displayUUID }) {
+            let virtual = DisplayDescriptor(id: "group-test-display", name: "Group Test Display", frame: physical.frame, visibleFrame: physical.visibleFrame)
+            manager.displayRegistry.testingDisplays = displays + [virtual]
+            c.bindGroup(id, to: virtual.id)
+            let binding = c.settings.groups.first { $0.id == id }!
+            try check(binding.displayUUID == virtual.id && binding.displayPosition != nil, "Each Group can be explicitly bound to its own display")
+            c.receive(["type": "utterance", "sequence": 108, "characterId": a.settings.id.uuidString, "text": "甲。"])
+            manager.displayRegistry.testingDisplays = displays; c.tick()
+            try check(!shared.panel.isVisible && !c.isGroupDisplayConnected(id) && c.settings.groups.first(where: { $0.id == id })?.displayUUID == virtual.id, "Display disconnect hides the Group while preserving its binding")
+            c.receive(["type": "utterance", "sequence": 109, "characterId": a.settings.id.uuidString, "text": "不会跳到另一块屏幕。"])
+            try check(shared.sentenceCount == 0 && c.groupEditingID == nil, "Disconnected Group messages do not appear on an available fallback display")
+            let movedVirtual = DisplayDescriptor(id: virtual.id, name: virtual.name, frame: virtual.frame.offsetBy(dx: 20, dy: 20), visibleFrame: virtual.visibleFrame.offsetBy(dx: 20, dy: 20))
+            manager.displayRegistry.testingDisplays = displays + [movedVirtual]; c.tick()
+            try check(c.isGroupDisplayConnected(id) && shared.panel.frame == binding.windowFrame(in: displays + [movedVirtual]), "Reconnecting the display restores the Group at its bound relative position")
+            c.bindGroup(id, to: physical.id)
+        }
+        manager.displayRegistry.testingDisplays = originalTopology; c.tick()
+        c.deleteGroup(id); c.deleteGroup(other)
+        try check(settingsWindow.model.selection == "general", "Deleting the selected Group returns the sidebar to a valid page")
         try check(c.group(for: a.settings.id) == nil && c.group(for: b.settings.id) == nil && c.canPlaceBubble(a.settings.id), "Deleting Groups returns members to individual bubbles")
         c.updateCharacter(b.settings.id) { $0.bubbleSide = .left }
     }
