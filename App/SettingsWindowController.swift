@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 import ServiceManagement
 
 // The manager remains the source of truth for both the menu and this window.
@@ -10,17 +11,29 @@ final class SettingsWindowModel: ObservableObject {
     @Published var page = RoleSettingsPage.appearance
     @Published var updatingLogin = false
     let login = LaunchAtLogin()
+    private var companionObservation: AnyCancellable?
 
     init(status: StatusBarController) {
         self.status = status
         selection = status.manager.records.first?.settings.id.uuidString ?? "general"
+        companionObservation = status.manager.companion?.$settings.sink { [weak self] settings in
+            guard let self, let id = CompanionGroupSelection.id(self.selection), !settings.groups.contains(where: { $0.id == id }) else { return }
+            self.selection = "general"
+        }
         status.manager.onChange = { [weak self] in
             guard let self else { return }
-            if let selection, selection != "general", !manager.records.contains(where: { $0.settings.id.uuidString == selection }) {
+            if let selection, !isValidSelection(selection) {
                 self.selection = manager.records.first?.settings.id.uuidString ?? "general"
             }
             objectWillChange.send()
         }
+    }
+    func isValidSelection(_ selection: String) -> Bool {
+        if selection == "general" { return true }
+        if let id = CompanionGroupSelection.id(selection) {
+            return manager.companion?.settings.groups.contains { $0.id == id } == true
+        }
+        return manager.records.contains { $0.settings.id.uuidString == selection }
     }
     func binding<Value>(_ record: ModelRecord, _ path: WritableKeyPath<ModelInstanceSettings, Value>) -> Binding<Value> {
         let id = record.settings.id
@@ -110,6 +123,9 @@ private struct SettingsRootView: View {
                             .tag(record.settings.id.uuidString)
                         }
                     }
+                    if let companion = model.manager.companion {
+                        CompanionGroupSidebar(companion: companion, selection: $model.selection)
+                    }
                     Section {
                         Label(L10n.text("settings.general"), systemImage: "gearshape").tag("general")
                     }
@@ -125,6 +141,9 @@ private struct SettingsRootView: View {
         } detail: {
             if let selection = model.selection, let id = UUID(uuidString: selection), let record = model.manager.record(id) {
                 RoleSettingsView(model: model, record: record).id(id)
+            } else if let id = CompanionGroupSelection.id(model.selection), let companion = model.manager.companion,
+                      companion.settings.groups.contains(where: { $0.id == id }) {
+                CompanionGroupPage(companion: companion, id: id).id(id)
             } else {
                 GeneralSettingsView(model: model)
             }

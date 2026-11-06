@@ -127,7 +127,6 @@ struct CompanionGeneralSections: View {
             }
             Text(L10n.text("companion.bubble_retention_help")).font(.caption).foregroundStyle(.secondary)
         } header: { Text(L10n.text("companion.bubble_section")) }
-        CompanionGroupsSection(companion: companion)
         Section {
             Toggle(L10n.text("companion.enabled"), isOn: binding(\.enabled))
             Toggle(L10n.text("companion.paused"), isOn: binding(\.paused)).disabled(!companion.settings.enabled)
