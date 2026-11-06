@@ -87,6 +87,12 @@ private actor ServiceFixture {
             try check(result["revision"] as? String != revision, "Native store retains transactional revisions")
             try check(try store.updateRecord(actor: b, name: "shared.md", content: "overwrite", revision: revision)["conflict"] as? Bool == true, "Concurrent record overwrite is refused")
             try check(try store.rows("SELECT actor FROM changes").first?["actor"] as? String == a, "Record audit preserves author")
+            try check(try store.readRecord("shared.md")["exists"] as? Bool == true && store.readRecord("plans.md")["exists"] as? Bool == false, "Shared notes explicitly distinguish existing and new paths")
+            let created = try store.updateRecord(actor: a, name: "plans.md", content: "A suggested a tea party.")
+            try check(created["conflict"] == nil, "First shared note can be created without a prior revision read")
+            try check(try store.updateRecord(actor: b, name: "plans.md", content: "Blind overwrite")["conflict"] as? Bool == true, "Omitting a revision cannot overwrite an existing shared note")
+            let merged = try store.updateRecord(actor: b, name: "plans.md", content: "A suggested a tea party; B agreed.", revision: created["revision"] as? String)
+            try check(merged["conflict"] == nil && (try store.readRecord("plans.md")["content"] as? String) == "A suggested a tea party; B agreed.", "Another companion can merge shared notes using the current revision")
             var rejected = false; do { _ = try store.readRecord("../bad.md") } catch { rejected = true }
             try check(rejected, "Record path traversal is rejected")
             try store.exportNotes()

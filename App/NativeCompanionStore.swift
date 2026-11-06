@@ -145,15 +145,17 @@ final class NativeCompanionStore {
     func requestCount(now: Double = NativeCompanionData.now()) throws -> Int { try rows("SELECT COUNT(*) AS n FROM requests WHERE at>=?", [now - 3600000]).first?["n"] as? Int ?? 0 }
     func readRecord(_ name: String) throws -> CompanionObject {
         guard !name.contains(".."), name.range(of: #"^[\w\u0080-\uffff][\w\u0080-\uffff .-]{0,120}\.md$"#, options: .regularExpression) != nil else { throw NativeCompanionData.error("Invalid record name") }
-        return try rows("SELECT content,revision FROM records WHERE path=?", [name]).first ?? ["content": "", "revision": NativeCompanionData.hash("")]
+        if var row = try rows("SELECT content,revision FROM records WHERE path=?", [name]).first { row["exists"] = true; return row }
+        return ["content": "", "revision": NativeCompanionData.hash(""), "exists": false]
     }
-    func updateRecord(actor: String, name: String, content: String, revision: String) throws -> CompanionObject {
+    func updateRecord(actor: String, name: String, content: String, revision: String? = nil) throws -> CompanionObject {
         guard content.utf8.count <= 32768 else { throw NativeCompanionData.error("Record exceeds 32 KB") }
         lock.lock(); defer { lock.unlock() }
         try execute("BEGIN IMMEDIATE")
         do {
             let before = try readRecord(name)
-            guard before["revision"] as? String == revision else { try execute("ROLLBACK"); return ["conflict": true, "revision": before["revision"] ?? ""] }
+            let matches = revision.map { $0 == before["revision"] as? String } ?? (before["exists"] as? Bool == false)
+            guard matches else { try execute("ROLLBACK"); return ["conflict": true, "revision": before["revision"] ?? ""] }
             let next = NativeCompanionData.hash(content)
             try execute("INSERT OR REPLACE INTO records VALUES (?,?,?)", [name, content, next])
             try execute("INSERT INTO changes(at,actor,path,before_revision,revision,content) VALUES (?,?,?,?,?,?)", [NativeCompanionData.iso(), actor, name, revision, next, content])
