@@ -312,3 +312,8 @@
 "companion.avatar_choose" = "選擇圖片…";
 "companion.avatar_remove" = "移除";
 "companion.avatar_help" = "未設定頭像時，只顯示氣泡。圖片會置中裁剪為圓形。";
+
+"companion.bubble_retention" = "氣泡保留時間";
+"companion.seconds" = "秒";
+"companion.bubble_retention_help" = "所有氣泡打字結束後統一保留此時間（1–300 秒）。滑鼠停留時，可點擊關閉按鈕手動關閉。";
+"companion.bubble_close" = "關閉氣泡";

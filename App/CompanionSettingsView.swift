@@ -97,6 +97,18 @@ struct CompanionGeneralSections: View {
     }
     var body: some View {
         Section {
+            LabeledContent(L10n.text("companion.bubble_retention")) {
+                HStack(spacing: 6) {
+                    TextField("", value: binding(\.bubbleRetentionSeconds), format: .number.precision(.fractionLength(0)))
+                        .labelsHidden().frame(width: 60)
+                        .accessibilityLabel(L10n.text("companion.bubble_retention"))
+                    Text(L10n.text("companion.seconds")).foregroundStyle(.secondary)
+                    Stepper("", value: binding(\.bubbleRetentionSeconds), in: 1...300).labelsHidden().fixedSize()
+                }
+            }
+            Text(L10n.text("companion.bubble_retention_help")).font(.caption).foregroundStyle(.secondary)
+        } header: { Text(L10n.text("companion.bubble_section")) }
+        Section {
             Toggle(L10n.text("companion.enabled"), isOn: binding(\.enabled))
             Toggle(L10n.text("companion.paused"), isOn: binding(\.paused)).disabled(!companion.settings.enabled)
             LabeledContent(L10n.text("companion.state")) {

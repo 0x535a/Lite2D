@@ -37,6 +37,7 @@ struct BubbleOffset: Codable, Equatable {
 struct CompanionSettings: Codable {
     var enabled = false
     var paused = false
+    var bubbleRetentionSeconds = 8
     var intervalMinutes = 30
     var hourlyRequests = 12
     var model = ""
@@ -46,13 +47,14 @@ struct CompanionSettings: Codable {
     var sources: [String: CompanionSourceSettings] = ["opencode": .init(), "codex": .init(), "claude": .init()]
     var characters: [String: CompanionCharacterSettings] = [:]
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters
+        case enabled, paused, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters
     }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)) ?? false
+        bubbleRetentionSeconds = min(max((try? c.decodeIfPresent(Int.self, forKey: .bubbleRetentionSeconds)) ?? 8, 1), 300)
         intervalMinutes = (try? c.decodeIfPresent(Int.self, forKey: .intervalMinutes)) ?? 30
         hourlyRequests = (try? c.decodeIfPresent(Int.self, forKey: .hourlyRequests)) ?? 12
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
@@ -127,12 +129,13 @@ final class CompanionCoordinator: ObservableObject {
         var value = character(id); edit(&value); settings.characters[id.uuidString] = value; changed()
     }
     func changed() {
+        settings.bubbleRetentionSeconds = min(max(settings.bubbleRetentionSeconds, 1), 300)
         for (id, bubble) in bubbles {
-            bubble.configure(avatar: avatar(id))
+            bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds))
             if let window = manager?.record(id)?.controller?.window { bubble.position(near: window) }
         }
         if let id = bubblePreviewID, let preview = bubblePreview, let window = manager?.record(id)?.controller?.window {
-            preview.configure(avatar: avatar(id)); preview.position(near: window)
+            preview.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds)); preview.position(near: window)
         }
         settings.intervalMinutes = min(max(settings.intervalMinutes, 0), 1440)
         settings.hourlyRequests = min(max(settings.hourlyRequests, 1), 120)
@@ -353,7 +356,7 @@ final class CompanionCoordinator: ObservableObject {
                   let record = manager?.record(id), let window = record.controller?.window, visible(record) else { continue }
             let bubble = bubbles[id] ?? CompanionBubble(); bubbles[id] = bubble
             bubble.offset = bubblePoint(character(id).bubbleOffset)
-            bubble.configure(avatar: avatar(id))
+            bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds))
             typingSpeaker = id
             bubble.type(text: text, near: window) { [weak self] in
                 guard let self else { return }
@@ -411,7 +414,7 @@ final class CompanionCoordinator: ObservableObject {
         if let current = bubbleEditingID, current != id { finishBubblePlacement(current, save: true) }
         guard bubbleEditingID == nil, canPlaceBubble(id), let record = manager?.record(id), let window = record.controller?.window else { return }
         let preview = CompanionBubble(preview: true)
-        preview.configure(avatar: avatar(id))
+        preview.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds))
         preview.offset = bubblePoint(character(id).bubbleOffset)
         preview.show(name: record.settings.localizedDisplayName, text: L10n.text("companion.bubble_preview"), near: window)
         preview.onMoved = { [weak self, weak preview, weak window] in

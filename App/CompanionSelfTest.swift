@@ -33,6 +33,11 @@ final class CompanionSelfTest {
                 try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
                 try check(manager.records.count >= 2, "Two model instances loaded")
                 let c = CompanionCoordinator(manager: manager); manager.companion = c
+                let legacySettings = try JSONDecoder().decode(CompanionSettings.self, from: Data("{}".utf8))
+                try check(legacySettings.bubbleRetentionSeconds == 8, "Existing settings default to eight-second bubble retention")
+                var durationSettings = CompanionSettings(); durationSettings.bubbleRetentionSeconds = 12
+                let restoredDuration = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(durationSettings))
+                try check(restoredDuration.bubbleRetentionSeconds == 12, "Custom bubble duration survives settings serialization")
                 c.receive(["type": "status", "sources": [:], "busy": false,
                     "openCodeService": ["state": "running", "pid": 42, "version": "2.2.5"]])
                 try check(c.openCodeService["state"] as? String == "running" && c.openCodeService["pid"] as? Int == 42,
@@ -172,11 +177,29 @@ final class CompanionSelfTest {
                     bubble.advance(to: playback.expiresAt.addingTimeInterval(0.1))
                     try check(bubble.sentenceCount == 0 && !bubble.panel.isVisible, "Expiry removes the bubble and avatar even after reconfiguration")
                     bubble.hide()
+                    bubble.configure(avatar: nil, retention: 12)
+                    var dismissedTyping = false
+                    bubble.type(text: "这个气泡可以在打字时手动关闭。", near: w) { dismissedTyping = true }
+                    if let button = bubble.closeButton(at: 0) {
+                        try check(button.isHidden && bubble.panel.ignoresMouseEvents, "Close control is hidden and speech remains click-through by default")
+                        let center = NSPoint(x: button.bounds.midX, y: button.bounds.midY)
+                        let point = bubble.panel.convertPoint(toScreen: button.convert(center, to: nil))
+                        bubble.updateHover(at: point)
+                        try check(!button.isHidden && !bubble.panel.ignoresMouseEvents && !bubble.panel.isKeyWindow, "Hover reveals a clickable native close control without taking focus")
+                        let hit = bubble.panel.contentView?.hitTest(button.convert(center, to: bubble.panel.contentView))
+                        try check(hit === button || hit?.isDescendant(of: button) == true, "Native hit testing routes the close control to its button")
+                        bubble.panel.display(); CATransaction.flush()
+                        try capture(bubble.panel, "companion-bubble-close")
+                        button.performClick(nil)
+                        try check(bubble.sentenceCount == 0 && dismissedTyping, "Closing the typing bubble removes it and releases the queue")
+                    } else { try check(false, "A close button exists for each speech bubble") }
+                    bubble.hide()
 
                 }
                 c.receive(["type": "utterance", "sequence": 1, "createdAt": "2026-11-04T00:00:00Z", "characterId": a.settings.id.uuidString, "text": "好耶，这次通过啦！"])
                 c.receive(["type": "utterance", "sequence": 2, "createdAt": "2026-11-04T00:00:01Z", "characterId": b.settings.id.uuidString, "text": "嗯，记录里这次确实通过了。姐姐，别忘了保留测试结果。"])
                 c.stopTopic()
+                c.settings.bubbleRetentionSeconds = 1
                 let original = "甲。乙！丙？丁；戊……己。"
                 c.receive(["type": "utterance", "sequence": 3, "characterId": a.settings.id.uuidString, "text": original])
                 try check(c.speechTexts(a.settings.id) == ["甲。"], "First sentence starts typing immediately")
