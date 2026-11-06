@@ -312,5 +312,3 @@
 "companion.avatar_choose" = "选择图片…";
 "companion.avatar_remove" = "移除";
 "companion.avatar_help" = "未设置头像时，只显示气泡。图片会居中裁剪为圆形。";
-"companion.bubble_limit" = "显示句数上限";
-"companion.bubble_limit_help" = "每个角色独立保留最近几句，新句出现时移除超出上限的旧句。";
