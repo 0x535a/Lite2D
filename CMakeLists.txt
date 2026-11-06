@@ -45,7 +45,7 @@ target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framewor
 set_target_properties(Lite2D PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist"
   RUNTIME_OUTPUT_DIRECTORY "${LITE2D_OUTPUT_ROOT}")
-set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js")
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/legacy-host.js" "${CMAKE_CURRENT_SOURCE_DIR}/App/Info.plist")
 file(GLOB_RECURSE LOCALIZATION_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Localizations/*")
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS ${LOCALIZATION_FILES})
 # Liquid Glass icon (macOS 26/27): actool emits Assets.car for the layered .icon

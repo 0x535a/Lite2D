@@ -288,7 +288,7 @@ actor NativeCompanionRuntime {
         case "public_record_list": return try store.records().map { ["path": $0["path"] ?? "", "revision": $0["revision"] ?? ""] }
         case "public_record_read": return try store.readRecord(args["path"] as? String ?? "")
         case "public_record_update":
-            let result = try store.updateRecord(actor: actor, name: args["path"] as? String ?? "", content: NativeCompanionData.clean(args["content"] as? String ?? "", limit: 32768), revision: args["expectedRevision"] as? String ?? "")
+            let result = try store.updateRecord(actor: actor, name: args["path"] as? String ?? "", content: NativeCompanionData.clean(args["content"] as? String ?? "", limit: 32768), revision: args["expectedRevision"] as? String)
             if result["conflict"] as? Bool != true { try store.exportNotes(); emit("record.changed", ["characterId": actor, "path": args["path"] ?? "", "revision": result["revision"] ?? ""]) }; return result
         case "private_memory_read": return ["content": store.get("memory:\(actor)") as? String ?? ""]
         case "private_memory_update":

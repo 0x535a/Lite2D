@@ -289,7 +289,11 @@ enum NativeCompanionMCP {
             "observer_watch_session": ["sessionRef"], "observer_unwatch_session": ["sessionRef"], "public_record_read": ["path"],
             "public_record_update": ["path", "content", "expectedRevision"], "private_memory_update": ["content"]
         ]
-        return toolNames.map { name in ["name": name, "description": prompt.toolDescriptions[name] ?? name, "inputSchema": schema(fields[name] ?? [], fields[name] ?? [])] }
+        return toolNames.map { name in
+            let properties = fields[name] ?? []
+            let required = name == "public_record_update" ? properties.filter { $0 != "expectedRevision" } : properties
+            return ["name": name, "description": prompt.toolDescriptions[name] ?? name, "inputSchema": schema(properties, required)]
+        }
     }
     static func run(promptFile: URL) {
         guard let prompt = try? NativeCompanionPrompt.load(promptFile) else { return }

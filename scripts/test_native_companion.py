@@ -33,7 +33,7 @@ def main():
                     str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
-    state = {'calls': 0, 'sent': False, 'read': False, 'tools': set(), 'prompts': [], 'trySearch': False, 'searchDenied': False}
+    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'trySearch': False, 'searchDenied': False}
 
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -52,6 +52,7 @@ def main():
             call = None
             send_name = next((n for n in names if n.endswith('companion_send_message')), None)
             read_name = next((n for n in names if n.endswith('private_memory_read')), None)
+            save_name = next((n for n in names if n.endswith('public_record_update')), None)
             search_name = next((n for n in names if n.endswith('_web_search')), None)
             if state['trySearch'] and search_name:
                 state['trySearch'] = False
@@ -59,6 +60,9 @@ def main():
             elif 'TEST_CHARACTER_A' in system and not state['sent'] and send_name:
                 state['sent'] = True
                 call = {'name': send_name, 'arguments': json.dumps({'to': B, 'text': 'Hello from native A'})}
+            elif 'TEST_CHARACTER_B' in system and not state['saved'] and save_name:
+                state['saved'] = True
+                call = {'name': save_name, 'arguments': json.dumps({'path': 'shared-topic.md', 'content': 'A greeted B; B replied.'})}
             elif 'TEST_CHARACTER_B' in system and not state['read'] and read_name:
                 state['read'] = True
                 call = {'name': read_name, 'arguments': '{}'}
@@ -136,7 +140,7 @@ def main():
             assert [e['text'] for e in utterances] == ['Hello from native A', 'Independent native reply from B'], utterances
             assert state['read'] and state['sent']
             assert state['tools'] and all(t.startswith('companion_') for t in state['tools']), state['tools']
-            assert state['calls'] == 4, state['calls']
+            assert state['calls'] == 5, state['calls']
             assert 'companion_web_search' in state['tools'], state['tools']
             send({'type': 'diagnostics'})
             diagnostics = until('diagnostics')['data']
@@ -151,14 +155,15 @@ def main():
         session_a = json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{A}',)).fetchone()[0])
         session_b = json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{B}',)).fetchone()[0])
         assert session_a != session_b
-        assert db.execute('SELECT COUNT(*) FROM requests').fetchone()[0] == 4
+        assert db.execute('SELECT COUNT(*) FROM requests').fetchone()[0] == 5
+        assert db.execute('SELECT content FROM records WHERE path=?', ('shared-topic.md',)).fetchone()[0] == 'A greeted B; B replied.'
         assert db.execute("SELECT COUNT(*) FROM deliveries WHERE status='accepted_pending_context'").fetchone()[0] == 1
         db.close()
         child, send, until = launch()
         try:
             send({'type': 'trigger', 'characterId': A})
             until('topic.end', timeout=75)
-            assert state['calls'] == 5, state['calls']
+            assert state['calls'] == 6, state['calls']
             # Revoke search on existing role sessions; the broker must enforce
             # the setting even when the model still has the tool schema.
             config['webSearchEnabled'] = False
@@ -176,11 +181,11 @@ def main():
         assert json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{A}',)).fetchone()[0]) == session_a
         assert json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'memory:{A}',)).fetchone()[0]) == 'Only A remembers this.'
         assert db.execute("SELECT COUNT(*) FROM deliveries WHERE status='context_consumed'").fetchone()[0] == 1
-        assert state['calls'] == 7, state['calls']
+        assert state['calls'] == 8, state['calls']
         db.close()
         report = {'passed': True, 'upstreamCalls': state['calls'], 'toolCount': len(state['tools']), 'utterances': [e['text'] for e in all_events if e['type'] == 'utterance'],
                   'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True,
-                  'searchRevocationEnforced': state['searchDenied']}
+                  'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved']}
         (OUT / 'native-protocol.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
     server.shutdown()

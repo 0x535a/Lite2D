@@ -8,7 +8,7 @@ macOS 原生菜单栏 Live2D 播放器。Swift + AppKit + OpenGL，支持多个�
 
 ## 下载
 
-[Lite2D v1.2.1 · macOS ARM64](https://gitlab.com/stephenzeng/lite2d/-/releases/v1.2.1) · [GitHub 镜像](https://github.com/0x535a/lite2d/releases/tag/v1.2.1) · [更新日志](docs/releases/v1.2.1.md)。应用包不附模型或个人配置，当前为 ad-hoc 签名、未公证；自有代码和第三方组件的许可说明随包提供。
+[Lite2D v1.3 · macOS ARM64](https://gitlab.com/stephenzeng/lite2d/-/releases/v1.3) · [GitHub 镜像](https://github.com/0x535a/Lite2D/releases/tag/v1.3) · [更新日志](docs/releases/v1.3.md)。应用包不附模型或个人配置，当前为 ad-hoc 签名、未公证；自有代码和第三方组件的许可说明随包提供。
 
 ## 使用
 
