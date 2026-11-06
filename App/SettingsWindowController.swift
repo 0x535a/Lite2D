@@ -113,7 +113,8 @@ private struct SettingsRootView: View {
                         ForEach(model.manager.records, id: \.settings.id) { record in
                             HStack(spacing: 10) {
                                 Image(systemName: record.error == nil ? "person.crop.square" : "exclamationmark.triangle")
-                                    .font(.title3).foregroundStyle(record.error == nil ? Color.accentColor : .orange)
+                                    .font(.title3).foregroundStyle(record.error == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                                    .frame(width: 22)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(model.status.roleName(record)).lineLimit(1)
                                     Text(model.status.roleStatus(record)).font(.caption).foregroundStyle(.secondary)
@@ -158,6 +159,31 @@ private struct SettingsRootView: View {
     }
 }
 
+// Shared page header: a tinted symbol tile, an editable or plain title, and a status line.
+struct SettingsPageHeader<Title: View, Status: View>: View {
+    let symbol: String
+    var tint: Color = .accentColor
+    var autosave = true
+    @ViewBuilder let title: Title
+    @ViewBuilder let status: Status
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 20, weight: .medium)).foregroundStyle(tint)
+                .frame(width: 46, height: 46)
+                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                title
+                HStack(spacing: 6) { status }.font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            if autosave {
+                Label(L10n.text("settings.autosave"), systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.tertiary).labelStyle(.titleAndIcon)
+            }
+        }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 14)
+    }
+}
+
 private struct RoleSettingsView: View {
     @ObservedObject private var language = LanguageStore.shared
     @ObservedObject var model: SettingsWindowModel
@@ -185,9 +211,9 @@ private struct RoleSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
+            SettingsPageHeader(symbol: record.error == nil ? "person.crop.square" : "exclamationmark.triangle", tint: record.error == nil ? .accentColor : .orange) {
                 TextField(L10n.text("role.name"), text: $name)
-                    .textFieldStyle(.plain).font(.system(size: 25, weight: .semibold))
+                    .textFieldStyle(.plain).font(.system(size: 22, weight: .semibold))
                     .focused($editingName).onSubmit(commitName)
                     .accessibilityLabel(L10n.text("role.name"))
                     .padding(.horizontal, 6).padding(.vertical, 2)
@@ -197,17 +223,14 @@ private struct RoleSettingsView: View {
                     }
                     .padding(.horizontal, -6)
                     .onHover { hoveringName = $0 }
-                HStack(spacing: 6) {
-                    Circle().fill(record.error != nil ? Color.orange : canAdjust ? .green : .secondary).frame(width: 7, height: 7)
-                    Text(model.status.roleStatus(record))
-                    if let screen = settings.boundDisplayName { Text("·"); Text(screen) }
-                    Spacer()
-                    Text(L10n.text("settings.autosave")).font(.caption)
-                }.font(.callout).foregroundStyle(.secondary)
-            }.padding(24)
+            } status: {
+                Circle().fill(record.error != nil ? Color.orange : canAdjust ? .green : .secondary).frame(width: 7, height: 7)
+                Text(model.status.roleStatus(record))
+                if let screen = settings.boundDisplayName { Text("·"); Text(screen) }
+            }
             Picker(L10n.text("settings.group"), selection: $model.page) {
                 ForEach(RoleSettingsPage.allCases) { Text($0.title).tag($0) }
-            }.id(language.revision).pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 16)
+            }.id(language.revision).pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 12)
             if let error = record.error {
                 notice(L10n.text("role.load_failure", L10n.error(error)), button: L10n.text("model.replace")) { model.status.chooseReplacement(id) }
             } else if !manager.isDisplayConnected(record) {
@@ -444,7 +467,11 @@ private struct GeneralSettingsView: View {
     @ObservedObject var model: SettingsWindowModel
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.text("settings.general")).font(.system(size: 25, weight: .semibold)).padding(24)
+            SettingsPageHeader(symbol: "gearshape", autosave: false) {
+                Text(L10n.text("settings.general")).font(.system(size: 22, weight: .semibold))
+            } status: {
+                Text(L10n.text("about.description")).lineLimit(1)
+            }
             Form {
                 Section {
                     Picker(L10n.text("language.label"), selection: Binding(get: { language.selection }, set: { language.selection = $0 })) {
