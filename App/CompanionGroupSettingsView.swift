@@ -7,8 +7,8 @@ struct CompanionGroupSidebar: View {
         Section(L10n.text("companion.groups")) {
             ForEach(companion.settings.groups) { group in
                 HStack(spacing: 10) {
-                    Image(systemName: "bubble.left.and.bubble.right").font(.title3)
-                        .foregroundStyle(companion.isGroupDisplayConnected(group.id) ? Color.accentColor : .orange)
+                    Image(systemName: "bubble.left.and.bubble.right").font(.title3).frame(width: 22)
+                        .foregroundStyle(companion.isGroupDisplayConnected(group.id) ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(group.name.isEmpty ? L10n.text("companion.group") : group.name).lineLimit(1)
                         Text(companion.isGroupDisplayConnected(group.id) ? (group.boundDisplayName ?? L10n.text("display.placeholder")) : L10n.text("companion.group_display_missing"))
@@ -16,9 +16,9 @@ struct CompanionGroupSidebar: View {
                     }
                 }.padding(.vertical, 4).tag(CompanionGroupSelection.tag(group.id))
             }
-            Button(L10n.text("companion.group_add"), systemImage: "plus") {
-                selection = CompanionGroupSelection.tag(companion.addGroup())
-            }.buttonStyle(.borderless)
+            Button { selection = CompanionGroupSelection.tag(companion.addGroup()) } label: {
+                Label(L10n.text("companion.group_add"), systemImage: "plus").foregroundStyle(.secondary)
+            }.buttonStyle(.plain).padding(.vertical, 2)
         }
         .onChange(of: companion.settings.groups.map(\.id)) { _, ids in
             if let id = CompanionGroupSelection.id(selection), !ids.contains(id) { selection = "general" }
@@ -38,16 +38,13 @@ struct CompanionGroupPage: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
+            SettingsPageHeader(symbol: "bubble.left.and.bubble.right", tint: connected ? .accentColor : .orange) {
                 TextField(L10n.text("companion.group_name"), text: binding(\.name))
-                    .textFieldStyle(.plain).font(.system(size: 25, weight: .semibold))
-                HStack(spacing: 6) {
-                    Circle().fill(connected ? Color.green : .orange).frame(width: 7, height: 7)
-                    Text(group.boundDisplayName ?? L10n.text("display.placeholder"))
-                    Spacer()
-                    Text(L10n.text("settings.autosave")).font(.caption)
-                }.font(.callout).foregroundStyle(.secondary)
-            }.padding(24)
+                    .textFieldStyle(.plain).font(.system(size: 22, weight: .semibold))
+            } status: {
+                Circle().fill(connected ? Color.green : .orange).frame(width: 7, height: 7)
+                Text(group.boundDisplayName ?? L10n.text("display.placeholder"))
+            }
             Form {
                 Section {
                     Picker(L10n.text("display.assigned"), selection: Binding(get: { group.displayUUID ?? "" }, set: { companion.bindGroup(id, to: $0) })) {
@@ -58,31 +55,38 @@ struct CompanionGroupPage: View {
                             Text(L10n.text("format.numbered", display.name, String(index + 1))).tag(display.id)
                         }
                     }
-                    HStack {
-                        number("companion.group_width", \.width)
-                        number("companion.group_height", \.height)
-                    }.disabled(editing)
-                    HStack {
-                        number("companion.group_x", \.positionX)
-                        number("companion.group_y", \.positionY)
-                    }.disabled(editing)
-                    Text(L10n.text("companion.group_coordinates")).font(.caption).foregroundStyle(.secondary)
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                        GridRow {
+                            number("companion.group_width", \.width)
+                            number("companion.group_height", \.height)
+                        }
+                        GridRow {
+                            number("companion.group_x", \.positionX)
+                            number("companion.group_y", \.positionY)
+                        }
+                    }.disabled(editing).padding(.vertical, 4)
                     HStack {
                         if editing {
                             Button(L10n.text("companion.bubble_done")) { companion.finishGroupPlacement(id, save: true) }
+                                .buttonStyle(.borderedProminent)
                             Button(L10n.text("action.cancel")) { companion.finishGroupPlacement(id, save: false) }
                         } else {
-                            Button(L10n.text("companion.group_adjust")) { companion.beginGroupPlacement(id) }.disabled(!connected)
+                            Button(L10n.text("companion.group_adjust"), systemImage: "arrow.up.left.and.arrow.down.right") { companion.beginGroupPlacement(id) }.disabled(!connected)
                         }
                     }
-                    Text(L10n.text(connected ? "companion.group_adjust_help" : "companion.group_display_help"))
-                        .font(.caption).foregroundStyle(.secondary)
-                } header: { Text(L10n.text("companion.group_window")) }
+                } header: { Text(L10n.text("companion.group_window")) } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L10n.text("companion.group_coordinates"))
+                        Text(L10n.text(connected ? "companion.group_adjust_help" : "companion.group_display_help"))
+                    }
+                }
                 Section {
                     ForEach(companion.manager?.records ?? [], id: \.settings.id) { record in
-                        Toggle(record.settings.localizedDisplayName, isOn: Binding(
+                        Toggle(isOn: Binding(
                             get: { companion.character(record.settings.id).groupID == id },
-                            set: { companion.assignGroup(record.settings.id, to: $0 ? id : nil) }))
+                            set: { companion.assignGroup(record.settings.id, to: $0 ? id : nil) })) {
+                            Label(record.settings.localizedDisplayName, systemImage: "person.crop.square")
+                        }.toggleStyle(.switch)
                     }
                 } header: { Text(L10n.text("companion.group_members")) }
                 Section {
@@ -94,10 +98,11 @@ struct CompanionGroupPage: View {
             Button(L10n.text("companion.group_delete"), role: .destructive) { companion.deleteGroup(id) }
         }
     }
-    private func number(_ key: String, _ path: WritableKeyPath<CompanionGroupSettings, Double>) -> some View {
-        LabeledContent(L10n.text(key)) {
-            TextField("", value: binding(path), format: .number.precision(.fractionLength(0)))
-                .labelsHidden().frame(width: 72).accessibilityLabel(L10n.text(key))
-        }
+    // Label and field share one grid row so the four values line up as a compact 2x2 block.
+    @ViewBuilder private func number(_ key: String, _ path: WritableKeyPath<CompanionGroupSettings, Double>) -> some View {
+        Text(L10n.text(key)).foregroundStyle(.secondary).gridColumnAlignment(.leading)
+        TextField("", value: binding(path), format: .number.precision(.fractionLength(0)))
+            .labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing).monospacedDigit()
+            .frame(minWidth: 80, maxWidth: .infinity).accessibilityLabel(L10n.text(key))
     }
 }
