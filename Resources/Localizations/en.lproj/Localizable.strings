@@ -317,3 +317,24 @@
 "companion.seconds" = "seconds";
 "companion.bubble_retention_help" = "All bubbles remain for this duration after typing finishes (1–300 seconds). Hover over a bubble to close it manually.";
 "companion.bubble_close" = "Close bubble";
+
+"companion.bubble_side" = "Bubble side";
+"companion.side_left" = "Left";
+"companion.side_right" = "Right";
+"companion.group" = "Group";
+"companion.groups" = "Groups";
+"companion.group_default" = "Group {0}";
+"companion.group_add" = "Add Group";
+"companion.group_name" = "Name";
+"companion.group_width" = "Width";
+"companion.group_height" = "Height";
+"companion.group_x" = "X";
+"companion.group_y" = "Y";
+"companion.group_coordinates" = "Dimensions and global screen coordinates are in points, measured from the bottom-left.";
+"companion.group_adjust" = "Adjust Window…";
+"companion.group_adjust_help" = "Drag the title bar or resize the window, then click Done.";
+"companion.group_members" = "Members";
+"companion.group_delete" = "Delete Group";
+"companion.group_delete_confirm" = "Delete this Group? Members will return to individual bubbles.";
+"companion.group_help" = "Groups collect member messages in a fixed window. Messages align to each model’s side and scroll vertically only.";
+"companion.group_member_help" = "Messages appear in {0}; individual bubble placement is inactive.";

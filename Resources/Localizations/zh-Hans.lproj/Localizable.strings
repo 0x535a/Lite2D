@@ -317,3 +317,24 @@
 "companion.seconds" = "秒";
 "companion.bubble_retention_help" = "所有气泡打字结束后统一保留此时间（1–300 秒）。鼠标悬停时，可点击关闭按钮手动关闭。";
 "companion.bubble_close" = "关闭气泡";
+
+"companion.bubble_side" = "气泡方向";
+"companion.side_left" = "左侧";
+"companion.side_right" = "右侧";
+"companion.group" = "群（Group）";
+"companion.groups" = "群（Groups）";
+"companion.group_default" = "群 {0}";
+"companion.group_add" = "新建群";
+"companion.group_name" = "名称";
+"companion.group_width" = "宽度";
+"companion.group_height" = "高度";
+"companion.group_x" = "X";
+"companion.group_y" = "Y";
+"companion.group_coordinates" = "尺寸及全局屏幕坐标以点为单位，坐标原点在屏幕左下方。";
+"companion.group_adjust" = "调整窗口…";
+"companion.group_adjust_help" = "拖动标题栏或缩放窗口，完成后点击“完成”。";
+"companion.group_members" = "成员";
+"companion.group_delete" = "删除群";
+"companion.group_delete_confirm" = "删除此群？成员将恢复在各自附近显示气泡。";
+"companion.group_help" = "群成员的消息集中显示在固定窗口内，按各模型的方向左右排列，只支持纵向滚动。";
+"companion.group_member_help" = "消息显示在“{0}”中，模型旁的独立气泡位置暂不生效。";

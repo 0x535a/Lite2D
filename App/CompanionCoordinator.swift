@@ -16,8 +16,10 @@ struct CompanionCharacterSettings: Codable, Equatable {
     var gaze = true
     var reactionMotionGroup: String?
     var avatarFile: String?
+    var bubbleSide: CompanionBubbleSide = .left
+    var groupID: UUID?
     var bubbleOffset: BubbleOffset?
-    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup, bubbleOffset, avatarFile }
+    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup, bubbleOffset, avatarFile, bubbleSide, groupID }
     init(enabled: Bool = false, gaze: Bool = true, reactionMotionGroup: String? = nil, bubbleOffset: BubbleOffset? = nil) {
         self.enabled = enabled; self.gaze = gaze; self.reactionMotionGroup = reactionMotionGroup; self.bubbleOffset = bubbleOffset
     }
@@ -26,6 +28,8 @@ struct CompanionCharacterSettings: Codable, Equatable {
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         gaze = (try? c.decodeIfPresent(Bool.self, forKey: .gaze)) ?? true
         reactionMotionGroup = try? c.decodeIfPresent(String.self, forKey: .reactionMotionGroup)
+        bubbleSide = (try? c.decodeIfPresent(CompanionBubbleSide.self, forKey: .bubbleSide)) ?? .left
+        groupID = try? c.decodeIfPresent(UUID.self, forKey: .groupID)
         avatarFile = try? c.decodeIfPresent(String.self, forKey: .avatarFile)
         bubbleOffset = try? c.decodeIfPresent(BubbleOffset.self, forKey: .bubbleOffset)
     }
@@ -46,8 +50,9 @@ struct CompanionSettings: Codable {
     var codexPath = ""
     var sources: [String: CompanionSourceSettings] = ["opencode": .init(), "codex": .init(), "claude": .init()]
     var characters: [String: CompanionCharacterSettings] = [:]
+    var groups: [CompanionGroupSettings] = []
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters
+        case enabled, paused, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters, groups
     }
     init() {}
     init(from decoder: Decoder) throws {
@@ -63,6 +68,8 @@ struct CompanionSettings: Codable {
         codexPath = (try? c.decodeIfPresent(String.self, forKey: .codexPath)) ?? ""
         sources = (try? c.decodeIfPresent([String: CompanionSourceSettings].self, forKey: .sources)) ?? [:]
         for backend in ["opencode", "codex", "claude"] where sources[backend] == nil { sources[backend] = .init() }
+        groups = (try? c.decodeIfPresent([CompanionGroupSettings].self, forKey: .groups)) ?? []
+        for index in groups.indices { groups[index].normalize() }
         characters = (try? c.decodeIfPresent([String: CompanionCharacterSettings].self, forKey: .characters)) ?? [:]
     }
 }
@@ -96,11 +103,14 @@ final class CompanionCoordinator: ObservableObject {
     private var lastSync = ""
     private var gaze: (a: UUID, b: UUID, until: Date, topic: String)?
     private var bubbles: [UUID: CompanionBubble] = [:]
+    private var groupBubbles: [UUID: CompanionBubble] = [:]
+    @Published private(set) var groupEditingID: UUID?
+    private var allBubbles: [CompanionBubble] { Array(bubbles.values) + Array(groupBubbles.values) }
     private var bubblePreview: CompanionBubble?
     private var bubblePreviewID: UUID?
     @Published private(set) var bubbleEditingID: UUID?
     private var pending: [[String: Any]] = []
-    private var typingSpeaker: UUID?
+    private var typingSpeakers: [UUID: UUID] = [:]
     private var bubbleTopic: String?
     private var cancelledTopics = Set<String>()
     private var expressionOverrides = Set<UUID>()
@@ -126,16 +136,40 @@ final class CompanionCoordinator: ObservableObject {
     }
     func character(_ id: UUID) -> CompanionCharacterSettings { settings.characters[id.uuidString] ?? .init() }
     func updateCharacter(_ id: UUID, _ edit: (inout CompanionCharacterSettings) -> Void) {
-        var value = character(id); edit(&value); settings.characters[id.uuidString] = value; changed()
+        let previous = character(id)
+        var value = previous; edit(&value)
+        guard value != previous else { return }
+        settings.characters[id.uuidString] = value
+        if previous.groupID != value.groupID {
+            if bubbleEditingID == id { finishBubblePlacement(id, save: false) }
+            bubbles[id]?.hide()
+            typingSpeakers.removeValue(forKey: id)
+            restoreExpression(id)
+            if let oldGroup = previous.groupID { groupBubbles[oldGroup]?.removeSpeaker(id) }
+        }
+        changed()
+        if previous.groupID != value.groupID { presentNext() }
     }
     func changed() {
         settings.bubbleRetentionSeconds = min(max(settings.bubbleRetentionSeconds, 1), 300)
         for (id, bubble) in bubbles {
-            bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds))
+            bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds), side: character(id).bubbleSide)
             if let window = manager?.record(id)?.controller?.window { bubble.position(near: window) }
         }
         if let id = bubblePreviewID, let preview = bubblePreview, let window = manager?.record(id)?.controller?.window {
-            preview.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds)); preview.position(near: window)
+            preview.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds), side: character(id).bubbleSide); preview.position(near: window)
+        }
+        let groupIDs = Set(settings.groups.map(\.id))
+        for id in Array(groupBubbles.keys) where !groupIDs.contains(id) {
+            groupBubbles.removeValue(forKey: id)?.hide(); typingSpeakers.removeValue(forKey: id)
+        }
+        for group in settings.groups {
+            if let bubble = groupBubbles[group.id] {
+                bubble.panel.title = group.name
+                bubble.setGroupFrame(group.reachableFrame())
+                bubble.configure(avatar: nil, retention: TimeInterval(settings.bubbleRetentionSeconds))
+                bubble.refreshSpeakers { (self.avatar($0), self.character($0).bubbleSide) }
+            }
         }
         settings.intervalMinutes = min(max(settings.intervalMinutes, 0), 1440)
         settings.hourlyRequests = min(max(settings.hourlyRequests, 1), 120)
@@ -146,6 +180,54 @@ final class CompanionCoordinator: ObservableObject {
         } catch { self.error = error.localizedDescription }
         objectWillChange.send(); reconcile(); sync()
     }
+    func group(for characterID: UUID) -> CompanionGroupSettings? {
+        settings.groups.first { $0.id == character(characterID).groupID }
+    }
+    @discardableResult func addGroup() -> UUID {
+        var group = CompanionGroupSettings()
+        group.name = L10n.text("companion.group_default", String(settings.groups.count + 1))
+        if let area = NSScreen.main?.visibleFrame {
+            group.x = area.midX - group.width / 2; group.y = area.midY - group.height / 2
+        }
+        settings.groups.append(group); changed(); return group.id
+    }
+    func updateGroup(_ id: UUID, _ edit: (inout CompanionGroupSettings) -> Void) {
+        guard let index = settings.groups.firstIndex(where: { $0.id == id }) else { return }
+        let previous = settings.groups[index]
+        edit(&settings.groups[index]); settings.groups[index].normalize()
+        if settings.groups[index] != previous { changed() }
+    }
+    func deleteGroup(_ id: UUID) {
+        if groupEditingID == id { finishGroupPlacement(id, save: false) }
+        groupBubbles.removeValue(forKey: id)?.hide(); typingSpeakers.removeValue(forKey: id)
+        settings.groups.removeAll { $0.id == id }
+        for key in Array(settings.characters.keys) where settings.characters[key]?.groupID == id {
+            settings.characters[key]?.groupID = nil
+        }
+        changed(); presentNext()
+    }
+    func assignGroup(_ characterID: UUID, to id: UUID?) {
+        guard id == nil || settings.groups.contains(where: { $0.id == id }) else { return }
+        updateCharacter(characterID) { $0.groupID = id }
+    }
+    private func groupBubble(_ group: CompanionGroupSettings) -> CompanionBubble {
+        if let bubble = groupBubbles[group.id] { return bubble }
+        let bubble = CompanionBubble(groupFrame: group.reachableFrame())
+        bubble.configure(avatar: nil, retention: TimeInterval(settings.bubbleRetentionSeconds))
+        groupBubbles[group.id] = bubble; return bubble
+    }
+    func beginGroupPlacement(_ id: UUID) {
+        if let current = groupEditingID, current != id { finishGroupPlacement(current, save: true) }
+        guard let group = settings.groups.first(where: { $0.id == id }), groupEditingID == nil else { return }
+        groupEditingID = id; groupBubble(group).beginGroupEditing(name: group.name)
+    }
+    func finishGroupPlacement(_ id: UUID, save: Bool) {
+        guard groupEditingID == id, let bubble = groupBubbles[id] else { return }
+        let frame = bubble.finishGroupEditing(); groupEditingID = nil
+        if save { updateGroup(id) { $0.frame = frame } }
+        else if let group = settings.groups.first(where: { $0.id == id }) { bubble.setGroupFrame(group.reachableFrame()) }
+    }
+    func groupWindow(_ id: UUID) -> CompanionBubble? { groupBubbles[id] }
     func avatar(_ id: UUID) -> NSImage? {
         guard let file = character(id).avatarFile, file == "avatar.png" else { return nil }
         return NSImage(contentsOf: root.appendingPathComponent("characters/\(id.uuidString)/\(file)"))
@@ -294,8 +376,8 @@ final class CompanionCoordinator: ObservableObject {
             if event["reason"] as? String != "completed", let topic = event["topicId"] as? String {
                 cancelledTopics.insert(topic); if gaze?.topic == topic { clearGaze() }
                 pending.removeAll { $0["topicId"] as? String == topic }
-                if bubbleTopic == topic { for bubble in bubbles.values { bubble.hide() }; hasSpeech = false; typingSpeaker = nil; restoreExpressions() }
-            } else if pending.isEmpty && typingSpeaker == nil { clearGaze() }
+                if bubbleTopic == topic { cancelPresentation() }
+            } else if pending.isEmpty && typingSpeakers.isEmpty { clearGaze() }
         }
     }
     private func append(_ event: [String: Any]) {
@@ -326,42 +408,58 @@ final class CompanionCoordinator: ObservableObject {
         if previouslySleeping && !sleeping, let runtime { Task { await runtime.reconcileAfterWake() } }
         previouslySleeping = sleeping
         sync(); updateGaze()
-        for (id, bubble) in bubbles {
+        for (id, bubble) in Array(bubbles) {
             if let record = manager?.record(id), let window = record.controller?.window, visible(record) { bubble.position(near: window) }
             else {
                 bubble.hide(); pending.removeAll { $0["characterId"] as? String == id.uuidString }
-                if typingSpeaker == id { typingSpeaker = nil; restoreExpressions() }
+                if typingSpeakers[id] == id { typingSpeakers.removeValue(forKey: id); restoreExpression(id) }
             }
         }
-        hasSpeech = bubbles.values.contains { $0.sentenceCount > 0 }
+        for bubble in Array(groupBubbles.values) {
+            for id in bubble.speakerIDs {
+                if let record = manager?.record(id), visible(record) { continue }
+                pending.removeAll { $0["characterId"] as? String == id.uuidString }
+                bubble.removeSpeaker(id)
+            }
+        }
+        hasSpeech = allBubbles.contains { $0.sentenceCount > 0 }
         if let id = bubblePreviewID, let preview = bubblePreview {
             if let record = manager?.record(id), let window = record.controller?.window { preview.position(near: window) }
             else { preview.hide() }
         }
-        if typingSpeaker == nil {
-            restoreExpressions()
-            presentNext()
-            if pending.isEmpty && typingSpeaker == nil && !busy { clearGaze() }
-        }
+        if typingSpeakers.isEmpty { restoreExpressions() }
+        presentNext()
+        if pending.isEmpty && typingSpeakers.isEmpty && !busy { clearGaze() }
         if settings.paused || manager?.sleeping == true || manager?.allHidden == true { cancelPresentation() }
     }
     private func visible(_ record: ModelRecord) -> Bool {
         record.settings.isVisible && manager?.allHidden == false && manager?.sleeping == false && manager?.isDisplayConnected(record) == true && record.controller?.window.isVisible == true
     }
     private func presentNext() {
-        guard typingSpeaker == nil, !settings.paused, manager?.sleeping != true, manager?.allHidden != true else { return }
-        while !pending.isEmpty {
-            let event = pending.removeFirst()
+        guard !settings.paused, manager?.sleeping != true, manager?.allHidden != true else { return }
+        var index = 0
+        while index < pending.count {
+            let event = pending[index]
             guard let id = (event["characterId"] as? String).flatMap(UUID.init(uuidString:)), let text = event["text"] as? String,
-                  let record = manager?.record(id), let window = record.controller?.window, visible(record) else { continue }
-            let bubble = bubbles[id] ?? CompanionBubble(); bubbles[id] = bubble
-            bubble.offset = bubblePoint(character(id).bubbleOffset)
-            bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds))
-            typingSpeaker = id
-            bubble.type(text: text, near: window) { [weak self] in
+                  let record = manager?.record(id), let window = record.controller?.window, visible(record) else {
+                pending.remove(at: index); continue
+            }
+            let group = group(for: id), channel = group?.id ?? id
+            if typingSpeakers[channel] != nil { index += 1; continue }
+            pending.remove(at: index)
+            let bubble: CompanionBubble
+            if let group { bubble = groupBubble(group) }
+            else {
+                bubble = bubbles[id] ?? CompanionBubble(); bubbles[id] = bubble
+                bubble.offset = bubblePoint(character(id).bubbleOffset)
+                bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds), side: character(id).bubbleSide)
+            }
+            typingSpeakers[channel] = id
+            bubble.type(text: text, near: window, speakerID: id, avatar: avatar(id), side: character(id).bubbleSide) { [weak self] in
                 guard let self else { return }
-                self.typingSpeaker = nil; self.restoreExpressions(); self.presentNext()
-                if self.pending.isEmpty && self.typingSpeaker == nil && !self.busy { self.clearGaze() }
+                self.typingSpeakers.removeValue(forKey: channel)
+                self.restoreExpression(id); self.presentNext()
+                if self.pending.isEmpty && self.typingSpeakers.isEmpty && !self.busy { self.clearGaze() }
             }
             hasSpeech = true
             if event["firstSentence"] as? Bool != false, !record.settings.animationPaused && record.settings.interactionMode != .edit,
@@ -379,7 +477,6 @@ final class CompanionCoordinator: ObservableObject {
                 }
             }
             bubbleTopic = event["topicId"] as? String
-            break
         }
     }
     private func updateGaze() {
@@ -392,18 +489,23 @@ final class CompanionCoordinator: ObservableObject {
         }
     }
     private func clearGaze() { gaze = nil; for record in manager?.records ?? [] { record.controller?.view.companionLookTarget = nil } }
-    private func restoreExpressions() {
-        for id in expressionOverrides {
-            guard let record = manager?.record(id), let view = record.controller?.view else { continue }
-            view.openGLContext?.makeCurrentContext(); _ = view.bridge.selectExpression(record.settings.expressionId ?? "")
-        }
-        expressionOverrides.removeAll()
+    private func restoreExpression(_ id: UUID) {
+        guard expressionOverrides.remove(id) != nil, let view = manager?.record(id)?.controller?.view else { return }
+        view.openGLContext?.makeCurrentContext()
+        _ = view.bridge.selectExpression(manager?.record(id)?.settings.expressionId ?? "")
     }
-    func speechTexts(_ id: UUID) -> [String] { bubbles[id]?.displayedTexts ?? [] }
-    private func cancelPresentation() { hasSpeech = false; pending.removeAll(); for bubble in bubbles.values { bubble.hide() }; restoreExpressions(); typingSpeaker = nil; clearGaze() }
+    private func restoreExpressions() { for id in Array(expressionOverrides) { restoreExpression(id) } }
+    func speechTexts(_ id: UUID) -> [String] {
+        if let group = group(for: id) { return groupBubbles[group.id]?.texts(for: id) ?? [] }
+        return bubbles[id]?.displayedTexts ?? []
+    }
+    private func cancelPresentation() {
+        hasSpeech = false; pending.removeAll(); allBubbles.forEach { $0.hide() }
+        restoreExpressions(); typingSpeakers.removeAll(); clearGaze()
+    }
     func stopTopic() { send(["type": "stop"]); cancelPresentation() }
     func canPlaceBubble(_ id: UUID) -> Bool {
-        guard let record = manager?.record(id), record.error == nil, record.controller != nil,
+        guard group(for: id) == nil, let record = manager?.record(id), record.error == nil, record.controller != nil,
               manager?.isDisplayConnected(record) == true else { return false }
         return true
     }
@@ -414,7 +516,7 @@ final class CompanionCoordinator: ObservableObject {
         if let current = bubbleEditingID, current != id { finishBubblePlacement(current, save: true) }
         guard bubbleEditingID == nil, canPlaceBubble(id), let record = manager?.record(id), let window = record.controller?.window else { return }
         let preview = CompanionBubble(preview: true)
-        preview.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds))
+        preview.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds), side: character(id).bubbleSide)
         preview.offset = bubblePoint(character(id).bubbleOffset)
         preview.show(name: record.settings.localizedDisplayName, text: L10n.text("companion.bubble_preview"), near: window)
         preview.onMoved = { [weak self, weak preview, weak window] in
@@ -488,7 +590,9 @@ final class CompanionCoordinator: ObservableObject {
         runtimeState = "stopped"; busy = false; sources = [:]; openCodeService = ["state": "disabled"]
     }
     func shutdown() {
-        shutdownRequested = true; timer?.invalidate(); timer = nil; stopProcess()
+        shutdownRequested = true
+        if let id = groupEditingID { finishGroupPlacement(id, save: true) }
+        timer?.invalidate(); timer = nil; stopProcess()
         if let historyCloseObserver { NotificationCenter.default.removeObserver(historyCloseObserver) }
         historyCloseObserver = nil; historyWindow?.close(); historyWindow = nil
     }
