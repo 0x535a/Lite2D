@@ -346,3 +346,7 @@
 "companion.group_preview_short" = "这是一条聊天气泡预览。";
 "companion.group_preview_long" = "较长的消息会在窗口内自动换行，文字始终左对齐。";
 "companion.group_preview_resize" = "拖动或缩放窗口，预览会跟随调整。";
+
+"companion.search_tools" = "搜索工具";
+"companion.web_search" = "允许角色联网搜索";
+"companion.web_search_help" = "搜索内容会发送给 Exa。仅开放联网搜索，其他第三方 MCP 工具保持禁用。角色交流和记忆工具继续可用。关闭后立即取消进行中的搜索并阻止新搜索。";

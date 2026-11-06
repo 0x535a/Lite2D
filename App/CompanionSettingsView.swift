@@ -167,6 +167,11 @@ struct CompanionGeneralSections: View {
             }
         } header: { Text(L10n.text("companion.observers")) } footer: { Text(L10n.text("companion.observer_help")).fixedSize(horizontal: false, vertical: true) }
         Section {
+            Toggle(L10n.text("companion.web_search"), isOn: binding(\.webSearchEnabled))
+        } header: { Text(L10n.text("companion.search_tools")) } footer: {
+            Text(L10n.text("companion.web_search_help")).fixedSize(horizontal: false, vertical: true)
+        }
+        Section {
             LabeledContent(L10n.text("companion.model")) {
                 TextField("provider/model", text: binding(\.model)).labelsHidden().frame(maxWidth: 250)
             }

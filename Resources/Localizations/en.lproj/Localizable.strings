@@ -346,3 +346,7 @@
 "companion.group_preview_short" = "This is a chat bubble preview.";
 "companion.group_preview_long" = "Longer messages wrap inside this window, with the text always aligned to the left.";
 "companion.group_preview_resize" = "Drag or resize the window to preview its layout.";
+
+"companion.search_tools" = "Search tools";
+"companion.web_search" = "Allow characters to search the web";
+"companion.web_search_help" = "Search queries are sent to Exa. Only web search is exposed; other third-party MCP tools remain blocked. Character messaging and memory tools stay available. Turning this off cancels active searches and blocks new searches immediately.";

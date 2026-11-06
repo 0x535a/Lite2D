@@ -35,6 +35,10 @@ final class CompanionSelfTest {
                 let c = CompanionCoordinator(manager: manager); manager.companion = c
                 let legacySettings = try JSONDecoder().decode(CompanionSettings.self, from: Data("{}".utf8))
                 try check(legacySettings.bubbleRetentionSeconds == 8, "Existing settings default to eight-second bubble retention")
+                try check(legacySettings.webSearchEnabled, "Existing settings enable search-only MCP access")
+                var searchSettings = CompanionSettings(); searchSettings.webSearchEnabled = false
+                let restoredSearch = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(searchSettings))
+                try check(!restoredSearch.webSearchEnabled, "Disabling web search survives settings serialization")
                 var durationSettings = CompanionSettings(); durationSettings.bubbleRetentionSeconds = 12
                 let restoredDuration = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(durationSettings))
                 try check(restoredDuration.bubbleRetentionSeconds == 12, "Custom bubble duration survives settings serialization")

@@ -346,3 +346,7 @@
 "companion.group_preview_short" = "吹き出しのプレビューです。";
 "companion.group_preview_long" = "長いメッセージはウィンドウ内で折り返され、本文は常に左揃えになります。";
 "companion.group_preview_resize" = "ウィンドウを移動・拡大縮小するとプレビューも変化します。";
+
+"companion.search_tools" = "検索ツール";
+"companion.web_search" = "キャラクターのウェブ検索を許可";
+"companion.web_search_help" = "検索内容は Exa に送信されます。ウェブ検索のみを許可し、他の外部 MCP ツールはブロックします。キャラクター同士の会話と記憶ツールは引き続き利用できます。オフにすると実行中の検索をキャンセルし、新しい検索を即座にブロックします。";

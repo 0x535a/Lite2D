@@ -346,3 +346,7 @@
 "companion.group_preview_short" = "這是一則聊天氣泡預覽。";
 "companion.group_preview_long" = "較長的訊息會在視窗內自動換行，文字始終靠左對齊。";
 "companion.group_preview_resize" = "拖曳或調整視窗大小，預覽會隨之變更。";
+
+"companion.search_tools" = "搜尋工具";
+"companion.web_search" = "允許角色連網搜尋";
+"companion.web_search_help" = "搜尋內容會傳送給 Exa。僅開放連網搜尋，其他第三方 MCP 工具保持停用。角色交流和記憶工具繼續可用。關閉後立即取消進行中的搜尋並阻止新搜尋。";
