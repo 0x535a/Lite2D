@@ -4,39 +4,82 @@ import AppKit
 final class CompanionBubble {
     let panel: NSPanel
     private let content = BubbleDragView()
-    private var rows: [(text: String, view: NSView, size: NSSize)] = []
-    private var limit = 3
+    private struct Row {
+        let text: String
+        let view: NSView
+        let size: NSSize
+        let label: NSTextField
+        var playback: CompanionSpeechPlayback?
+    }
+    private var rows: [Row] = []
+    private var timer: Timer?
+    private var typingCompleted: (() -> Void)?
+    private weak var anchor: NSWindow?
     private var avatar: NSImage?
     var offset = NSPoint.zero
     var onMoved: (() -> Void)?
     var sentenceCount: Int { rows.count }
-    var displayedTexts: [String] { rows.map(\.text) }
+    var displayedTexts: [String] { rows.map { $0.label.stringValue } }
     init(preview: Bool = false) {
         panel = preview ? BubblePreviewPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             : NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.animationBehavior = .none
         panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.level = .floating; panel.ignoresMouseEvents = !preview; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         content.wantsLayer = true; content.autoresizesSubviews = false
         content.onMoved = { [weak self] in self?.onMoved?() }
         panel.contentView = content
     }
-    func configure(limit: Int, avatar: NSImage?) {
-        self.limit = min(max(limit, 1), 6); self.avatar = avatar
-        let texts = rows.suffix(self.limit).map(\.text)
+    deinit { timer?.invalidate() }
+    func configure(avatar: NSImage?) {
+        self.avatar = avatar
+        let previous = rows
         rows.forEach { $0.view.removeFromSuperview() }; rows.removeAll()
-        texts.forEach { append($0) }
+        for row in previous {
+            append(row.text)
+            rows[rows.count - 1].playback = row.playback
+            rows.last?.label.stringValue = row.label.stringValue
+        }
         layout(animated: false)
     }
+    /// Static content is used only by the draggable placement preview.
     func show(name: String, text: String, near window: NSWindow) {
-        append(text)
-        while rows.count > limit {
-            let old = rows.removeFirst().view
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18; old.animator().alphaValue = 0
-            } completionHandler: { old.removeFromSuperview() }
-        }
+        anchor = window; append(text)
         layout(animated: panel.isVisible)
-        position(near: window); panel.orderFrontRegardless()
+        position(near: window); panel.orderFrontRegardless(); panel.display()
+    }
+    func type(text: String, near window: NSWindow, completion: @escaping () -> Void) {
+        anchor = window; append(text)
+        let playback = CompanionSpeechPlayback(text: text)
+        rows[rows.count - 1].playback = playback
+        rows.last?.label.stringValue = playback.visibleText(at: playback.startedAt)
+        typingCompleted = completion
+        layout(animated: panel.isVisible)
+        position(near: window); panel.orderFrontRegardless(); panel.display()
+        if timer == nil {
+            let timer = Timer(timeInterval: 0.025, repeats: true) { [weak self] _ in self?.advance(to: Date()) }
+            self.timer = timer; RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    func advance(to time: Date) {
+        for row in rows {
+            if let playback = row.playback { row.label.stringValue = playback.visibleText(at: time) }
+        }
+        let finished = rows.allSatisfy { $0.playback?.isTyping(at: time) != true }
+        let completion = finished ? typingCompleted : nil
+        if finished { typingCompleted = nil }
+        let expired = rows.filter { $0.playback?.isExpired(at: time) == true }
+        if !expired.isEmpty {
+            expired.forEach { $0.view.removeFromSuperview() }
+            rows.removeAll { $0.playback?.isExpired(at: time) == true }
+            if rows.isEmpty { panel.orderOut(nil) }
+            else {
+                layout(animated: true)
+                if let anchor { position(near: anchor) }
+            }
+        }
+        if rows.allSatisfy({ $0.playback == nil }) { timer?.invalidate(); timer = nil }
+        completion?()
     }
     private func append(_ text: String) {
         let font = NSFont.systemFont(ofSize: 14)
@@ -71,7 +114,7 @@ final class CompanionBubble {
             row.addSubview(image)
         }
         content.addSubview(row)
-        rows.append((text, row, NSSize(width: avatarSpace + width + 6, height: height)))
+        rows.append(Row(text: text, view: row, size: NSSize(width: avatarSpace + width + 6, height: height), label: label))
     }
     private func layout(animated: Bool) {
         let width = rows.map(\.size.width).max() ?? 0
@@ -101,6 +144,7 @@ final class CompanionBubble {
         return NSPoint(x: window.frame.midX - panel.frame.width / 2, y: window.frame.maxY + 8)
     }
     func hide() {
+        timer?.invalidate(); timer = nil; typingCompleted = nil
         panel.orderOut(nil)
         rows.forEach { $0.view.removeFromSuperview() }; rows.removeAll()
     }

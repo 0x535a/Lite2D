@@ -312,5 +312,3 @@
 "companion.avatar_choose" = "画像を選択…";
 "companion.avatar_remove" = "削除";
 "companion.avatar_help" = "未設定の場合は吹き出しのみ表示します。画像は中央で円形に切り抜かれます。";
-"companion.bubble_limit" = "表示する文の上限";
-"companion.bubble_limit_help" = "キャラクターごとに最近の文を保持し、上限を超えると古い文から消えます。";

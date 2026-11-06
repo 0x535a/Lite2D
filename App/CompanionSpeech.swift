@@ -3,14 +3,25 @@ import Foundation
 /// Presentation-only splitting; the original utterance remains intact in history.
 enum CompanionSpeech {
     static let maximumLength = 20
-    private static let boundaries: Set<Character> = ["。", "；", "\n", "\r"]
+    private static let boundaries: Set<Character> = ["。", "；", "！", "？", "…", "\n", "\r"]
     // Latin words stay intact; hyphens are deliberately separate tokens. Numbers are
     // grouped like words, while CJK characters and emoji each form one unit.
     private static let tokens = try! NSRegularExpression(pattern: #"\p{Latin}+(?:['’]\p{Latin}+)*|[0-9]+(?:\.[0-9]+)*"#)
 
     static func count(_ text: String) -> Int { units(text).filter(isCounted).count }
-    static func delay(for text: String) -> TimeInterval {
+    static func retention(for text: String) -> TimeInterval {
         1 + Double(max(0, min(count(text), maximumLength) - 10)) * 0.1
+    }
+    static let typingInterval: TimeInterval = 0.05
+    /// Each frame adds one counted unit, plus adjacent punctuation/whitespace.
+    static func typingFrames(_ text: String) -> [String] {
+        var frames: [String] = [], current = ""
+        for token in units(text) {
+            current += token
+            if isCounted(token) { frames.append(current) }
+            else if !frames.isEmpty { frames[frames.count - 1] = current }
+        }
+        return frames.isEmpty && !current.isEmpty ? [current] : frames
     }
     static func sentences(_ text: String) -> [String] {
         var result: [String] = [], current = ""
@@ -47,5 +58,26 @@ enum CompanionSpeech {
 
     private static func isCounted(_ token: String) -> Bool {
         token.unicodeScalars.contains { !CharacterSet.whitespacesAndNewlines.contains($0) && !CharacterSet.punctuationCharacters.contains($0) }
+    }
+}
+
+/// Absolute deadlines keep typing and retention independent, even if a UI tick is late.
+struct CompanionSpeechPlayback {
+    let frames: [String]
+    let startedAt: Date
+    let completedAt: Date
+    let expiresAt: Date
+    init(text: String, startedAt: Date = Date()) {
+        frames = CompanionSpeech.typingFrames(text)
+        self.startedAt = startedAt
+        completedAt = startedAt.addingTimeInterval(Double(frames.count) * CompanionSpeech.typingInterval)
+        expiresAt = completedAt.addingTimeInterval(CompanionSpeech.retention(for: text))
+    }
+    func isTyping(at time: Date) -> Bool { time < completedAt }
+    func isExpired(at time: Date) -> Bool { time >= expiresAt }
+    func visibleText(at time: Date) -> String {
+        guard !frames.isEmpty else { return "" }
+        let index = min(frames.count - 1, max(0, Int(time.timeIntervalSince(startedAt) / CompanionSpeech.typingInterval)))
+        return frames[index]
     }
 }

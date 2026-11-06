@@ -97,12 +97,6 @@ struct CompanionGeneralSections: View {
     }
     var body: some View {
         Section {
-            Stepper(value: binding(\.bubbleLimit), in: 1...6) {
-                LabeledContent(L10n.text("companion.bubble_limit"), value: "\(companion.settings.bubbleLimit)")
-            }
-            Text(L10n.text("companion.bubble_limit_help")).font(.caption).foregroundStyle(.secondary)
-        } header: { Text(L10n.text("companion.bubble_section")) }
-        Section {
             Toggle(L10n.text("companion.enabled"), isOn: binding(\.enabled))
             Toggle(L10n.text("companion.paused"), isOn: binding(\.paused)).disabled(!companion.settings.enabled)
             LabeledContent(L10n.text("companion.state")) {
