@@ -312,3 +312,8 @@
 "companion.avatar_choose" = "画像を選択…";
 "companion.avatar_remove" = "削除";
 "companion.avatar_help" = "未設定の場合は吹き出しのみ表示します。画像は中央で円形に切り抜かれます。";
+
+"companion.bubble_retention" = "吹き出しの表示時間";
+"companion.seconds" = "秒";
+"companion.bubble_retention_help" = "入力完了後、すべての吹き出しを同じ時間だけ表示します（1〜300秒）。カーソルを重ねると閉じるボタンが表示されます。";
+"companion.bubble_close" = "吹き出しを閉じる";

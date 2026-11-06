@@ -312,3 +312,8 @@
 "companion.avatar_choose" = "Choose Image…";
 "companion.avatar_remove" = "Remove";
 "companion.avatar_help" = "Without an avatar, only bubbles appear. Images are center-cropped to a circle.";
+
+"companion.bubble_retention" = "Bubble duration";
+"companion.seconds" = "seconds";
+"companion.bubble_retention_help" = "All bubbles remain for this duration after typing finishes (1–300 seconds). Hover over a bubble to close it manually.";
+"companion.bubble_close" = "Close bubble";

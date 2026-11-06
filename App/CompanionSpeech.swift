@@ -9,9 +9,6 @@ enum CompanionSpeech {
     private static let tokens = try! NSRegularExpression(pattern: #"\p{Latin}+(?:['’]\p{Latin}+)*|[0-9]+(?:\.[0-9]+)*"#)
 
     static func count(_ text: String) -> Int { units(text).filter(isCounted).count }
-    static func retention(for text: String) -> TimeInterval {
-        1 + Double(max(0, min(count(text), maximumLength) - 10)) * 0.1
-    }
     static let typingInterval: TimeInterval = 0.05
     /// Each frame adds one counted unit, plus adjacent punctuation/whitespace.
     static func typingFrames(_ text: String) -> [String] {
@@ -66,12 +63,19 @@ struct CompanionSpeechPlayback {
     let frames: [String]
     let startedAt: Date
     let completedAt: Date
-    let expiresAt: Date
-    init(text: String, startedAt: Date = Date()) {
+    private(set) var expiresAt: Date
+    static let defaultRetention: TimeInterval = 8
+    init(text: String, startedAt: Date = Date(), retention: TimeInterval = Self.defaultRetention) {
         frames = CompanionSpeech.typingFrames(text)
         self.startedAt = startedAt
         completedAt = startedAt.addingTimeInterval(Double(frames.count) * CompanionSpeech.typingInterval)
-        expiresAt = completedAt.addingTimeInterval(CompanionSpeech.retention(for: text))
+        expiresAt = completedAt.addingTimeInterval(Self.normalizedRetention(retention))
+    }
+    static func normalizedRetention(_ seconds: TimeInterval) -> TimeInterval {
+        seconds.isFinite ? min(max(seconds, 1), 300) : defaultRetention
+    }
+    mutating func setRetention(_ seconds: TimeInterval) {
+        expiresAt = completedAt.addingTimeInterval(Self.normalizedRetention(seconds))
     }
     func isTyping(at time: Date) -> Bool { time < completedAt }
     func isExpired(at time: Date) -> Bool { time >= expiresAt }
