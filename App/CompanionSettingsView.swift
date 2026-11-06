@@ -46,6 +46,18 @@ struct CompanionRoleSections: View {
             Text(L10n.text("companion.role_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         } header: { Text(L10n.text("companion.continuity")) }
         Section {
+            LabeledContent(L10n.text("companion.avatar")) {
+                HStack {
+                    if let avatar = companion.avatar(id) {
+                        Image(nsImage: avatar).resizable().scaledToFill().frame(width: 30, height: 30).clipShape(Circle())
+                    }
+                    Button(L10n.text("companion.avatar_choose")) { companion.importAvatar(id) }
+                    if companion.character(id).avatarFile != nil {
+                        Button(L10n.text("companion.avatar_remove")) { companion.removeAvatar(id) }
+                    }
+                }
+            }
+            Text(L10n.text("companion.avatar_help")).font(.caption).foregroundStyle(.secondary)
             LabeledContent(L10n.text("companion.bubble_position")) {
                 HStack {
                     if companion.bubbleEditingID == id {
@@ -85,6 +97,12 @@ struct CompanionGeneralSections: View {
     }
     var body: some View {
         Section {
+            Stepper(value: binding(\.bubbleLimit), in: 1...6) {
+                LabeledContent(L10n.text("companion.bubble_limit"), value: "\(companion.settings.bubbleLimit)")
+            }
+            Text(L10n.text("companion.bubble_limit_help")).font(.caption).foregroundStyle(.secondary)
+        } header: { Text(L10n.text("companion.bubble_section")) }
+        Section {
             Toggle(L10n.text("companion.enabled"), isOn: binding(\.enabled))
             Toggle(L10n.text("companion.paused"), isOn: binding(\.paused)).disabled(!companion.settings.enabled)
             LabeledContent(L10n.text("companion.state")) {
@@ -103,7 +121,7 @@ struct CompanionGeneralSections: View {
             }
             Text(L10n.text("companion.service_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button(L10n.text("companion.stop")) { companion.stopTopic() }.disabled(!companion.busy)
+                Button(L10n.text("companion.stop")) { companion.stopTopic() }.disabled(!companion.busy && !companion.hasSpeech)
                 Button(L10n.text("companion.history")) { companion.showHistory() }
                 if companion.settings.enabled { Button(L10n.text("companion.retry")) { companion.retry() } }
             }

@@ -8,6 +8,10 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '.local/verification/companion'
 OUT.mkdir(parents=True, exist_ok=True)
+speech_test = OUT / 'speech-tests'
+subprocess.run(['xcrun', 'swiftc', str(ROOT / 'App/CompanionSpeech.swift'),
+                str(ROOT / 'Tests/CompanionSpeechTests.swift'), '-o', str(speech_test)], check=True)
+subprocess.run([str(speech_test)], check=True)
 settings = OUT / 'settings.json'
 if settings.exists(): settings.unlink()
 suite = f'local.lite2d.companion.{uuid.uuid4().hex}'

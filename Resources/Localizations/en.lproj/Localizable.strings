@@ -307,3 +307,10 @@
 "companion.trigger_action" = "Trigger";
 "companion.open_history" = "Open…";
 "companion.shared_section" = "Shared Settings";
+
+"companion.avatar" = "Avatar";
+"companion.avatar_choose" = "Choose Image…";
+"companion.avatar_remove" = "Remove";
+"companion.avatar_help" = "Without an avatar, only bubbles appear. Images are center-cropped to a circle.";
+"companion.bubble_limit" = "Visible sentence limit";
+"companion.bubble_limit_help" = "Each character keeps its most recent sentences. New sentences replace the oldest ones above this limit.";

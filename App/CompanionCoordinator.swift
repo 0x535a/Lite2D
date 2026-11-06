@@ -15,8 +15,9 @@ struct CompanionCharacterSettings: Codable, Equatable {
     var enabled = false
     var gaze = true
     var reactionMotionGroup: String?
+    var avatarFile: String?
     var bubbleOffset: BubbleOffset?
-    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup, bubbleOffset }
+    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup, bubbleOffset, avatarFile }
     init(enabled: Bool = false, gaze: Bool = true, reactionMotionGroup: String? = nil, bubbleOffset: BubbleOffset? = nil) {
         self.enabled = enabled; self.gaze = gaze; self.reactionMotionGroup = reactionMotionGroup; self.bubbleOffset = bubbleOffset
     }
@@ -25,6 +26,7 @@ struct CompanionCharacterSettings: Codable, Equatable {
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         gaze = (try? c.decodeIfPresent(Bool.self, forKey: .gaze)) ?? true
         reactionMotionGroup = try? c.decodeIfPresent(String.self, forKey: .reactionMotionGroup)
+        avatarFile = try? c.decodeIfPresent(String.self, forKey: .avatarFile)
         bubbleOffset = try? c.decodeIfPresent(BubbleOffset.self, forKey: .bubbleOffset)
     }
 }
@@ -35,6 +37,7 @@ struct BubbleOffset: Codable, Equatable {
 struct CompanionSettings: Codable {
     var enabled = false
     var paused = false
+    var bubbleLimit = 3
     var intervalMinutes = 30
     var hourlyRequests = 12
     var model = ""
@@ -44,13 +47,14 @@ struct CompanionSettings: Codable {
     var sources: [String: CompanionSourceSettings] = ["opencode": .init(), "codex": .init(), "claude": .init()]
     var characters: [String: CompanionCharacterSettings] = [:]
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters
+        case enabled, paused, bubbleLimit, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters
     }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)) ?? false
+        bubbleLimit = min(max((try? c.decodeIfPresent(Int.self, forKey: .bubbleLimit)) ?? 3, 1), 6)
         intervalMinutes = (try? c.decodeIfPresent(Int.self, forKey: .intervalMinutes)) ?? 30
         hourlyRequests = (try? c.decodeIfPresent(Int.self, forKey: .hourlyRequests)) ?? 12
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
@@ -80,6 +84,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var sources: [String: [String: Any]] = [:]
     @Published var openCodeService: [String: Any] = ["state": "disabled"]
     @Published var entries: [CompanionEntry] = []
+    @Published private(set) var hasSpeech = false
     @Published var busy = false
     @Published var roleErrors: [String: String] = [:]
     @Published var records: [[String: String]] = []
@@ -88,6 +93,7 @@ final class CompanionCoordinator: ObservableObject {
     private var closingRuntime: Task<Void, Never>?
     private var runtimeGeneration = UUID()
     private var timer: Timer?
+    private var speechTimer: Timer?
     private var lastSync = ""
     private var gaze: (a: UUID, b: UUID, until: Date, topic: String)?
     private var bubbles: [UUID: CompanionBubble] = [:]
@@ -124,6 +130,14 @@ final class CompanionCoordinator: ObservableObject {
         var value = character(id); edit(&value); settings.characters[id.uuidString] = value; changed()
     }
     func changed() {
+        settings.bubbleLimit = min(max(settings.bubbleLimit, 1), 6)
+        for (id, bubble) in bubbles {
+            bubble.configure(limit: settings.bubbleLimit, avatar: avatar(id))
+            if let window = manager?.record(id)?.controller?.window { bubble.position(near: window) }
+        }
+        if let id = bubblePreviewID, let preview = bubblePreview, let window = manager?.record(id)?.controller?.window {
+            preview.configure(limit: settings.bubbleLimit, avatar: avatar(id)); preview.position(near: window)
+        }
         settings.intervalMinutes = min(max(settings.intervalMinutes, 0), 1440)
         settings.hourlyRequests = min(max(settings.hourlyRequests, 1), 120)
         do {
@@ -132,6 +146,34 @@ final class CompanionCoordinator: ObservableObject {
             try encoder.encode(settings).write(to: root.appendingPathComponent("settings.json"), options: .atomic)
         } catch { self.error = error.localizedDescription }
         objectWillChange.send(); reconcile(); sync()
+    }
+    func avatar(_ id: UUID) -> NSImage? {
+        guard let file = character(id).avatarFile, file == "avatar.png" else { return nil }
+        return NSImage(contentsOf: root.appendingPathComponent("characters/\(id.uuidString)/\(file)"))
+    }
+    func importAvatar(_ id: UUID) {
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try installAvatar(from: url, for: id) } catch { self.error = L10n.error(error) }
+    }
+    func installAvatar(from url: URL, for id: UUID) throws {
+        guard let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0,
+              let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 128, pixelsHigh: 128, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { throw CocoaError(.fileReadCorruptFile) }
+        NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = context
+        let side = min(image.size.width, image.size.height)
+        image.draw(in: NSRect(x: 0, y: 0, width: 128, height: 128), from: NSRect(x: (image.size.width - side) / 2, y: (image.size.height - side) / 2, width: side, height: side), operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        guard let data = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
+        let target = root.appendingPathComponent("characters/\(id.uuidString)/avatar.png")
+        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: target, options: .atomic)
+        updateCharacter(id) { $0.avatarFile = "avatar.png" }
+    }
+    func removeAvatar(_ id: UUID) {
+        updateCharacter(id) { $0.avatarFile = nil }
+        try? FileManager.default.removeItem(at: root.appendingPathComponent("characters/\(id.uuidString)/avatar.png"))
     }
     func personaURL(_ id: UUID) -> URL { root.appendingPathComponent("characters/\(id.uuidString)/persona.md") }
     func hasPersona(_ id: UUID) -> Bool { FileManager.default.fileExists(atPath: personaURL(id).path) }
@@ -234,7 +276,13 @@ final class CompanionCoordinator: ObservableObject {
         if type == "utterance" {
             append(event)
             if let topic = event["topicId"] as? String, cancelledTopics.contains(topic) { return }
-            pending.append(event); presentNext()
+            if let text = event["text"] as? String {
+                for (index, sentence) in CompanionSpeech.sentences(text).enumerated() {
+                    var part = event; part["text"] = sentence; part["firstSentence"] = index == 0
+                    pending.append(part)
+                }
+            }
+            presentNext()
         }
         if type == "conversation.focus", let a = (event["speakerId"] as? String).flatMap(UUID.init(uuidString:)),
            let b = (event["listenerId"] as? String).flatMap(UUID.init(uuidString:)),
@@ -247,7 +295,7 @@ final class CompanionCoordinator: ObservableObject {
             if event["reason"] as? String != "completed", let topic = event["topicId"] as? String {
                 cancelledTopics.insert(topic); if gaze?.topic == topic { clearGaze() }
                 pending.removeAll { $0["topicId"] as? String == topic }
-                if bubbleTopic == topic { for bubble in bubbles.values { bubble.hide() }; bubbleUntil = .distantPast }
+                if bubbleTopic == topic { for bubble in bubbles.values { bubble.hide() }; hasSpeech = false; bubbleUntil = .distantPast }
             } else if pending.isEmpty && Date() >= bubbleUntil { clearGaze() }
         }
     }
@@ -281,14 +329,14 @@ final class CompanionCoordinator: ObservableObject {
         sync(); updateGaze()
         for (id, bubble) in bubbles {
             if let record = manager?.record(id), let window = record.controller?.window, visible(record) { bubble.position(near: window) }
-            else { bubble.hide() }
+            else { bubble.hide(); pending.removeAll { $0["characterId"] as? String == id.uuidString } }
         }
+        hasSpeech = bubbles.values.contains { $0.sentenceCount > 0 }
         if let id = bubblePreviewID, let preview = bubblePreview {
             if let record = manager?.record(id), let window = record.controller?.window { preview.position(near: window) }
             else { preview.hide() }
         }
         if Date() >= bubbleUntil {
-            for bubble in bubbles.values { bubble.hide() }
             restoreExpressions()
             presentNext()
             if pending.isEmpty && !busy { clearGaze() }
@@ -306,8 +354,10 @@ final class CompanionCoordinator: ObservableObject {
                   let record = manager?.record(id), let window = record.controller?.window, visible(record) else { continue }
             let bubble = bubbles[id] ?? CompanionBubble(); bubbles[id] = bubble
             bubble.offset = bubblePoint(character(id).bubbleOffset)
+            bubble.configure(limit: settings.bubbleLimit, avatar: avatar(id))
             bubble.show(name: record.settings.localizedDisplayName, text: text, near: window)
-            if !record.settings.animationPaused && record.settings.interactionMode != .edit,
+            hasSpeech = true
+            if event["firstSentence"] as? Bool != false, !record.settings.animationPaused && record.settings.interactionMode != .edit,
                let group = character(id).reactionMotionGroup, let view = record.controller?.view,
                !view.bridge.interactionPlaying, Date() >= view.manualMotionUntil,
                (view.bridge.motionGroups[group]?.intValue ?? 0) > 0 {
@@ -321,7 +371,15 @@ final class CompanionCoordinator: ObservableObject {
                     if view.bridge.selectExpression(expression) { expressionOverrides.insert(id) }
                 }
             }
-            bubbleUntil = Date().addingTimeInterval(min(max(Double(text.count) / 12, 4), 15)); bubbleTopic = event["topicId"] as? String
+            let delay = CompanionSpeech.delay(for: text)
+            bubbleUntil = Date().addingTimeInterval(delay); bubbleTopic = event["topicId"] as? String
+            speechTimer?.invalidate()
+            let next = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                self.restoreExpressions(); self.presentNext()
+                if self.pending.isEmpty && !self.busy { self.clearGaze() }
+            }
+            speechTimer = next; RunLoop.main.add(next, forMode: .common)
             break
         }
     }
@@ -342,7 +400,8 @@ final class CompanionCoordinator: ObservableObject {
         }
         expressionOverrides.removeAll()
     }
-    private func cancelPresentation() { pending.removeAll(); for bubble in bubbles.values { bubble.hide() }; restoreExpressions(); bubbleUntil = .distantPast; clearGaze() }
+    func speechTexts(_ id: UUID) -> [String] { bubbles[id]?.displayedTexts ?? [] }
+    private func cancelPresentation() { speechTimer?.invalidate(); speechTimer = nil; hasSpeech = false; pending.removeAll(); for bubble in bubbles.values { bubble.hide() }; restoreExpressions(); bubbleUntil = .distantPast; clearGaze() }
     func stopTopic() { send(["type": "stop"]); cancelPresentation() }
     func canPlaceBubble(_ id: UUID) -> Bool {
         guard let record = manager?.record(id), record.error == nil, record.controller != nil,
@@ -356,6 +415,7 @@ final class CompanionCoordinator: ObservableObject {
         if let current = bubbleEditingID, current != id { finishBubblePlacement(current, save: true) }
         guard bubbleEditingID == nil, canPlaceBubble(id), let record = manager?.record(id), let window = record.controller?.window else { return }
         let preview = CompanionBubble(preview: true)
+        preview.configure(limit: settings.bubbleLimit, avatar: avatar(id))
         preview.offset = bubblePoint(character(id).bubbleOffset)
         preview.show(name: record.settings.localizedDisplayName, text: L10n.text("companion.bubble_preview"), near: window)
         preview.onMoved = { [weak self, weak preview, weak window] in
@@ -432,72 +492,5 @@ final class CompanionCoordinator: ObservableObject {
         shutdownRequested = true; timer?.invalidate(); timer = nil; stopProcess()
         if let historyCloseObserver { NotificationCenter.default.removeObserver(historyCloseObserver) }
         historyCloseObserver = nil; historyWindow?.close(); historyWindow = nil
-    }
-}
-
-final class CompanionBubble {
-    let panel: NSPanel
-    var offset = NSPoint.zero
-    var onMoved: (() -> Void)?
-    init(preview: Bool = false) {
-        panel = preview ? BubblePreviewPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            : NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.level = .floating; panel.ignoresMouseEvents = !preview; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-    }
-    func show(name: String, text: String, near window: NSWindow) {
-        let drag = BubbleDragView(); drag.onMoved = { [weak self] in self?.onMoved?() }
-        let effect: NSVisualEffectView = panel is BubblePreviewPanel ? drag : NSVisualEffectView()
-        effect.material = .popover; effect.blendingMode = .behindWindow; effect.state = .active
-        effect.wantsLayer = true; effect.layer?.cornerRadius = 12; effect.layer?.masksToBounds = true
-        let title = NSTextField(labelWithString: name); title.font = .systemFont(ofSize: 11, weight: .semibold); title.textColor = .secondaryLabelColor
-        let label = NSTextField(wrappingLabelWithString: text); label.font = .systemFont(ofSize: 14); label.maximumNumberOfLines = 12
-        let stack = NSStackView(views: [title, label]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 5
-        effect.addSubview(stack); stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14), stack.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -14), stack.topAnchor.constraint(equalTo: effect.topAnchor, constant: 12), stack.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -12)])
-        panel.contentView = effect
-        let rect = (text as NSString).boundingRect(with: NSSize(width: 272, height: 1000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: NSFont.systemFont(ofSize: 14)])
-        panel.setContentSize(NSSize(width: 300, height: min(max(ceil(rect.height) + 48, 78), 300)))
-        position(near: window); panel.orderFrontRegardless()
-    }
-    func position(near window: NSWindow) {
-        guard let screen = window.screen else { hide(); return }
-        guard let base = baseOrigin(near: window) else { hide(); return }
-        let area = screen.visibleFrame, size = panel.frame.size
-        let x = min(max(base.x + offset.x, area.minX + 8), area.maxX - size.width - 8)
-        let preferredY = base.y + offset.y
-        let y = min(max(preferredY, area.minY + 8), area.maxY - size.height - 8)
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-    func baseOrigin(near window: NSWindow) -> NSPoint? {
-        guard window.screen != nil else { return nil }
-        let size = panel.frame.size
-        return NSPoint(x: window.frame.midX - size.width / 2, y: window.frame.maxY + 8)
-    }
-    func hide() { panel.orderOut(nil) }
-}
-
-private final class BubblePreviewPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-}
-private final class BubbleDragView: NSVisualEffectView {
-    private var startMouse: NSPoint?
-    private var startOrigin: NSPoint?
-    var onMoved: (() -> Void)?
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
-    override func mouseDown(with event: NSEvent) {
-        startMouse = NSEvent.mouseLocation; startOrigin = window?.frame.origin
-        NSCursor.closedHand.set()
-    }
-    override func mouseDragged(with event: NSEvent) {
-        guard let startMouse, let startOrigin else { return }
-        let point = NSEvent.mouseLocation
-        window?.setFrameOrigin(NSPoint(x: startOrigin.x + point.x - startMouse.x, y: startOrigin.y + point.y - startMouse.y))
-        onMoved?()
-    }
-    override func mouseUp(with event: NSEvent) {
-        startMouse = nil; startOrigin = nil; NSCursor.openHand.set()
     }
 }
