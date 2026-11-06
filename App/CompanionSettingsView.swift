@@ -46,6 +46,25 @@ struct CompanionRoleSections: View {
             Text(L10n.text("companion.role_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         } header: { Text(L10n.text("companion.continuity")) }
         Section {
+            Picker(L10n.text("companion.bubble_side"), selection: Binding(get: { companion.character(id).bubbleSide }, set: { value in
+                companion.updateCharacter(id) { $0.bubbleSide = value }
+            })) {
+                Text(L10n.text("companion.side_left")).tag(CompanionBubbleSide.left)
+                Text(L10n.text("companion.side_right")).tag(CompanionBubbleSide.right)
+            }.pickerStyle(.segmented)
+            Picker(L10n.text("companion.group"), selection: Binding(get: { companion.group(for: id)?.id.uuidString ?? "" }, set: { value in
+                companion.assignGroup(id, to: UUID(uuidString: value))
+            })) {
+                Text(L10n.text("common.none")).tag("")
+                ForEach(companion.settings.groups) { group in Text(group.name).tag(group.id.uuidString) }
+            }
+            if let group = companion.group(for: id) {
+                Text(L10n.text("companion.group_member_help", group.name)).font(.caption).foregroundStyle(.secondary)
+                Button(L10n.text("companion.group_adjust")) { companion.beginGroupPlacement(group.id) }
+                if companion.groupEditingID == group.id {
+                    Button(L10n.text("companion.bubble_done")) { companion.finishGroupPlacement(group.id, save: true) }
+                }
+            }
             LabeledContent(L10n.text("companion.avatar")) {
                 HStack {
                     if let avatar = companion.avatar(id) {
@@ -68,7 +87,7 @@ struct CompanionRoleSections: View {
                             .disabled(!companion.canPlaceBubble(id))
                     }
                     Button(L10n.text("companion.bubble_reset")) { companion.resetBubblePlacement(id) }
-                        .disabled(companion.character(id).bubbleOffset == nil || companion.bubbleEditingID == id)
+                        .disabled(companion.group(for: id) != nil || companion.character(id).bubbleOffset == nil || companion.bubbleEditingID == id)
                 }
             }
             Text(L10n.text(companion.bubbleEditingID == id ? "companion.bubble_dragging" : "companion.bubble_help"))
@@ -108,6 +127,7 @@ struct CompanionGeneralSections: View {
             }
             Text(L10n.text("companion.bubble_retention_help")).font(.caption).foregroundStyle(.secondary)
         } header: { Text(L10n.text("companion.bubble_section")) }
+        CompanionGroupsSection(companion: companion)
         Section {
             Toggle(L10n.text("companion.enabled"), isOn: binding(\.enabled))
             Toggle(L10n.text("companion.paused"), isOn: binding(\.paused)).disabled(!companion.settings.enabled)

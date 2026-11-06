@@ -317,3 +317,24 @@
 "companion.seconds" = "秒";
 "companion.bubble_retention_help" = "入力完了後、すべての吹き出しを同じ時間だけ表示します（1〜300秒）。カーソルを重ねると閉じるボタンが表示されます。";
 "companion.bubble_close" = "吹き出しを閉じる";
+
+"companion.bubble_side" = "吹き出しの向き";
+"companion.side_left" = "左";
+"companion.side_right" = "右";
+"companion.group" = "グループ";
+"companion.groups" = "グループ";
+"companion.group_default" = "グループ {0}";
+"companion.group_add" = "グループを追加";
+"companion.group_name" = "名前";
+"companion.group_width" = "幅";
+"companion.group_height" = "高さ";
+"companion.group_x" = "X";
+"companion.group_y" = "Y";
+"companion.group_coordinates" = "サイズと画面全体の座標はポイント単位です。原点は画面の左下です。";
+"companion.group_adjust" = "ウィンドウを調整…";
+"companion.group_adjust_help" = "タイトルバーをドラッグするかサイズを変更し、完了を押してください。";
+"companion.group_members" = "メンバー";
+"companion.group_delete" = "グループを削除";
+"companion.group_delete_confirm" = "このグループを削除しますか？メンバーは個別の吹き出しに戻ります。";
+"companion.group_help" = "固定ウィンドウにメンバーの発言をまとめ、各モデルの設定に従って左右に配置します。縦方向のみスクロールできます。";
+"companion.group_member_help" = "発言は「{0}」に表示されます。個別の吹き出し位置は適用されません。";

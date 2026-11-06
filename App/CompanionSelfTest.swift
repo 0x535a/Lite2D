@@ -212,6 +212,7 @@ final class CompanionSelfTest {
                 c.stopTopic()
                 try await Task.sleep(nanoseconds: 150_000_000)
                 try check(c.speechTexts(a.settings.id).isEmpty && !c.hasSpeech, "Stopping cancels typing and prevents late callbacks")
+                try await verifyGroups(c, a: a, b: b)
                 let history = CompanionHistoryView.makeWindow(coordinator: c)
                 history.makeKeyAndOrderFront(nil)
                 try await Task.sleep(nanoseconds: 160_000_000)
