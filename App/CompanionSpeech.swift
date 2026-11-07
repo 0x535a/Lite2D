@@ -2,7 +2,7 @@ import Foundation
 
 /// Presentation-only splitting; the original utterance remains intact in history.
 enum CompanionSpeech {
-    static let maximumLength = 20
+    static let softLength = 20
     private static let boundaries: Set<Character> = ["。", "；", "！", "？", "…", "\n", "\r"]
     // Latin words stay intact; hyphens are deliberately separate tokens. Numbers are
     // grouped like words, while CJK characters and emoji each form one unit.
@@ -32,11 +32,14 @@ enum CompanionSpeech {
         for token in units(text) {
             if token.contains(where: { $0.isNewline }) { flush(); ended = false; continue }
             let counted = isCounted(token)
-            if counted && (length == maximumLength || ended) { flush(); ended = false }
-            // Keep closing punctuation/quotes attached even after reaching the limit.
+            if counted && ended { flush(); ended = false }
+            // Once a boundary is found, keep adjacent punctuation and closing quotes attached.
             current += token
             if counted { length += 1 }
-            if token.contains(where: { boundaries.contains($0) }) { ended = true }
+            if token.contains(where: { boundaries.contains($0) }) ||
+                (length > softLength && !counted && token.unicodeScalars.contains(where: { CharacterSet.punctuationCharacters.contains($0) })) {
+                ended = true
+            }
         }
         flush()
         return result
