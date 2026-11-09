@@ -386,6 +386,9 @@ actor NativeCompanionRuntime {
                 guard let markdown = try? String(contentsOf: file, encoding: .utf8) else { throw NativeCompanionData.error("Persona is unavailable") }
                 let view = try store.runtimePersona(characterID: id, markdown: markdown)
                 emit("persona", ["characterId": id, "content": view, "identityRevision": (try store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0])
+            case "persona_preview":
+                guard let id = command["characterId"] as? String, NativeCompanionData.validID(id), let markdown = command["markdown"] as? String else { throw NativeCompanionData.error("Persona preview requires character and Markdown") }
+                emit("persona.preview", try store.personaChangePreview(characterID: id, markdown: markdown))
             case "world_seed_preview":
                 let worldID = command["worldId"] as? String ?? "cyberworld-main"
                 let participants = command["participants"] as? [String] ?? []

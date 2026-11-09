@@ -86,6 +86,7 @@ final class NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS seed_batches(id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE NOT NULL,world_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
+        try backfillLegacyMemories()
     }
     deinit { sqlite3_close(database) }
     private func statement(_ sql: String, _ args: [Any?]) throws -> OpaquePointer {
@@ -134,6 +135,16 @@ final class NativeCompanionStore {
     }
     func set(_ key: String, _ value: Any) throws { try execute("INSERT OR REPLACE INTO state VALUES (?,?)", [key, NativeCompanionData.string(value)]) }
 
+    private func backfillLegacyMemories() throws {
+        for row in try rows("SELECT key,value FROM state WHERE key LIKE 'memory:%'") {
+            guard let key = row["key"] as? String, let owner = key.split(separator: ":", maxSplits: 1).last.map(String.init), NativeCompanionData.validID(owner),
+                  let encoded = row["value"] as? String, let data = encoded.data(using: .utf8), let content = try? NativeCompanionData.decode(data) as? String,
+                  !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let exists = try rows("SELECT id FROM memory_items WHERE owner_character_id=? AND provenance='legacy_import' LIMIT 1", [owner]).first != nil
+            if !exists { _ = try memoryWrite(owner: owner, type: "diary", provenance: "legacy_import", content: content) }
+        }
+    }
+
     func ingestPersona(characterID: String, markdown: String, actor: String = "user", sourceKind: String = "user_persona_edit") throws -> CompanionObject {
         guard NativeCompanionData.validID(characterID), !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Invalid Persona") }
         let hash = NativeCompanionData.hash(markdown), now = NativeCompanionData.iso()
@@ -152,6 +163,15 @@ final class NativeCompanionStore {
 
     func latestPersona(characterID: String) throws -> CompanionObject? {
         try rows("SELECT id,character_id,revision,raw_hash,base_hash,markdown,actor,source_kind,created_at FROM persona_revisions WHERE character_id=? ORDER BY revision DESC LIMIT 1", [characterID]).first
+    }
+
+    func personaChangePreview(characterID: String, markdown: String) throws -> CompanionObject {
+        let current = try latestPersona(characterID: characterID)
+        let nextClaims = NativePersonaMemory.claims(markdown).map { ["field": $0.field, "value": $0.value, "kind": $0.kind, "confidence": $0.confidence] as [String: Any] }
+        let oldClaims = try personaClaims(characterID: characterID)
+        let oldHash = current?["raw_hash"] as? String ?? ""
+        let nextHash = NativeCompanionData.hash(markdown)
+        return ["characterId": characterID, "baseRevision": current?["revision"] ?? 0, "baseHash": oldHash, "nextHash": nextHash, "changed": oldHash != nextHash, "oldClaims": oldClaims, "newClaims": nextClaims, "conflicts": []]
     }
 
     func personaClaims(characterID: String) throws -> [CompanionObject] {

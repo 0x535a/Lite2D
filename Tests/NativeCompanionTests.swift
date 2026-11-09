@@ -99,6 +99,7 @@ private actor ServiceFixture {
             try check(try String(contentsOf: store.root.appendingPathComponent("characters/\(a)/memory.md"), encoding: .utf8) == "private", "Native memory projection matches existing file format")
             let reopened = try NativeCompanionStore(root: store.root)
             try check(reopened.get("session:\(a)") as? String == "ses_existing" && reopened.get("memory:\(a)") as? String == "private", "Existing database sessions and memory survive reopening")
+            try check(try reopened.memorySearch(owner: a, query: "private").contains { $0["provenance"] as? String == "legacy_import" }, "Legacy private memory is backfilled into structured storage")
             let persona = """
             ---
             character_id: test
@@ -113,6 +114,7 @@ private actor ServiceFixture {
             """
             let personaRevision = try reopened.ingestPersona(characterID: a, markdown: persona)
             try check(personaRevision["revision"] as? Int == 1, "Persona edits create a versioned identity revision")
+            try check((try reopened.personaChangePreview(characterID: a, markdown: persona.replacingOccurrences(of: "谨慎", with: "谨慎且诚实")))["changed"] as? Bool == true, "Persona edits support a non-destructive change preview")
             let card = try reopened.publicIdentityCard(characterID: a, name: "测试角色")
             try check((card["confirmed"] as? String)?.contains("测试角色") == true && card["unknown"] != nil, "Public identity cards expose confirmed content and preserve unknowns")
             try check((try reopened.runtimePersona(characterID: a, markdown: persona)).contains("Controller-managed identity context"), "Runtime Persona view includes traceable managed identity context")
