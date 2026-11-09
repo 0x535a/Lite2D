@@ -81,13 +81,16 @@ final class NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS persona_views(character_id TEXT NOT NULL,view_kind TEXT NOT NULL,content TEXT NOT NULL,content_hash TEXT NOT NULL,identity_revision TEXT NOT NULL,memory_cursor TEXT,generated_at TEXT NOT NULL,PRIMARY KEY(character_id,view_kind))",
             "CREATE TABLE IF NOT EXISTS memory_items(id TEXT PRIMARY KEY,owner_character_id TEXT NOT NULL,memory_type TEXT NOT NULL,scope TEXT NOT NULL,provenance TEXT NOT NULL,content TEXT NOT NULL,evidence_ids TEXT NOT NULL,source_actor_id TEXT,revision INTEGER NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,supersedes_id TEXT)",
             "CREATE INDEX IF NOT EXISTS memory_items_owner_status ON memory_items(owner_character_id,status)",
+            "CREATE TABLE IF NOT EXISTS world_events(id TEXT PRIMARY KEY,world_id TEXT NOT NULL,event_type TEXT NOT NULL,happened_at TEXT,source_kind TEXT NOT NULL,synthetic INTEGER NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS relations(id TEXT PRIMARY KEY,observer_character_id TEXT NOT NULL,target_character_id TEXT NOT NULL,role TEXT,trust REAL NOT NULL,familiarity REAL NOT NULL,closeness REAL NOT NULL,impression TEXT,evidence_ids TEXT NOT NULL,seed_batch_id TEXT,revision INTEGER NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(observer_character_id,target_character_id))",
+            "CREATE TABLE IF NOT EXISTS seed_batches(id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE NOT NULL,world_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
     }
     deinit { sqlite3_close(database) }
     private func statement(_ sql: String, _ args: [Any?]) throws -> OpaquePointer {
         var result: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &result, nil) == SQLITE_OK, let result else { throw NativeCompanionData.error("Companion database query failed") }
+        guard sqlite3_prepare_v2(database, sql, -1, &result, nil) == SQLITE_OK, let result else { throw NativeCompanionData.error("Companion database query failed: \(String(cString: sqlite3_errmsg(database))) SQL=\(sql)") }
         for (i, value) in args.enumerated() {
             let index = Int32(i + 1)
             if let s = value as? String { sqlite3_bind_text(result, index, s, -1, transient) }
@@ -100,7 +103,7 @@ final class NativeCompanionStore {
         lock.lock(); defer { lock.unlock() }
         let s = try statement(sql, args); defer { sqlite3_finalize(s) }
         let code = sqlite3_step(s)
-        guard code == SQLITE_DONE || code == SQLITE_ROW else { throw NativeCompanionData.error("Companion database write failed") }
+        guard code == SQLITE_DONE || code == SQLITE_ROW else { throw NativeCompanionData.error("Companion database write failed: \(String(cString: sqlite3_errmsg(database)))") }
     }
     func rows(_ sql: String, _ args: [Any?] = []) throws -> [CompanionObject] {
         lock.lock(); defer { lock.unlock() }
@@ -201,6 +204,61 @@ final class NativeCompanionStore {
         let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id)
         try execute("UPDATE memory_items SET status='superseded',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
         var result = next; result["reason"] = reason; result["supersedesId"] = id; return result
+    }
+
+    func relationGet(observer: String, target: String) throws -> CompanionObject? {
+        try rows("SELECT observer_character_id,target_character_id,role,trust,familiarity,closeness,impression,evidence_ids,seed_batch_id,revision,status,created_at,updated_at FROM relations WHERE observer_character_id=? AND target_character_id=? AND status='active'", [observer, target]).first
+    }
+
+    func previewRelationshipBootstrap(worldID: String, participants: [String], premise: String, perspectives: CompanionObject, idempotencyKey: String) throws -> CompanionObject {
+        guard participants.count >= 2, participants.allSatisfy(NativeCompanionData.validID), !premise.isEmpty, !idempotencyKey.isEmpty else { throw NativeCompanionData.error("Invalid relationship seed") }
+        if let existing = try rows("SELECT id,status,payload FROM seed_batches WHERE idempotency_key=?", [idempotencyKey]).first {
+            return ["previewId": existing["id"] ?? "", "status": existing["status"] ?? "", "idempotent": true, "proposed": existing["payload"] ?? "{}"]
+        }
+        let proposed: CompanionObject = ["participants": participants, "premise": NativeCompanionData.clean(premise, limit: 4000), "perspectives": perspectives, "synthetic": true, "source": "world_seed"]
+        let batchID = UUID().uuidString, now = NativeCompanionData.iso()
+        try execute("INSERT INTO seed_batches VALUES (?,?,?,?,?,?,?)", [batchID, idempotencyKey, worldID, "preview", NativeCompanionData.string(proposed), now, now])
+        return ["previewId": batchID, "status": "preview", "idempotent": false, "proposed": proposed]
+    }
+
+    func commitRelationshipBootstrap(previewID: String, approvedBy: String) throws -> CompanionObject {
+        guard !approvedBy.isEmpty, let batch = try rows("SELECT id,world_id,status,payload FROM seed_batches WHERE id=?", [previewID]).first,
+              let status = batch["status"] as? String, status == "preview",
+              let payloadText = batch["payload"] as? String, let payloadData = payloadText.data(using: .utf8), let payload = try NativeCompanionData.decode(payloadData) as? CompanionObject,
+              let participants = payload["participants"] as? [String] else { throw NativeCompanionData.error("Seed preview is unavailable or already committed") }
+        let now = NativeCompanionData.iso(), eventID = UUID().uuidString
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("UPDATE seed_batches SET status='committing',updated_at=? WHERE id=?", [now, previewID])
+            let eventPayload: CompanionObject = ["premise": payload["premise"] ?? "", "participants": participants, "approvedBy": approvedBy]
+            try execute("INSERT INTO world_events VALUES (?,?,?,?,?,?,?,?)", [eventID, batch["world_id"] ?? "", "relationship_bootstrap", now, "world_seed", 1, NativeCompanionData.string(eventPayload), now])
+            let perspectives = NativeCompanionData.object(payload["perspectives"])
+            for observer in participants {
+                let target = participants.first { $0 != observer } ?? observer
+                let view = NativeCompanionData.object(perspectives[observer])
+                let trust = min(max(view["trust"] as? Double ?? 0.5, 0), 1)
+                let familiarity = min(max(view["familiarity"] as? Double ?? trust, 0), 1)
+                let closeness = min(max(view["closeness"] as? Double ?? familiarity, 0), 1)
+                let role = view["role"] as? String ?? "known_person"
+                let impression = NativeCompanionData.clean(view["impression"] as? String ?? "", limit: 2000)
+                try execute("INSERT OR REPLACE INTO relations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [UUID().uuidString, observer, target, role, trust, familiarity, closeness, impression, NativeCompanionData.string([eventID]), previewID, 1, "active", now, now])
+                _ = try memoryWrite(owner: observer, type: "relation", provenance: "world_seed", content: impression.isEmpty ? "我与对方存在设定中的关系：\(role)。" : impression, evidenceIDs: [eventID], sourceActorID: nil, supersedesID: nil)
+            }
+            try execute("UPDATE seed_batches SET status='committed',updated_at=? WHERE id=?", [NativeCompanionData.iso(), previewID])
+            try execute("COMMIT")
+            return ["seedBatchId": previewID, "status": "committed", "eventId": eventID, "participants": participants]
+        } catch { try? execute("ROLLBACK"); try? execute("UPDATE seed_batches SET status='failed',updated_at=? WHERE id=?", [NativeCompanionData.iso(), previewID]); throw error }
+    }
+
+    func rollbackSeedBatch(_ batchID: String) throws -> CompanionObject {
+        guard let batch = try rows("SELECT status FROM seed_batches WHERE id=?", [batchID]).first, let status = batch["status"] as? String, status == "committed" else { throw NativeCompanionData.error("Seed batch is not committed") }
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("UPDATE relations SET status='archived',updated_at=? WHERE seed_batch_id=? AND status='active'", [NativeCompanionData.iso(), batchID])
+            try execute("UPDATE seed_batches SET status='rolled_back',updated_at=? WHERE id=?", [NativeCompanionData.iso(), batchID])
+            try execute("COMMIT")
+            return ["seedBatchId": batchID, "status": "rolled_back"]
+        } catch { try? execute("ROLLBACK"); throw error }
     }
     func event(_ type: String, _ payload: CompanionObject) throws -> CompanionObject {
         lock.lock(); defer { lock.unlock() }

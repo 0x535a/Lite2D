@@ -325,6 +325,10 @@ actor NativeCompanionRuntime {
             guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
                   let expected = Int(args["expectedRevision"] as? String ?? "") else { throw NativeCompanionData.error("Memory correction requires ID, content and revision") }
             return try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
+        case "relation_get":
+            guard let target = args["targetCharacterId"] as? String, NativeCompanionData.validID(target), target != actor,
+                  characters.contains(where: { $0["id"] as? String == target && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Relationship target is unavailable") }
+            return try store.relationGet(observer: actor, target: target) ?? ["observerCharacterId": actor, "targetCharacterId": target, "status": "unknown", "message": "No relationship has been recorded."]
         case "companion_send_message":
             guard let topic, !topic.cancelled, topic.speaker == actor, let to = args["to"] as? String, to != actor, visible.contains(where: { $0["id"] as? String == to }) else { throw NativeCompanionData.error("No available recipient or topic") }
             guard let raw = args["text"] as? String, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, raw.count <= 300, topic.utterances + topic.queue.count < 4 else { throw NativeCompanionData.error("Message or topic limit exceeded") }
@@ -382,6 +386,18 @@ actor NativeCompanionRuntime {
                 guard let markdown = try? String(contentsOf: file, encoding: .utf8) else { throw NativeCompanionData.error("Persona is unavailable") }
                 let view = try store.runtimePersona(characterID: id, markdown: markdown)
                 emit("persona", ["characterId": id, "content": view, "identityRevision": (try store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0])
+            case "world_seed_preview":
+                let worldID = command["worldId"] as? String ?? "cyberworld-main"
+                let participants = command["participants"] as? [String] ?? []
+                let perspectives = NativeCompanionData.object(command["perspectives"])
+                let preview = try store.previewRelationshipBootstrap(worldID: worldID, participants: participants, premise: command["premise"] as? String ?? "", perspectives: perspectives, idempotencyKey: command["idempotencyKey"] as? String ?? UUID().uuidString)
+                emit("world_seed.preview", preview)
+            case "world_seed_commit":
+                let result = try store.commitRelationshipBootstrap(previewID: command["previewId"] as? String ?? "", approvedBy: command["approvedBy"] as? String ?? "user")
+                emit("world_seed.committed", result)
+            case "world_seed_rollback":
+                let result = try store.rollbackSeedBatch(command["seedBatchId"] as? String ?? "")
+                emit("world_seed.rolled_back", result)
             default: throw NativeCompanionData.error("Unknown host command")
             }
         } catch { emit("error", ["requestType": command["type"] ?? "", "message": NativeCompanionData.clean(error.localizedDescription, limit: 240)]) }
