@@ -232,6 +232,7 @@
 "companion.edit_persona" = "Markdown を編集";
 "companion.personality" = "ペルソナ";
 "companion.persona_help" = "性格、興味、話し方を UTF-8 の Markdown に記述します。このモデル専用のコピーを保存し、編集は次のターンから反映します。";
+"companion.generated_persona" = "生成されたペルソナを開く";
 "companion.invalid_persona" = "64 KB 以下の空でない UTF-8 Markdown ファイルを選んでください。";
 "companion.gaze" = "会話中は相手を見る";
 "companion.continuity" = "会話";

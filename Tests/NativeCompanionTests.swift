@@ -99,11 +99,33 @@ private actor ServiceFixture {
             try check(try String(contentsOf: store.root.appendingPathComponent("characters/\(a)/memory.md"), encoding: .utf8) == "private", "Native memory projection matches existing file format")
             let reopened = try NativeCompanionStore(root: store.root)
             try check(reopened.get("session:\(a)") as? String == "ses_existing" && reopened.get("memory:\(a)") as? String == "private", "Existing database sessions and memory survive reopening")
+            let persona = """
+            ---
+            character_id: test
+            ---
+            # Persona
+
+            ## 1. 我是谁
+            你是测试角色，喜欢谨慎记录事实。
+
+            ## 4. 和姐姐的关系
+            你尊重姐姐，但不会替她发言。
+            """
+            let personaRevision = try reopened.ingestPersona(characterID: a, markdown: persona)
+            try check(personaRevision["revision"] as? Int == 1, "Persona edits create a versioned identity revision")
+            let card = try reopened.publicIdentityCard(characterID: a, name: "测试角色")
+            try check((card["confirmed"] as? String)?.contains("测试角色") == true && card["unknown"] != nil, "Public identity cards expose confirmed content and preserve unknowns")
+            try check((try reopened.runtimePersona(characterID: a, markdown: persona)).contains("Controller-managed identity context"), "Runtime Persona view includes traceable managed identity context")
+            let written = try reopened.memoryWrite(owner: a, type: "fact", provenance: "experienced", content: "A observed a real event", evidenceIDs: ["event-1"])
+            let memoryID = written["memoryId"] as! String
+            try check(try reopened.memorySearch(owner: a, query: "real event").contains { $0["id"] as? String == memoryID }, "Structured memory search is scoped to its owner")
+            let corrected = try reopened.memoryCorrect(memoryID, owner: a, content: "A corrected the event", expectedRevision: 1, reason: "verified source")
+            try check(corrected["conflict"] == nil && (try reopened.memoryRead(memoryID, owner: a)) == nil, "Memory correction supersedes the old revision")
             try check(try store.spend(1, now: 1_000_000) && !store.spend(1, now: 1_000_001), "Rolling request budget prevents overspend")
             try check(NativeCompanionData.text(["type": "thinking", "text": "secret"]).isEmpty && NativeCompanionData.text(["type": "tool_result", "content": "secret output"]) == "[tool completed]", "Observer normalization excludes reasoning and raw tool output")
             try check(NativeCompanionData.output("{\"command\":\"execute\"}")["skip"] as? Bool == true, "Malformed model JSON never becomes a command")
             let prompt = try NativeCompanionPrompt.load(promptFile)
-            try check(NativeCompanionMCP.tools(prompt).count == 14 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 14 tool schemas and unchanged Persona composition load natively")
+            try check(NativeCompanionMCP.tools(prompt).count == 18 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 18 tool schemas and unchanged Persona composition load natively")
             let searchResult: CompanionObject = ["jsonrpc": "2.0", "id": 1, "result": ["content": [["type": "text", "text": "Title: Example\nURL: https://example.com"]]]]
             let searchJSON = try NativeCompanionData.json(searchResult)
             let searchSSE = Data(("event: message\r\ndata: " + String(decoding: searchJSON, as: UTF8.self) + "\r\n\r\n").utf8)
@@ -122,7 +144,7 @@ private actor ServiceFixture {
             do { _ = try await NativeCompanionSearch.search(query: "public topic", objective: "find facts", session: searchSession) } catch { rateLimited = true }
             try check(rateLimited, "Search HTTP failures return errors instead of invented results")
             let allowed = NativeCompanionRoles.rules.filter { $0["effect"] as? String == "allow" }.compactMap { $0["action"] as? String }
-            try check(allowed.count == 42 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
+            try check(allowed.count == 54 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
             for invalid: CompanionObject in [["id": 1, "error": ["code": -1]], ["id": 1, "result": ["isError": true, "content": [["type": "text", "text": "failed"]]]], ["id": 2, "result": [:]]] {
                 var rejected = false
                 do { _ = try NativeCompanionSearch.result(NativeCompanionData.json(invalid)) } catch { rejected = true }

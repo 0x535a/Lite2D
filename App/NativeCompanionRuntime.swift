@@ -226,7 +226,16 @@ actor NativeCompanionRuntime {
         context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
         context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }
         context["privateMemory"] = NativeCompanionData.clean(store.get("memory:\(id)") as? String ?? "", limit: 3000)
-        context["characters"] = visible.map { ["id": $0["id"] ?? "", "name": $0["name"] ?? ""] }; context["remainingUtterances"] = 4 - topic.utterances
+        context["privateMemoryItems"] = (try? store.memorySearch(owner: id, query: "", limit: 12)) ?? []
+        context["identityRevision"] = (try? store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0
+        context["characters"] = visible.map { character in
+            let characterID = character["id"] as? String ?? ""
+            let name = character["name"] as? String ?? ""
+            let file = root.appendingPathComponent("characters/\(characterID)/persona.md")
+            if let markdown = try? String(contentsOf: file, encoding: .utf8) { _ = try? store.ingestPersona(characterID: characterID, markdown: markdown) }
+            return (try? store.publicIdentityCard(characterID: characterID, name: name)) ?? ["id": characterID, "name": name, "unknown": "身份资料不可用"]
+        }
+        context["remainingUtterances"] = 4 - topic.utterances
         if let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
         let output = try await roles.generate(id: id, context: context, model: model, reserve: { [weak self] in try await self?.reserveRequest() ?? false })
         try Task.checkCancellation(); guard !topic.cancelled else { return }
@@ -260,7 +269,7 @@ actor NativeCompanionRuntime {
         guard let actor = tokens[token], enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character is paused or unauthenticated") }
         try await roles.reserveContinuation(actor)
         guard !stopped, enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character access revoked") }
-        if ["private_memory_update", "public_record_update"].contains(name) {
+        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct"].contains(name) {
             guard let topic, !topic.cancelled, topic.speaker == actor else { throw NativeCompanionData.error("No active write context") }
         }
         switch name {
@@ -293,7 +302,29 @@ actor NativeCompanionRuntime {
         case "private_memory_read": return ["content": store.get("memory:\(actor)") as? String ?? ""]
         case "private_memory_update":
             guard let content = args["content"] as? String, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Memory exceeds 32 KB") }
-            try store.set("memory:\(actor)", NativeCompanionData.clean(content, limit: 32768)); try store.exportNotes(); return ["updated": true]
+            let cleaned = NativeCompanionData.clean(content, limit: 32768)
+            try store.set("memory:\(actor)", cleaned)
+            _ = try? store.memoryWrite(owner: actor, type: "diary", provenance: "character_edit", content: cleaned)
+            try store.exportNotes(); return ["updated": true]
+        case "memory_search":
+            let query = args["query"] as? String ?? ""
+            let types = (args["types"] as? String ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let limit = Int(args["limit"] as? String ?? "20") ?? 20
+            return ["memories": try store.memorySearch(owner: actor, query: query, types: types, limit: limit)]
+        case "memory_read":
+            guard let memoryID = args["memoryId"] as? String, let memory = try store.memoryRead(memoryID, owner: actor) else { throw NativeCompanionData.error("Memory not found or not accessible") }
+            return memory
+        case "memory_write":
+            guard let type = args["type"] as? String, let content = args["content"] as? String else { throw NativeCompanionData.error("Memory type and content are required") }
+            let evidence = (args["evidenceIds"] as? String ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let source = args["source"] as? String ?? "experienced"
+            let allowed = ["experienced", "observed", "told_by_other", "world_seed", "imported", "inferred", "user_persona_edit"]
+            guard allowed.contains(source) else { throw NativeCompanionData.error("Unsupported memory provenance") }
+            return try store.memoryWrite(owner: actor, type: type, provenance: source, content: content, evidenceIDs: evidence)
+        case "memory_correct":
+            guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
+                  let expected = Int(args["expectedRevision"] as? String ?? "") else { throw NativeCompanionData.error("Memory correction requires ID, content and revision") }
+            return try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
         case "companion_send_message":
             guard let topic, !topic.cancelled, topic.speaker == actor, let to = args["to"] as? String, to != actor, visible.contains(where: { $0["id"] as? String == to }) else { throw NativeCompanionData.error("No available recipient or topic") }
             guard let raw = args["text"] as? String, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, raw.count <= 300, topic.utterances + topic.queue.count < 4 else { throw NativeCompanionData.error("Message or topic limit exceeded") }
@@ -345,6 +376,12 @@ actor NativeCompanionRuntime {
                 else if scope == "public" { try store.execute("DELETE FROM records"); try store.execute("DELETE FROM changes") }
                 else if NativeCompanionData.validID(scope) { try store.set("memory:\(scope)", ""); try store.set("session:\(scope)", NSNull()); await roles.forget(scope) }
                 try store.exportNotes(); emit("history", ["history": try store.history()]); emit("records", ["records": try store.records()])
+            case "persona":
+                guard let id = command["characterId"] as? String, NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
+                let file = root.appendingPathComponent("characters/\(id)/persona.md")
+                guard let markdown = try? String(contentsOf: file, encoding: .utf8) else { throw NativeCompanionData.error("Persona is unavailable") }
+                let view = try store.runtimePersona(characterID: id, markdown: markdown)
+                emit("persona", ["characterId": id, "content": view, "identityRevision": (try store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0])
             default: throw NativeCompanionData.error("Unknown host command")
             }
         } catch { emit("error", ["requestType": command["type"] ?? "", "message": NativeCompanionData.clean(error.localizedDescription, limit: 240)]) }

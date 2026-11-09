@@ -98,6 +98,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var roleErrors: [String: String] = [:]
     @Published var records: [[String: String]] = []
     @Published var memoryContents: [String: String] = [:]
+    @Published var personaViews: [String: String] = [:]
     private var runtime: NativeCompanionRuntime?
     private var closingRuntime: Task<Void, Never>?
     private var runtimeGeneration = UUID()
@@ -400,6 +401,12 @@ final class CompanionCoordinator: ObservableObject {
         if type == "history" { loadHistory(event) }
         if type == "records" { records = event["records"] as? [[String: String]] ?? [] }
         if type == "memory", let id = event["characterId"] as? String, let content = event["content"] as? String { memoryContents[id] = content }
+        if type == "persona", let id = event["characterId"] as? String, let content = event["content"] as? String {
+            personaViews[id] = content
+            let file = root.appendingPathComponent("characters/\(id)/persona.generated.md")
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try? content.write(to: file, atomically: true, encoding: .utf8)
+        }
         if type == "error" {
             error = event["message"] as? String; append(event)
             if event["requestType"] as? String == "trigger" { busy = false }
@@ -644,6 +651,12 @@ final class CompanionCoordinator: ObservableObject {
         NSApp.activate(ignoringOtherApps: true); historyWindow?.makeKeyAndOrderFront(nil)
     }
     func exportMemory(_ id: UUID) { send(["type": "memory", "characterId": id.uuidString]) }
+    func showGeneratedPersona(_ id: UUID) {
+        if runtime == nil { reconcile(readOnly: true) }
+        send(["type": "persona", "characterId": id.uuidString])
+        let file = root.appendingPathComponent("characters/\(id.uuidString)/persona.generated.md")
+        if FileManager.default.fileExists(atPath: file.path) { NSWorkspace.shared.open(file) }
+    }
     private func stopProcess() {
         cancelPresentation(); runtimeGeneration = UUID()
         if let old = runtime {

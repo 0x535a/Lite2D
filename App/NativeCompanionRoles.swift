@@ -100,12 +100,13 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
               file.resolvingSymlinksInPath().deletingLastPathComponent() == directory.resolvingSymlinksInPath() else { throw NativeCompanionData.error("Persona must be regular Markdown under 64 KB") }
         let persona = try String(contentsOf: file, encoding: .utf8)
         guard !persona.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Persona is empty") }
-        let digest = NativeCompanionData.hash(prompt.system(persona: persona))
+        let runtimePersona = (try? store.runtimePersona(characterID: id, markdown: persona)) ?? persona
+        let digest = NativeCompanionData.hash(prompt.system(persona: runtimePersona))
         if let existing = instances[id], existing.digest == digest, existing.model == model { return existing }
         let hadInstance = instances[id] != nil
         let token = await register(id)
         let config: CompanionObject = ["default_agent": "companion", "permissions": Self.rules,
-            "agents": ["companion": ["mode": "primary", "system": prompt.system(persona: persona), "permissions": Self.rules, "steps": 6]],
+            "agents": ["companion": ["mode": "primary", "system": prompt.system(persona: runtimePersona), "permissions": Self.rules, "steps": 6]],
             "mcp": ["companion": ["type": "local", "command": [helper, "--companion-mcp"], "codemode": false,
                 "environment": ["LITE2D_TOOL_ENDPOINT": toolEndpoint.absoluteString, "LITE2D_TOOL_TOKEN": token, "LITE2D_PROMPT_PATH": promptFile.path]]],
             "plugins": [], "snapshots": false]

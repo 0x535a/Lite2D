@@ -232,6 +232,7 @@
 "companion.edit_persona" = "编辑 Markdown";
 "companion.personality" = "人格";
 "companion.persona_help" = "提供一份 UTF-8 Markdown 描述性格、兴趣和说话方式。文件复制到此模型实例的独立目录，编辑后下一回合生效。";
+"companion.generated_persona" = "打开生成的人设";
 "companion.invalid_persona" = "请选择非空且不超过 64 KB 的 UTF-8 Markdown 文件。";
 "companion.gaze" = "交流时注视对方";
 "companion.continuity" = "交流";

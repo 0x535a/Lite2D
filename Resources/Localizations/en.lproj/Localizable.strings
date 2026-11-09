@@ -232,6 +232,7 @@
 "companion.edit_persona" = "Edit Markdown";
 "companion.personality" = "Personality";
 "companion.persona_help" = "Choose a UTF-8 Markdown file describing personality, interests and speaking style. A private copy belongs to this model instance. Edits apply to the next turn.";
+"companion.generated_persona" = "Open Generated Persona";
 "companion.invalid_persona" = "Choose a nonempty UTF-8 Markdown file under 64 KB.";
 "companion.gaze" = "Look at each other during conversations";
 "companion.continuity" = "Conversation";

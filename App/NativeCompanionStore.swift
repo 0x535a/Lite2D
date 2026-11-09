@@ -74,6 +74,13 @@ final class NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS changes(id INTEGER PRIMARY KEY,at TEXT,actor TEXT,path TEXT,before_revision TEXT,revision TEXT,content TEXT)",
             "CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,topic TEXT,sender TEXT,recipient TEXT,text TEXT,status TEXT,remote_id TEXT,at TEXT)",
             "CREATE TABLE IF NOT EXISTS requests(at INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS persona_revisions(id TEXT PRIMARY KEY,character_id TEXT NOT NULL,revision INTEGER NOT NULL,raw_hash TEXT NOT NULL,base_hash TEXT,markdown TEXT NOT NULL,actor TEXT NOT NULL,source_kind TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS persona_revisions_character_revision ON persona_revisions(character_id,revision)",
+            "CREATE TABLE IF NOT EXISTS persona_claims(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,character_id TEXT NOT NULL,field TEXT NOT NULL,value TEXT NOT NULL,kind TEXT NOT NULL,provenance TEXT NOT NULL,confidence REAL NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS persona_claims_character ON persona_claims(character_id,status)",
+            "CREATE TABLE IF NOT EXISTS persona_views(character_id TEXT NOT NULL,view_kind TEXT NOT NULL,content TEXT NOT NULL,content_hash TEXT NOT NULL,identity_revision TEXT NOT NULL,memory_cursor TEXT,generated_at TEXT NOT NULL,PRIMARY KEY(character_id,view_kind))",
+            "CREATE TABLE IF NOT EXISTS memory_items(id TEXT PRIMARY KEY,owner_character_id TEXT NOT NULL,memory_type TEXT NOT NULL,scope TEXT NOT NULL,provenance TEXT NOT NULL,content TEXT NOT NULL,evidence_ids TEXT NOT NULL,source_actor_id TEXT,revision INTEGER NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,supersedes_id TEXT)",
+            "CREATE INDEX IF NOT EXISTS memory_items_owner_status ON memory_items(owner_character_id,status)",
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
     }
@@ -123,6 +130,78 @@ final class NativeCompanionStore {
         return try? NativeCompanionData.decode(data)
     }
     func set(_ key: String, _ value: Any) throws { try execute("INSERT OR REPLACE INTO state VALUES (?,?)", [key, NativeCompanionData.string(value)]) }
+
+    func ingestPersona(characterID: String, markdown: String, actor: String = "user", sourceKind: String = "user_persona_edit") throws -> CompanionObject {
+        guard NativeCompanionData.validID(characterID), !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Invalid Persona") }
+        let hash = NativeCompanionData.hash(markdown), now = NativeCompanionData.iso()
+        if let existing = try rows("SELECT id,revision,raw_hash FROM persona_revisions WHERE character_id=? AND raw_hash=? ORDER BY revision DESC LIMIT 1", [characterID, hash]).first {
+            return ["revisionId": existing["id"] ?? "", "revision": existing["revision"] ?? 0, "hash": hash, "unchanged": true]
+        }
+        let previous = try rows("SELECT revision,raw_hash FROM persona_revisions WHERE character_id=? ORDER BY revision DESC LIMIT 1", [characterID]).first
+        let revision = (previous?["revision"] as? Int ?? 0) + 1
+        let id = UUID().uuidString
+        try execute("INSERT INTO persona_revisions VALUES (?,?,?,?,?,?,?,?,?)", [id, characterID, revision, hash, previous?["raw_hash"], markdown, actor, sourceKind, now])
+        for claim in NativePersonaMemory.claims(markdown) {
+            try execute("INSERT INTO persona_claims VALUES (?,?,?,?,?,?,?,?,?,?)", [UUID().uuidString, id, characterID, claim.field, claim.value, claim.kind, sourceKind, claim.confidence, "active", now])
+        }
+        return ["revisionId": id, "revision": revision, "hash": hash, "unchanged": false]
+    }
+
+    func latestPersona(characterID: String) throws -> CompanionObject? {
+        try rows("SELECT id,character_id,revision,raw_hash,base_hash,markdown,actor,source_kind,created_at FROM persona_revisions WHERE character_id=? ORDER BY revision DESC LIMIT 1", [characterID]).first
+    }
+
+    func personaClaims(characterID: String) throws -> [CompanionObject] {
+        guard let latest = try latestPersona(characterID: characterID), let revisionID = latest["id"] as? String else { return [] }
+        return try rows("SELECT field,value,kind,provenance,confidence,status FROM persona_claims WHERE revision_id=? AND status='active' ORDER BY id", [revisionID])
+    }
+
+    func publicIdentityCard(characterID: String, name: String) throws -> CompanionObject {
+        guard let persona = try latestPersona(characterID: characterID), let markdown = persona["markdown"] as? String else {
+            return ["id": characterID, "name": name, "identityRevision": 0, "confirmed": "", "unknown": "没有公开 Persona 资料；不要根据名字或玩笑推断身份。", "provenance": "missing"]
+        }
+        let revision = String(persona["revision"] as? Int ?? 0)
+        return NativePersonaMemory.publicCard(characterID: characterID, name: name, markdown: markdown, revision: revision)
+    }
+
+    func runtimePersona(characterID: String, markdown: String) throws -> String {
+        let revision = try ingestPersona(characterID: characterID, markdown: markdown)["revision"] as? Int ?? 1
+        let claims = try personaClaims(characterID: characterID).compactMap { row -> NativePersonaClaim? in
+            guard let field = row["field"] as? String, let value = row["value"] as? String, let kind = row["kind"] as? String else { return nil }
+            return NativePersonaClaim(field: field, value: value, kind: kind, confidence: row["confidence"] as? Double ?? 1)
+        }
+        let view = NativePersonaMemory.runtimeView(markdown: markdown, revision: String(revision), managed: claims)
+        try execute("INSERT OR REPLACE INTO persona_views VALUES (?,?,?,?,?,?,?)", [characterID, "runtime", view, NativeCompanionData.hash(view), String(revision), nil, NativeCompanionData.iso()])
+        return view
+    }
+
+    @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil) throws -> CompanionObject {
+        guard NativeCompanionData.validID(owner), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Invalid memory") }
+        let id = UUID().uuidString, now = NativeCompanionData.iso()
+        try execute("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [id, owner, type, scope, provenance, NativeCompanionData.clean(content, limit: 32768), NativeCompanionData.string(evidenceIDs), sourceActorID, 1, "active", now, now, supersedesID])
+        return ["memoryId": id, "revision": 1, "status": "active"]
+    }
+
+    func memorySearch(owner: String, query: String, types: [String] = [], limit: Int = 20) throws -> [CompanionObject] {
+        let safeLimit = min(max(limit, 1), 100)
+        var sql = "SELECT id,memory_type,scope,provenance,content,evidence_ids,source_actor_id,revision,status,created_at,updated_at,supersedes_id FROM memory_items WHERE owner_character_id=? AND status='active'"
+        var args: [Any?] = [owner]
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { sql += " AND content LIKE ?"; args.append("%\(query.replacingOccurrences(of: "%", with: ""))%") }
+        if !types.isEmpty { sql += " AND memory_type IN (" + Array(repeating: "?", count: types.count).joined(separator: ",") + ")"; args.append(contentsOf: types) }
+        sql += " ORDER BY updated_at DESC LIMIT ?"; args.append(safeLimit)
+        return try rows(sql, args)
+    }
+
+    func memoryRead(_ id: String, owner: String) throws -> CompanionObject? {
+        try rows("SELECT id,memory_type,scope,provenance,content,evidence_ids,source_actor_id,revision,status,created_at,updated_at,supersedes_id FROM memory_items WHERE id=? AND owner_character_id=? AND status='active'", [id, owner]).first
+    }
+
+    func memoryCorrect(_ id: String, owner: String, content: String, expectedRevision: Int, reason: String) throws -> CompanionObject {
+        guard let old = try memoryRead(id, owner: owner), let revision = old["revision"] as? Int, revision == expectedRevision else { return ["conflict": true] }
+        let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id)
+        try execute("UPDATE memory_items SET status='superseded',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
+        var result = next; result["reason"] = reason; result["supersedesId"] = id; return result
+    }
     func event(_ type: String, _ payload: CompanionObject) throws -> CompanionObject {
         lock.lock(); defer { lock.unlock() }
         let at = NativeCompanionData.iso()

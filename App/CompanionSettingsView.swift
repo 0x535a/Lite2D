@@ -13,7 +13,10 @@ struct CompanionRoleSections: View {
             LabeledContent {
                 HStack {
                     Button(companion.hasPersona(id) ? L10n.text("companion.replace_persona") : L10n.text("companion.import_persona")) { companion.importPersona(id) }
-                    if companion.hasPersona(id) { Button(L10n.text("companion.edit_persona")) { companion.editPersona(id) } }
+                    if companion.hasPersona(id) {
+                        Button(L10n.text("companion.edit_persona")) { companion.editPersona(id) }
+                        Button(L10n.text("companion.generated_persona")) { companion.showGeneratedPersona(id) }
+                    }
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
