@@ -269,7 +269,7 @@ actor NativeCompanionRuntime {
         guard let actor = tokens[token], enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character is paused or unauthenticated") }
         try await roles.reserveContinuation(actor)
         guard !stopped, enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character access revoked") }
-        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct"].contains(name) {
+        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct", "memory_forget"].contains(name) {
             guard let topic, !topic.cancelled, topic.speaker == actor else { throw NativeCompanionData.error("No active write context") }
         }
         switch name {
@@ -325,6 +325,9 @@ actor NativeCompanionRuntime {
             guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
                   let expected = Int(args["expectedRevision"] as? String ?? "") else { throw NativeCompanionData.error("Memory correction requires ID, content and revision") }
             return try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
+        case "memory_forget":
+            guard let memoryID = args["memoryId"] as? String else { throw NativeCompanionData.error("Memory ID is required") }
+            return ["forgotten": try store.forgetMemory(memoryID, owner: actor)]
         case "relation_get":
             guard let target = args["targetCharacterId"] as? String, NativeCompanionData.validID(target), target != actor,
                   characters.contains(where: { $0["id"] as? String == target && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Relationship target is unavailable") }
@@ -378,7 +381,7 @@ actor NativeCompanionRuntime {
                 stop(); await roles.interrupt(); let scope = command["scope"] as? String ?? ""
                 if scope == "history" { try store.execute("DELETE FROM events"); try store.execute("DELETE FROM deliveries") }
                 else if scope == "public" { try store.execute("DELETE FROM records"); try store.execute("DELETE FROM changes") }
-                else if NativeCompanionData.validID(scope) { try store.set("memory:\(scope)", ""); try store.set("session:\(scope)", NSNull()); await roles.forget(scope) }
+                else if NativeCompanionData.validID(scope) { try store.forgetCharacter(scope); try store.set("session:\(scope)", NSNull()); await roles.forget(scope) }
                 try store.exportNotes(); emit("history", ["history": try store.history()]); emit("records", ["records": try store.records()])
             case "persona":
                 guard let id = command["characterId"] as? String, NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }

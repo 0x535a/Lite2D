@@ -61,6 +61,7 @@ final class NativeCompanionStore {
     private var database: OpaquePointer?
     private let lock = NSRecursiveLock()
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    private var ftsAvailable = false
     init(root: URL) throws {
         self.root = root
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -86,6 +87,10 @@ final class NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS seed_batches(id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE NOT NULL,world_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
+        do {
+            try execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED,owner_character_id UNINDEXED,content)")
+            ftsAvailable = true
+        } catch { ftsAvailable = false }
         try backfillLegacyMemories()
     }
     deinit { sqlite3_close(database) }
@@ -201,7 +206,9 @@ final class NativeCompanionStore {
     @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil) throws -> CompanionObject {
         guard NativeCompanionData.validID(owner), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Invalid memory") }
         let id = UUID().uuidString, now = NativeCompanionData.iso()
-        try execute("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [id, owner, type, scope, provenance, NativeCompanionData.clean(content, limit: 32768), NativeCompanionData.string(evidenceIDs), sourceActorID, 1, "active", now, now, supersedesID])
+        let cleaned = NativeCompanionData.clean(content, limit: 32768)
+        try execute("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [id, owner, type, scope, provenance, cleaned, NativeCompanionData.string(evidenceIDs), sourceActorID, 1, "active", now, now, supersedesID])
+        if ftsAvailable { try? execute("INSERT INTO memory_fts(memory_id,owner_character_id,content) VALUES (?,?,?)", [id, owner, cleaned]) }
         return ["memoryId": id, "revision": 1, "status": "active"]
     }
 
@@ -209,6 +216,15 @@ final class NativeCompanionStore {
         let safeLimit = min(max(limit, 1), 100)
         var sql = "SELECT id,memory_type,scope,provenance,content,evidence_ids,source_actor_id,revision,status,created_at,updated_at,supersedes_id FROM memory_items WHERE owner_character_id=? AND status='active'"
         var args: [Any?] = [owner]
+        if ftsAvailable && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            do {
+                var ftsSQL = "SELECT m.id,m.memory_type,m.scope,m.provenance,m.content,m.evidence_ids,m.source_actor_id,m.revision,m.status,m.created_at,m.updated_at,m.supersedes_id FROM memory_items m JOIN memory_fts f ON f.memory_id=m.id WHERE m.owner_character_id=? AND m.status='active' AND f.owner_character_id=? AND f.content MATCH ?"
+                var ftsArgs: [Any?] = [owner, owner, query]
+                if !types.isEmpty { ftsSQL += " AND m.memory_type IN (" + Array(repeating: "?", count: types.count).joined(separator: ",") + ")"; ftsArgs.append(contentsOf: types) }
+                ftsSQL += " ORDER BY m.updated_at DESC LIMIT ?"; ftsArgs.append(safeLimit)
+                return try rows(ftsSQL, ftsArgs)
+            } catch { }
+        }
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { sql += " AND content LIKE ?"; args.append("%\(query.replacingOccurrences(of: "%", with: ""))%") }
         if !types.isEmpty { sql += " AND memory_type IN (" + Array(repeating: "?", count: types.count).joined(separator: ",") + ")"; args.append(contentsOf: types) }
         sql += " ORDER BY updated_at DESC LIMIT ?"; args.append(safeLimit)
@@ -224,6 +240,20 @@ final class NativeCompanionStore {
         let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id)
         try execute("UPDATE memory_items SET status='superseded',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
         var result = next; result["reason"] = reason; result["supersedesId"] = id; return result
+    }
+
+    @discardableResult func forgetMemory(_ id: String, owner: String) throws -> Bool {
+        guard try memoryRead(id, owner: owner) != nil else { return false }
+        try execute("UPDATE memory_items SET status='deleted',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
+        if ftsAvailable { try? execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
+        return true
+    }
+
+    func forgetCharacter(_ owner: String) throws {
+        try execute("UPDATE memory_items SET status='deleted',updated_at=? WHERE owner_character_id=? AND status='active'", [NativeCompanionData.iso(), owner])
+        if ftsAvailable { try? execute("DELETE FROM memory_fts WHERE owner_character_id=?", [owner]) }
+        try set("memory:\(owner)", "")
+        try execute("UPDATE relations SET status='archived',updated_at=? WHERE observer_character_id=? OR target_character_id=?", [NativeCompanionData.iso(), owner, owner])
     }
 
     func relationGet(observer: String, target: String) throws -> CompanionObject? {
