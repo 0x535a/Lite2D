@@ -351,3 +351,14 @@
 "companion.search_tools" = "検索ツール";
 "companion.web_search" = "キャラクターのウェブ検索を許可";
 "companion.web_search_help" = "検索内容は Exa に送信されます。ウェブ検索のみを許可し、他の外部 MCP ツールはブロックします。キャラクター同士の会話と記憶ツールは引き続き利用できます。オフにすると実行中の検索をキャンセルし、新しい検索を即座にブロックします。";
+
+"companion.structured_memory" = "構造化メモリ";
+"companion.search_memory" = "メモリを検索";
+"companion.reflect_preview" = "統合をプレビュー";
+"companion.forget_item" = "このメモリを忘れる";
+"companion.reflection" = "振り返り";
+"companion.growth" = "成長の提案";
+"companion.approve" = "承認";
+"companion.rollback" = "変更を取り消す";
+"companion.close_memory" = "閉じる";
+"companion.growth_help" = "統合はモデルを起動せず、確認可能な根拠の要約を作成します。成長には直接の根拠、日次制限、承認が必要です。削除はローカル本文と派生要約が対象です。外部履歴とバックアップは別途保持されます。";

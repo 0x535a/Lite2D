@@ -351,3 +351,14 @@
 "companion.search_tools" = "Search tools";
 "companion.web_search" = "Allow characters to search the web";
 "companion.web_search_help" = "Search queries are sent to Exa. Only web search is exposed; other third-party MCP tools remain blocked. Character messaging and memory tools stay available. Turning this off cancels active searches and blocks new searches immediately.";
+
+"companion.structured_memory" = "Structured memories";
+"companion.search_memory" = "Search memories";
+"companion.reflect_preview" = "Preview consolidation";
+"companion.forget_item" = "Forget this memory";
+"companion.reflection" = "Reflection";
+"companion.growth" = "Growth proposal";
+"companion.approve" = "Approve";
+"companion.rollback" = "Roll back";
+"companion.close_memory" = "Close";
+"companion.growth_help" = "Consolidation creates a reviewable evidence summary without waking a model. Growth requires direct sources, daily limits and approval. Forgetting removes local text and derived summaries; external history and backups have separate retention.";

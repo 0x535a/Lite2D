@@ -68,6 +68,8 @@ final class NativeCompanionStore {
         guard sqlite3_open_v2(root.appendingPathComponent("state.sqlite").path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else { throw NativeCompanionData.error("Cannot open Companion database") }
         sqlite3_busy_timeout(database, 3000)
         try execute("PRAGMA journal_mode=WAL")
+        try execute("PRAGMA secure_delete=ON")
+        try execute("PRAGMA foreign_keys=ON")
         for sql in [
             "CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,at TEXT NOT NULL,type TEXT NOT NULL,payload TEXT NOT NULL)",
@@ -85,6 +87,13 @@ final class NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS world_events(id TEXT PRIMARY KEY,world_id TEXT NOT NULL,event_type TEXT NOT NULL,happened_at TEXT,source_kind TEXT NOT NULL,synthetic INTEGER NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS relations(id TEXT PRIMARY KEY,observer_character_id TEXT NOT NULL,target_character_id TEXT NOT NULL,role TEXT,trust REAL NOT NULL,familiarity REAL NOT NULL,closeness REAL NOT NULL,impression TEXT,evidence_ids TEXT NOT NULL,seed_batch_id TEXT,revision INTEGER NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(observer_character_id,target_character_id))",
             "CREATE TABLE IF NOT EXISTS seed_batches(id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE NOT NULL,world_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS reflection_jobs(id TEXT PRIMARY KEY,owner_character_id TEXT NOT NULL,status TEXT NOT NULL,evidence_ids TEXT NOT NULL,proposed_content TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS reflection_jobs_owner_status ON reflection_jobs(owner_character_id,status)",
+            "CREATE TABLE IF NOT EXISTS seed_relation_backups(batch_id TEXT NOT NULL,observer TEXT NOT NULL,target TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(batch_id,observer,target))",
+            "CREATE TABLE IF NOT EXISTS memory_dependencies(memory_id TEXT NOT NULL,evidence_id TEXT NOT NULL,PRIMARY KEY(memory_id,evidence_id))",
+            "CREATE TABLE IF NOT EXISTS memory_audit(id TEXT PRIMARY KEY,owner TEXT NOT NULL,operation TEXT NOT NULL,target TEXT NOT NULL,at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS growth_jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,target TEXT,field TEXT NOT NULL,old_value REAL NOT NULL,new_value REAL NOT NULL,evidence_ids TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL,base_revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS traits(owner TEXT NOT NULL,field TEXT NOT NULL,value REAL NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(owner,field))",
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
         do {
@@ -94,6 +103,29 @@ final class NativeCompanionStore {
         try backfillLegacyMemories()
     }
     deinit { sqlite3_close(database) }
+    // Hold the recursive lock for the entire transaction, including reads and CAS.
+    func transaction<T>(_ body: () throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        let nested = sqlite3_get_autocommit(database) == 0
+        let savepoint = "sp_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        try execute(nested ? "SAVEPOINT \(savepoint)" : "BEGIN IMMEDIATE")
+        do {
+            let result = try body()
+            try execute(nested ? "RELEASE SAVEPOINT \(savepoint)" : "COMMIT")
+            return result
+        } catch {
+            if nested { try? execute("ROLLBACK TO SAVEPOINT \(savepoint)"); try? execute("RELEASE SAVEPOINT \(savepoint)") }
+            else { try? execute("ROLLBACK") }
+            throw error
+        }
+    }
+    func audit(owner: String, operation: String, target: String) throws {
+        try execute("INSERT INTO memory_audit VALUES (?,?,?,?,?)", [UUID().uuidString, owner, operation, target, NativeCompanionData.iso()])
+    }
+    func evidenceIDs(_ row: CompanionObject) -> [String] {
+        guard let value = row["evidence_ids"] as? String, let data = value.data(using: .utf8) else { return [] }
+        return (try? NativeCompanionData.decode(data)) as? [String] ?? []
+    }
     private func statement(_ sql: String, _ args: [Any?]) throws -> OpaquePointer {
         var result: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &result, nil) == SQLITE_OK, let result else { throw NativeCompanionData.error("Companion database query failed: \(String(cString: sqlite3_errmsg(database))) SQL=\(sql)") }
@@ -152,18 +184,22 @@ final class NativeCompanionStore {
 
     func ingestPersona(characterID: String, markdown: String, actor: String = "user", sourceKind: String = "user_persona_edit") throws -> CompanionObject {
         guard NativeCompanionData.validID(characterID), !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Invalid Persona") }
+        return try transaction {
         let hash = NativeCompanionData.hash(markdown), now = NativeCompanionData.iso()
-        if let existing = try rows("SELECT id,revision,raw_hash FROM persona_revisions WHERE character_id=? AND raw_hash=? ORDER BY revision DESC LIMIT 1", [characterID, hash]).first {
+        if let existing = try latestPersona(characterID: characterID), existing["raw_hash"] as? String == hash {
             return ["revisionId": existing["id"] ?? "", "revision": existing["revision"] ?? 0, "hash": hash, "unchanged": true]
         }
         let previous = try rows("SELECT revision,raw_hash FROM persona_revisions WHERE character_id=? ORDER BY revision DESC LIMIT 1", [characterID]).first
         let revision = (previous?["revision"] as? Int ?? 0) + 1
         let id = UUID().uuidString
         try execute("INSERT INTO persona_revisions VALUES (?,?,?,?,?,?,?,?,?)", [id, characterID, revision, hash, previous?["raw_hash"], markdown, actor, sourceKind, now])
+        try execute("UPDATE persona_claims SET status='superseded' WHERE character_id=? AND status='active'", [characterID])
         for claim in NativePersonaMemory.claims(markdown) {
             try execute("INSERT INTO persona_claims VALUES (?,?,?,?,?,?,?,?,?,?)", [UUID().uuidString, id, characterID, claim.field, claim.value, claim.kind, sourceKind, claim.confidence, "active", now])
         }
+        try audit(owner: characterID, operation: "persona.revision", target: id)
         return ["revisionId": id, "revision": revision, "hash": hash, "unchanged": false]
+        }
     }
 
     func latestPersona(characterID: String) throws -> CompanionObject? {
@@ -176,7 +212,7 @@ final class NativeCompanionStore {
         let oldClaims = try personaClaims(characterID: characterID)
         let oldHash = current?["raw_hash"] as? String ?? ""
         let nextHash = NativeCompanionData.hash(markdown)
-        return ["characterId": characterID, "baseRevision": current?["revision"] ?? 0, "baseHash": oldHash, "nextHash": nextHash, "changed": oldHash != nextHash, "oldClaims": oldClaims, "newClaims": nextClaims, "conflicts": []]
+        return ["characterId": characterID, "baseRevision": current?["revision"] ?? 0, "baseHash": oldHash, "nextHash": nextHash, "changed": oldHash != nextHash, "oldClaims": oldClaims, "newClaims": nextClaims, "conflicts": nextClaims.filter { next in oldClaims.contains { $0["field"] as? String == next["field"] as? String && $0["value"] as? String != next["value"] as? String } }]
     }
 
     func personaClaims(characterID: String) throws -> [CompanionObject] {
@@ -198,18 +234,24 @@ final class NativeCompanionStore {
             guard let field = row["field"] as? String, let value = row["value"] as? String, let kind = row["kind"] as? String else { return nil }
             return NativePersonaClaim(field: field, value: value, kind: kind, confidence: row["confidence"] as? Double ?? 1)
         }
-        let view = NativePersonaMemory.runtimeView(markdown: markdown, revision: String(revision), managed: claims)
+        let base = NativePersonaMemory.runtimeView(markdown: markdown, revision: String(revision), managed: claims)
+        let memories = try memorySearch(owner: characterID, query: "", types: ["belief", "habit", "skill", "reflection", "opinion"], limit: 6)
+        let derived = memories.map { "- [\($0["id"] as? String ?? "")] source=\($0["provenance"] as? String ?? ""), evidence=\($0["evidence_ids"] as? String ?? "[]"): \(String(($0["content"] as? String ?? "").prefix(400)))" }.joined(separator: "\n")
+        let view = base + (derived.isEmpty ? "" : "\n\n## Derived continuity (controller_generated; not identity or independent evidence)\n" + derived)
         try execute("INSERT OR REPLACE INTO persona_views VALUES (?,?,?,?,?,?,?)", [characterID, "runtime", view, NativeCompanionData.hash(view), String(revision), nil, NativeCompanionData.iso()])
         return view
     }
 
     @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil) throws -> CompanionObject {
+        return try transaction {
         guard NativeCompanionData.validID(owner), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Invalid memory") }
         let id = UUID().uuidString, now = NativeCompanionData.iso()
         let cleaned = NativeCompanionData.clean(content, limit: 32768)
         try execute("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [id, owner, type, scope, provenance, cleaned, NativeCompanionData.string(evidenceIDs), sourceActorID, 1, "active", now, now, supersedesID])
-        if ftsAvailable { try? execute("INSERT INTO memory_fts(memory_id,owner_character_id,content) VALUES (?,?,?)", [id, owner, cleaned]) }
+        if ftsAvailable { try execute("INSERT INTO memory_fts(memory_id,owner_character_id,content) VALUES (?,?,?)", [id, owner, cleaned]) }
+        for evidence in Set(evidenceIDs) { try execute("INSERT INTO memory_dependencies VALUES (?,?)", [id, evidence]) }
         return ["memoryId": id, "revision": 1, "status": "active"]
+        }
     }
 
     func memorySearch(owner: String, query: String, types: [String] = [], limit: Int = 20) throws -> [CompanionObject] {
@@ -236,24 +278,195 @@ final class NativeCompanionStore {
     }
 
     func memoryCorrect(_ id: String, owner: String, content: String, expectedRevision: Int, reason: String) throws -> CompanionObject {
+        return try transaction {
         guard let old = try memoryRead(id, owner: owner), let revision = old["revision"] as? Int, revision == expectedRevision else { return ["conflict": true] }
         let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id)
         try execute("UPDATE memory_items SET status='superseded',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
-        var result = next; result["reason"] = reason; result["supersedesId"] = id; return result
+        try invalidateDependents(of: [id], owner: owner)
+        try audit(owner: owner, operation: "memory.correct", target: id)
+        var result = next; result["reason"] = NativeCompanionData.clean(reason); result["supersedesId"] = id; return result
+        }
+    }
+
+    // Invalidation traverses explicit dependencies; derived text must never outlive its evidence.
+    func invalidateDependents(of ids: [String], owner: String) throws {
+        var pending = ids, seen = Set(ids)
+        while !pending.isEmpty {
+            let source = pending.removeFirst()
+            for row in try rows("SELECT m.id FROM memory_items m JOIN memory_dependencies d ON d.memory_id=m.id WHERE d.evidence_id=? AND m.owner_character_id=? AND m.status='active' AND m.supersedes_id IS NULL", [source, owner]) {
+                if let id = row["id"] as? String, seen.insert(id).inserted {
+                    try execute("UPDATE memory_items SET status='needs_review',content='',updated_at=? WHERE id=?", [NativeCompanionData.iso(), id])
+                    if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
+                    pending.append(id)
+                }
+            }
+        }
+        // Purge only jobs using the affected evidence, not unrelated reflections.
+        for job in try rows("SELECT * FROM reflection_jobs WHERE owner_character_id=? AND status IN ('preview','committed')", [owner]) where !Set(evidenceIDs(job)).isDisjoint(with: seen) {
+            try execute("UPDATE reflection_jobs SET status='invalidated',proposed_content='' WHERE id=?", [job["id"]])
+        }
+        for job in try rows("SELECT * FROM growth_jobs WHERE owner=? AND status IN ('preview','committed')", [owner]) where !Set(evidenceIDs(job)).isDisjoint(with: seen) {
+            if job["status"] as? String == "committed" {
+                do { _ = try rollbackGrowth(owner: owner, jobID: job["id"] as? String ?? "") }
+                catch {
+                    if let target = job["target"] as? String { try execute("UPDATE relations SET status='needs_review' WHERE observer_character_id=? AND target_character_id=?", [owner, target]) }
+                }
+            }
+            try execute("UPDATE growth_jobs SET status='needs_review',reason='' WHERE id=?", [job["id"]])
+        }
+        try execute("DELETE FROM persona_views WHERE character_id=?", [owner])
+        let generated = root.appendingPathComponent("characters/\(owner)/persona.generated.md")
+        try? FileManager.default.removeItem(at: generated)
     }
 
     @discardableResult func forgetMemory(_ id: String, owner: String) throws -> Bool {
-        guard try memoryRead(id, owner: owner) != nil else { return false }
-        try execute("UPDATE memory_items SET status='deleted',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
-        if ftsAvailable { try? execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
-        return true
+        try transaction {
+            guard try rows("SELECT id FROM memory_items WHERE id=? AND owner_character_id=? AND status!='deleted'", [id, owner]).first != nil else { return false }
+            try invalidateDependents(of: [id], owner: owner)
+            try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
+            if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
+            try set("memory:\(owner)", "")
+            try audit(owner: owner, operation: "memory.forget", target: id)
+            return true
+        }
     }
 
     func forgetCharacter(_ owner: String) throws {
-        try execute("UPDATE memory_items SET status='deleted',updated_at=? WHERE owner_character_id=? AND status='active'", [NativeCompanionData.iso(), owner])
-        if ftsAvailable { try? execute("DELETE FROM memory_fts WHERE owner_character_id=?", [owner]) }
-        try set("memory:\(owner)", "")
-        try execute("UPDATE relations SET status='archived',updated_at=? WHERE observer_character_id=? OR target_character_id=?", [NativeCompanionData.iso(), owner, owner])
+        try transaction {
+            try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE owner_character_id=?", [NativeCompanionData.iso(), owner])
+            if ftsAvailable { try execute("DELETE FROM memory_fts WHERE owner_character_id=?", [owner]) }
+            try set("memory:\(owner)", "")
+            try set("legacyMigrated:\(owner)", true)
+            try execute("UPDATE reflection_jobs SET status='invalidated',proposed_content='' WHERE owner_character_id=?", [owner])
+            try execute("UPDATE growth_jobs SET status='invalidated',reason='' WHERE owner=?", [owner])
+            try execute("DELETE FROM traits WHERE owner=?", [owner])
+            try execute("DELETE FROM persona_views WHERE character_id=?", [owner])
+            try execute("UPDATE relations SET status='archived',impression='',updated_at=? WHERE observer_character_id=? OR target_character_id=?", [NativeCompanionData.iso(), owner, owner])
+            try audit(owner: owner, operation: "character.forget", target: owner)
+        }
+    }
+
+    // Only direct, active sources belonging to this actor qualify as growth evidence.
+    func verifiedEvidence(owner: String, ids: [String], minimum: Int = 1) throws -> [CompanionObject] {
+        let unique = Array(Set(ids)).sorted()
+        guard unique.count >= minimum, unique.count <= 20 else { throw NativeCompanionData.error("Independent evidence is required") }
+        return try unique.map { id in
+            guard let item = try memoryRead(id, owner: owner),
+                  ["experienced", "observed", "told_by_other"].contains(item["provenance"] as? String ?? ""),
+                  ["event", "fact"].contains(item["memory_type"] as? String ?? "") else { throw NativeCompanionData.error("Evidence is unavailable, synthetic or derived") }
+            return item
+        }
+    }
+
+    func reflectionPreview(owner: String, limit: Int = 20) throws -> [CompanionObject] {
+        try transaction {
+            let memories = try memorySearch(owner: owner, query: "", types: ["event", "fact"], limit: min(max(limit, 2), 20)).filter {
+                ["experienced", "observed", "told_by_other"].contains($0["provenance"] as? String ?? "")
+            }
+            guard memories.count >= 2 else { return [] }
+            let evidence = memories.compactMap { $0["id"] as? String }.sorted()
+            let encoded = NativeCompanionData.string(evidence)
+            if let existing = try rows("SELECT * FROM reflection_jobs WHERE owner_character_id=? AND evidence_ids=? AND status IN ('preview','committed','cancelled') ORDER BY created_at DESC LIMIT 1", [owner, encoded]).first { return [existing] }
+            let snippets = memories.map { "[\($0["id"] as? String ?? "")] (\($0["provenance"] as? String ?? "")) \(String(($0["content"] as? String ?? "").prefix(240)))" }
+            let content = "待审核的证据摘要（不是新的独立经历）：\n" + snippets.joined(separator: "\n")
+            let id = UUID().uuidString, now = NativeCompanionData.iso()
+            try execute("INSERT INTO reflection_jobs VALUES (?,?,?,?,?,?,?)", [id, owner, "preview", encoded, content, now, now])
+            return try rows("SELECT * FROM reflection_jobs WHERE id=?", [id])
+        }
+    }
+
+    func commitReflection(owner: String, jobID: String) throws -> CompanionObject {
+        try transaction {
+            guard let job = try rows("SELECT * FROM reflection_jobs WHERE id=? AND owner_character_id=? AND status='preview'", [jobID, owner]).first,
+                  let content = job["proposed_content"] as? String else { throw NativeCompanionData.error("Reflection job is unavailable") }
+            let ids = evidenceIDs(job)
+            _ = try verifiedEvidence(owner: owner, ids: ids, minimum: 2)
+            let result = try memoryWrite(owner: owner, type: "reflection", provenance: "inferred", content: content, evidenceIDs: ids)
+            try execute("UPDATE reflection_jobs SET status='committed',updated_at=? WHERE id=?", [NativeCompanionData.iso(), jobID])
+            try audit(owner: owner, operation: "reflection.commit", target: jobID)
+            var output = result; output["jobId"] = jobID; output["evidenceIds"] = ids; return output
+        }
+    }
+
+    func cancelReflection(owner: String, jobID: String) throws -> Bool {
+        try transaction {
+            guard let job = try rows("SELECT status FROM reflection_jobs WHERE id=? AND owner_character_id=?", [jobID, owner]).first, job["status"] as? String == "preview" else { return false }
+            try execute("UPDATE reflection_jobs SET status='cancelled',proposed_content='',updated_at=? WHERE id=?", [NativeCompanionData.iso(), jobID])
+            return true
+        }
+    }
+
+    // Proposals cannot change locked identity or policy. Explicit approval is a host-only operation.
+    func previewGrowth(owner: String, target: String? = nil, field: String, value: Double, evidence: [String], reason: String) throws -> CompanionObject {
+        try transaction {
+            guard value.isFinite, (0...1).contains(value), !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Growth needs a bounded value and reason") }
+            let sources = try verifiedEvidence(owner: owner, ids: evidence, minimum: 2)
+            let old: Double, revision: Int
+            if let target {
+                guard target != owner, NativeCompanionData.validID(target), ["trust", "familiarity", "closeness"].contains(field),
+                      sources.contains(where: { $0["source_actor_id"] as? String == target }),
+                      let relation = try relationGet(observer: owner, target: target) else { throw NativeCompanionData.error("Relationship growth requires evidence involving the target") }
+                old = (relation[field] as? NSNumber)?.doubleValue ?? 0.5; revision = relation["revision"] as? Int ?? 1
+            } else {
+                guard ["curiosity", "patience", "sociability", "carefulness"].contains(field) else { throw NativeCompanionData.error("Locked identity and policy are not growth fields") }
+                let trait = try rows("SELECT value,revision FROM traits WHERE owner=? AND field=?", [owner, field]).first
+                old = (trait?["value"] as? NSNumber)?.doubleValue ?? 0.5; revision = trait?["revision"] as? Int ?? 0
+            }
+            let cap = target == nil ? 0.05 : 0.1
+            guard abs(value - old) > 0.000001, abs(value - old) <= cap + 0.000001 else { throw NativeCompanionData.error("Growth exceeds the per-day change limit") }
+            let id = UUID().uuidString, now = NativeCompanionData.iso()
+            try execute("INSERT INTO growth_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [id, owner, target, field, old, value, NativeCompanionData.string(Array(Set(evidence)).sorted()), NativeCompanionData.clean(reason, limit: 2000), "preview", revision, now, now])
+            return try rows("SELECT * FROM growth_jobs WHERE id=?", [id]).first!
+        }
+    }
+
+    func commitGrowth(owner: String, jobID: String) throws -> CompanionObject {
+        try transaction {
+            guard let job = try rows("SELECT * FROM growth_jobs WHERE id=? AND owner=? AND status='preview'", [jobID, owner]).first,
+                  let field = job["field"] as? String, let old = job["old_value"] as? Double, let value = job["new_value"] as? Double,
+                  let revision = job["base_revision"] as? Int else { throw NativeCompanionData.error("Growth proposal is unavailable") }
+            let sources = try verifiedEvidence(owner: owner, ids: evidenceIDs(job), minimum: 2)
+            let target = job["target"] as? String
+            let date = String(NativeCompanionData.iso().prefix(10))
+            let spent = try rows("SELECT old_value,new_value FROM growth_jobs WHERE owner=? AND field=? AND COALESCE(target,'')=? AND status IN ('committed','rolled_back','needs_review') AND updated_at>=?", [owner, field, target ?? "", date]).reduce(0.0) { $0 + abs(($1["new_value"] as? Double ?? 0) - ($1["old_value"] as? Double ?? 0)) }
+            guard spent + abs(value - old) <= (target == nil ? 0.05 : 0.1) + 0.000001 else { throw NativeCompanionData.error("Daily growth allowance is exhausted") }
+            if let target {
+                guard sources.contains(where: { $0["source_actor_id"] as? String == target }), let current = try relationGet(observer: owner, target: target), current["revision"] as? Int == revision else { throw NativeCompanionData.error("Relationship changed; preview again") }
+                // field was validated at proposal creation; recheck before SQL interpolation.
+                guard ["trust", "familiarity", "closeness"].contains(field) else { throw NativeCompanionData.error("Invalid growth field") }
+                try execute("UPDATE relations SET \(field)=?,revision=revision+1,evidence_ids=?,updated_at=? WHERE observer_character_id=? AND target_character_id=?", [value, job["evidence_ids"], NativeCompanionData.iso(), owner, target])
+            } else {
+                let current = try rows("SELECT revision FROM traits WHERE owner=? AND field=?", [owner, field]).first?["revision"] as? Int ?? 0
+                guard current == revision else { throw NativeCompanionData.error("Trait changed; preview again") }
+                try execute("INSERT OR REPLACE INTO traits VALUES (?,?,?,?)", [owner, field, value, revision + 1])
+            }
+            try execute("UPDATE growth_jobs SET status='committed',updated_at=? WHERE id=?", [NativeCompanionData.iso(), jobID])
+            try audit(owner: owner, operation: "growth.commit", target: jobID)
+            return ["jobId": jobID, "status": "committed", "revision": revision + 1]
+        }
+    }
+
+    func rollbackGrowth(owner: String, jobID: String) throws -> CompanionObject {
+        try transaction {
+            guard let job = try rows("SELECT * FROM growth_jobs WHERE id=? AND owner=? AND status='committed'", [jobID, owner]).first,
+                  let field = job["field"] as? String, let old = job["old_value"] as? Double, let revision = job["base_revision"] as? Int else { throw NativeCompanionData.error("Committed growth is unavailable") }
+            if let target = job["target"] as? String {
+                guard ["trust", "familiarity", "closeness"].contains(field), let current = try relationGet(observer: owner, target: target), current["revision"] as? Int == revision + 1 else { throw NativeCompanionData.error("Later relationship changes require review") }
+                try execute("UPDATE relations SET \(field)=?,revision=revision+1,updated_at=? WHERE observer_character_id=? AND target_character_id=?", [old, NativeCompanionData.iso(), owner, target])
+            } else {
+                guard try rows("SELECT revision FROM traits WHERE owner=? AND field=?", [owner, field]).first?["revision"] as? Int == revision + 1 else { throw NativeCompanionData.error("Later trait changes require review") }
+                try execute("UPDATE traits SET value=?,revision=revision+1 WHERE owner=? AND field=?", [old, owner, field])
+            }
+            try execute("UPDATE growth_jobs SET status='rolled_back',updated_at=? WHERE id=?", [NativeCompanionData.iso(), jobID])
+            try audit(owner: owner, operation: "growth.rollback", target: jobID)
+            return ["jobId": jobID, "status": "rolled_back"]
+        }
+    }
+
+    func growthState(owner: String) throws -> CompanionObject {
+        ["traits": try rows("SELECT t.* FROM traits t WHERE owner=? AND NOT EXISTS (SELECT 1 FROM growth_jobs g WHERE g.owner=t.owner AND g.field=t.field AND g.target IS NULL AND g.status='needs_review')", [owner]),
+         "proposals": try rows("SELECT * FROM growth_jobs WHERE owner=? ORDER BY created_at DESC LIMIT 100", [owner]),
+         "reflections": try rows("SELECT * FROM reflection_jobs WHERE owner_character_id=? ORDER BY created_at DESC LIMIT 100", [owner])]
     }
 
     func relationGet(observer: String, target: String) throws -> CompanionObject? {
@@ -261,7 +474,7 @@ final class NativeCompanionStore {
     }
 
     func previewRelationshipBootstrap(worldID: String, participants: [String], premise: String, perspectives: CompanionObject, idempotencyKey: String) throws -> CompanionObject {
-        guard participants.count >= 2, participants.allSatisfy(NativeCompanionData.validID), !premise.isEmpty, !idempotencyKey.isEmpty else { throw NativeCompanionData.error("Invalid relationship seed") }
+        guard participants.count >= 2, participants.count <= 20, Set(participants).count == participants.count, participants.allSatisfy(NativeCompanionData.validID), !premise.isEmpty, !idempotencyKey.isEmpty else { throw NativeCompanionData.error("Invalid relationship seed") }
         if let existing = try rows("SELECT id,status,payload FROM seed_batches WHERE idempotency_key=?", [idempotencyKey]).first {
             return ["previewId": existing["id"] ?? "", "status": existing["status"] ?? "", "idempotent": true, "proposed": existing["payload"] ?? "{}"]
         }
@@ -276,16 +489,20 @@ final class NativeCompanionStore {
               let status = batch["status"] as? String, status == "preview",
               let payloadText = batch["payload"] as? String, let payloadData = payloadText.data(using: .utf8), let payload = try NativeCompanionData.decode(payloadData) as? CompanionObject,
               let participants = payload["participants"] as? [String] else { throw NativeCompanionData.error("Seed preview is unavailable or already committed") }
+        lock.lock(); defer { lock.unlock() }
         let now = NativeCompanionData.iso(), eventID = UUID().uuidString
         try execute("BEGIN IMMEDIATE")
         do {
             try execute("UPDATE seed_batches SET status='committing',updated_at=? WHERE id=?", [now, previewID])
-            let eventPayload: CompanionObject = ["premise": payload["premise"] ?? "", "participants": participants, "approvedBy": approvedBy]
+            let eventPayload: CompanionObject = ["premise": payload["premise"] ?? "", "participants": participants, "approvedBy": approvedBy, "seedBatchId": previewID]
             try execute("INSERT INTO world_events VALUES (?,?,?,?,?,?,?,?)", [eventID, batch["world_id"] ?? "", "relationship_bootstrap", now, "world_seed", 1, NativeCompanionData.string(eventPayload), now])
             let perspectives = NativeCompanionData.object(payload["perspectives"])
             for observer in participants {
-                let target = participants.first { $0 != observer } ?? observer
-                let view = NativeCompanionData.object(perspectives[observer])
+                for target in participants where target != observer {
+                let perspective = NativeCompanionData.object(perspectives[observer])
+                let view = participants.count == 2 && perspective["role"] != nil ? perspective : NativeCompanionData.object(perspective[target])
+                let previous = try rows("SELECT * FROM relations WHERE observer_character_id=? AND target_character_id=?", [observer, target]).first
+                try execute("INSERT INTO seed_relation_backups VALUES (?,?,?,?)", [previewID, observer, target, NativeCompanionData.string(previous ?? [:])])
                 let trust = min(max(view["trust"] as? Double ?? 0.5, 0), 1)
                 let familiarity = min(max(view["familiarity"] as? Double ?? trust, 0), 1)
                 let closeness = min(max(view["closeness"] as? Double ?? familiarity, 0), 1)
@@ -293,6 +510,7 @@ final class NativeCompanionStore {
                 let impression = NativeCompanionData.clean(view["impression"] as? String ?? "", limit: 2000)
                 try execute("INSERT OR REPLACE INTO relations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [UUID().uuidString, observer, target, role, trust, familiarity, closeness, impression, NativeCompanionData.string([eventID]), previewID, 1, "active", now, now])
                 _ = try memoryWrite(owner: observer, type: "relation", provenance: "world_seed", content: impression.isEmpty ? "我与对方存在设定中的关系：\(role)。" : impression, evidenceIDs: [eventID], sourceActorID: nil, supersedesID: nil)
+                }
             }
             try execute("UPDATE seed_batches SET status='committed',updated_at=? WHERE id=?", [NativeCompanionData.iso(), previewID])
             try execute("COMMIT")
@@ -301,14 +519,39 @@ final class NativeCompanionStore {
     }
 
     func rollbackSeedBatch(_ batchID: String) throws -> CompanionObject {
-        guard let batch = try rows("SELECT status FROM seed_batches WHERE id=?", [batchID]).first, let status = batch["status"] as? String, status == "committed" else { throw NativeCompanionData.error("Seed batch is not committed") }
-        try execute("BEGIN IMMEDIATE")
-        do {
-            try execute("UPDATE relations SET status='archived',updated_at=? WHERE seed_batch_id=? AND status='active'", [NativeCompanionData.iso(), batchID])
+        try transaction {
+            guard let batch = try rows("SELECT status FROM seed_batches WHERE id=?", [batchID]).first, batch["status"] as? String == "committed" else { throw NativeCompanionData.error("Seed batch is not committed") }
+            var conflicts: [String] = []
+            for saved in try rows("SELECT observer,target,payload FROM seed_relation_backups WHERE batch_id=?", [batchID]) {
+                let observer = saved["observer"] as? String ?? "", target = saved["target"] as? String ?? ""
+                guard let current = try rows("SELECT * FROM relations WHERE observer_character_id=? AND target_character_id=?", [observer, target]).first,
+                      current["seed_batch_id"] as? String == batchID, current["revision"] as? Int == 1 else { conflicts.append("\(observer)->\(target)"); continue }
+                let old = NativeCompanionData.object((saved["payload"] as? String)?.data(using: .utf8).flatMap { try? NativeCompanionData.decode($0) })
+                if !old.isEmpty {
+                    let fields = ["id", "observer_character_id", "target_character_id", "role", "trust", "familiarity", "closeness", "impression", "evidence_ids", "seed_batch_id", "revision", "status", "created_at", "updated_at"]
+                    try execute("INSERT OR REPLACE INTO relations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", fields.map { old[$0] })
+                } else {
+                    try execute("UPDATE relations SET status='archived',updated_at=? WHERE observer_character_id=? AND target_character_id=?", [NativeCompanionData.iso(), observer, target])
+                }
+            }
+            // Match the event through its participant memory and seed's creation audit.
+            let eventRows = try rows("SELECT id,payload FROM world_events WHERE event_type='relationship_bootstrap' AND source_kind='world_seed'")
+            let ownedEvents = eventRows.filter { row in
+                let payload = NativeCompanionData.object((row["payload"] as? String)?.data(using: .utf8).flatMap { try? NativeCompanionData.decode($0) })
+                return payload["seedBatchId"] as? String == batchID
+            }.compactMap { $0["id"] as? String }
+            for event in ownedEvents {
+                let memories = try rows("SELECT m.id,m.owner_character_id FROM memory_items m JOIN memory_dependencies d ON d.memory_id=m.id WHERE d.evidence_id=? AND m.provenance='world_seed'", [event])
+                for memory in memories {
+                    let id = memory["id"] as? String ?? "", owner = memory["owner_character_id"] as? String ?? ""
+                    try invalidateDependents(of: [id], owner: owner)
+                    try execute("UPDATE memory_items SET status='archived',updated_at=? WHERE id=?", [NativeCompanionData.iso(), id])
+                    if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
+                }
+            }
             try execute("UPDATE seed_batches SET status='rolled_back',updated_at=? WHERE id=?", [NativeCompanionData.iso(), batchID])
-            try execute("COMMIT")
-            return ["seedBatchId": batchID, "status": "rolled_back"]
-        } catch { try? execute("ROLLBACK"); throw error }
+            return ["seedBatchId": batchID, "status": "rolled_back", "conflicts": conflicts]
+        }
     }
     func event(_ type: String, _ payload: CompanionObject) throws -> CompanionObject {
         lock.lock(); defer { lock.unlock() }

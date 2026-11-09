@@ -278,7 +278,7 @@ enum NativeCompanionSearch {
 }
 
 enum NativeCompanionMCP {
-    static let toolNames = ["web_search", "companion_list_characters", "companion_send_message", "observer_list_sessions", "observer_get_activity", "observer_get_recent_work", "observer_get_session_summary", "observer_watch_session", "observer_unwatch_session", "public_record_list", "public_record_read", "public_record_update", "private_memory_read", "private_memory_update", "memory_search", "memory_read", "memory_write", "memory_correct", "memory_forget", "relation_get"]
+    static let toolNames = ["web_search", "companion_list_characters", "companion_send_message", "observer_list_sessions", "observer_get_activity", "observer_get_recent_work", "observer_get_session_summary", "observer_watch_session", "observer_unwatch_session", "public_record_list", "public_record_read", "public_record_update", "private_memory_read", "private_memory_update", "memory_search", "memory_read", "memory_write", "memory_correct", "memory_forget", "relation_get", "growth_propose"]
     static func tools(_ prompt: NativeCompanionPrompt) -> [CompanionObject] {
         func schema(_ properties: [String], _ required: [String]) -> CompanionObject {
             ["type": "object", "properties": Dictionary(uniqueKeysWithValues: properties.map { ($0, ["type": "string"]) }), "required": required, "additionalProperties": false]
@@ -289,12 +289,12 @@ enum NativeCompanionMCP {
             "observer_watch_session": ["sessionRef"], "observer_unwatch_session": ["sessionRef"], "public_record_read": ["path"],
             "public_record_update": ["path", "content", "expectedRevision"], "private_memory_update": ["content"],
             "memory_search": ["query", "types", "limit"], "memory_read": ["memoryId"],
-            "memory_write": ["type", "content", "evidenceIds", "source"], "memory_correct": ["memoryId", "newContent", "expectedRevision", "reason"], "memory_forget": ["memoryId"], "relation_get": ["targetCharacterId"]
+            "memory_write": ["type", "content", "evidenceIds", "source", "targetCharacterId"], "memory_correct": ["memoryId", "newContent", "expectedRevision", "reason"], "memory_forget": ["memoryId"], "relation_get": ["targetCharacterId"], "growth_propose": ["targetCharacterId", "field", "value", "evidenceIds", "reason"]
         ]
         return toolNames.map { name in
             let properties = fields[name] ?? []
             let optional = ["expectedRevision", "types", "limit", "evidenceIds", "source"]
-            let required = properties.filter { !optional.contains($0) }
+            let required = properties.filter { !optional.contains($0) || ($0 == "targetCharacterId" && name != "growth_propose") }
             return ["name": name, "description": prompt.toolDescriptions[name] ?? name, "inputSchema": schema(properties, required)]
         }
     }

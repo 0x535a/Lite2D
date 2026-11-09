@@ -117,7 +117,8 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         var session = store.get("session:\(id)") as? String
         if let old = session {
             if let response = try? await client.get("api/session/\(old)"), NativeCompanionData.object(NativeCompanionData.object(response["data"])["location"])["directory"] as? String == directory.path,
-               store.get("sessionPolicy:\(id)") as? String == "search-v1" { }
+               store.get("sessionPolicy:\(id)") as? String == "search-v1",
+               store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { }
             else { session = nil }
         }
         var modelRef: CompanionObject?
@@ -129,6 +130,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             guard let created = NativeCompanionData.object(response["data"])["id"] as? String else { throw NativeCompanionData.error("OpenCode did not create a role session") }
             session = created; try store.set("session:\(id)", created)
             try store.set("sessionPolicy:\(id)", "search-v1")
+            try store.set("sessionPersona:\(id)", NativeCompanionData.hash(persona))
         } else if let modelRef { _ = try await client.post("api/session/\(session!)/model", ["model": modelRef]) }
         let agents = try await client.get("api/agent", ["location[directory]": directory.path])
         let agent = NativeCompanionData.array(agents["data"]).first { $0["id"] as? String == "companion" }

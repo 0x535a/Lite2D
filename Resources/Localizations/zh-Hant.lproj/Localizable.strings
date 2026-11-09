@@ -351,3 +351,14 @@
 "companion.search_tools" = "搜尋工具";
 "companion.web_search" = "允許角色連網搜尋";
 "companion.web_search_help" = "搜尋內容會傳送給 Exa。僅開放連網搜尋，其他第三方 MCP 工具保持停用。角色交流和記憶工具繼續可用。關閉後立即取消進行中的搜尋並阻止新搜尋。";
+
+"companion.structured_memory" = "結構化記憶";
+"companion.search_memory" = "搜尋記憶";
+"companion.reflect_preview" = "預覽記憶鞏固";
+"companion.forget_item" = "遺忘這條記憶";
+"companion.reflection" = "反思";
+"companion.growth" = "成長提案";
+"companion.approve" = "審核通過";
+"companion.rollback" = "撤銷變更";
+"companion.close_memory" = "關閉";
+"companion.growth_help" = "鞏固會產生可審核的證據摘要，不喚醒模型。成長需要直接證據、每日變化限制和審核。遺忘會清除本地正文及衍生摘要；外部歷史和備份另有保留策略。";

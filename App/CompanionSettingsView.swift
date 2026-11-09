@@ -221,6 +221,7 @@ struct CompanionHistoryView: View {
     @State private var recordText = ""
     @State private var clearing = false
     @State private var memorySelection: CompanionMemorySelection?
+    @State private var structuredSelection: UUID?
     var body: some View {
         VStack(spacing: 0) {
             Picker(L10n.text("companion.history"), selection: $page) {
@@ -259,6 +260,7 @@ struct CompanionHistoryView: View {
                     Section(L10n.text("companion.private_memory")) {
                         ForEach(companion.manager?.records ?? [], id: \.settings.id) { record in
                             LabeledContent(record.settings.localizedDisplayName) {
+                                Button(L10n.text("companion.structured_memory")) { structuredSelection = record.settings.id }
                                 Button(L10n.text("companion.inspect_memory")) {
                                     companion.exportMemory(record.settings.id)
                                     memorySelection = .init(id: record.settings.id.uuidString, content: companion.memoryContents[record.settings.id.uuidString] ?? "", revision: "", isPrivate: true)
@@ -276,6 +278,9 @@ struct CompanionHistoryView: View {
             }.padding(.horizontal, 20).padding(.vertical, 12)
         }.frame(minWidth: 560, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
         .onChange(of: page) { _, value in if value == "memory" { companion.send(["type": "records"]) } }
+        .sheet(isPresented: Binding(get: { structuredSelection != nil }, set: { if !$0 { structuredSelection = nil } })) {
+            if let id = structuredSelection { CompanionStructuredMemoryView(companion: companion, characterID: id.uuidString) }
+        }
         .sheet(item: $memorySelection) { selection in CompanionMemoryEditor(companion: companion, selection: selection) }
         .confirmationDialog(L10n.text("companion.clear_confirm"), isPresented: $clearing, titleVisibility: .visible) {
             Button(L10n.text("companion.clear"), role: .destructive) { companion.send(["type": "clear", "scope": page == "history" ? "history" : "public"]) }
@@ -334,5 +339,74 @@ private struct CompanionMemoryEditor: View {
                 companion.send(["type": "clear", "scope": selection.id]); dismiss()
             }
         } message: { Text(L10n.text("companion.reset_context_help")) }
+    }
+}
+
+
+struct CompanionStructuredMemoryView: View {
+    @ObservedObject var companion: CompanionCoordinator
+    let characterID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    private var memories: [[String: Any]] { companion.structuredMemories[characterID] ?? [] }
+    private var state: [String: Any] { companion.growthStates[characterID] ?? [:] }
+    private func send(_ type: String, job: String? = nil, memory: String? = nil) {
+        var command: [String: Any] = ["type": type, "characterId": characterID, "query": query]
+        command["jobId"] = job; command["memoryId"] = memory; companion.send(command)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(L10n.text("companion.structured_memory")).font(.headline)
+                Spacer()
+                Button(L10n.text("companion.close_memory")) { dismiss() }
+            }
+            HStack {
+                TextField(L10n.text("companion.search_memory"), text: $query).onSubmit { send("memory_items") }
+                Button(L10n.text("companion.refresh")) { send("memory_items") }
+                Button(L10n.text("companion.reflect_preview")) { send("reflection_preview") }
+            }
+            if let error = companion.error { Text(error).foregroundStyle(.orange) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(memories.indices, id: \.self) { index in
+                        let item = memories[index]
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item["content"] as? String ?? "").textSelection(.enabled)
+                            Text("\(item["memory_type"] as? String ?? "") · \(item["provenance"] as? String ?? "") · \(item["created_at"] as? String ?? "")").font(.caption).foregroundStyle(.secondary)
+                            Text(item["id"] as? String ?? "").font(.caption2).textSelection(.enabled)
+                            Text(item["evidence_ids"] as? String ?? "[]").font(.caption2).textSelection(.enabled)
+                            Button(L10n.text("companion.forget_item"), role: .destructive) { send("memory_forget", memory: item["id"] as? String) }
+                        }
+                        Divider()
+                    }
+                    jobList(state["reflections"] as? [[String: Any]] ?? [], reflection: true)
+                    jobList(state["proposals"] as? [[String: Any]] ?? [], reflection: false)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Text(L10n.text("companion.growth_help")).font(.caption).foregroundStyle(.secondary)
+        }.padding(20).frame(width: 720, height: 600)
+        .onAppear { send("memory_items") }
+    }
+    @ViewBuilder private func jobList(_ jobs: [[String: Any]], reflection: Bool) -> some View {
+        ForEach(jobs.indices, id: \.self) { index in
+            let job = jobs[index], status = job["status"] as? String ?? "", id = job["id"] as? String ?? ""
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.text(reflection ? "companion.reflection" : "companion.growth") + " · " + status).font(.headline)
+                Text(job["proposed_content"] as? String ?? job["reason"] as? String ?? "").textSelection(.enabled)
+                if !reflection { Text("\(job["field"] as? String ?? ""): \(String(describing: job["old_value"] ?? "")) → \(String(describing: job["new_value"] ?? ""))") }
+                Text(job["evidence_ids"] as? String ?? "[]").font(.caption).textSelection(.enabled)
+                HStack {
+                    if status == "preview" {
+                        Button(L10n.text("companion.approve")) { send(reflection ? "reflection_commit" : "growth_commit", job: id) }
+                        Button(L10n.text("action.cancel")) { send(reflection ? "reflection_cancel" : "growth_cancel", job: id) }
+                    }
+                    if !reflection && status == "committed" {
+                        Button(L10n.text("companion.rollback")) { send("growth_rollback", job: id) }
+                    }
+                }
+            }
+            Divider()
+        }
     }
 }

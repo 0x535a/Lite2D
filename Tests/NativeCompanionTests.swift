@@ -136,11 +136,76 @@ private actor ServiceFixture {
             let replay = try reopened.previewRelationshipBootstrap(worldID: "cyberworld", participants: [a, b], premise: "ignored", perspectives: [:], idempotencyKey: "seed-22-33-v1")
             try check(replay["idempotent"] as? Bool == true && replay["previewId"] as? String == seedID, "Relationship bootstrap retries are idempotent")
             try check((try reopened.rollbackSeedBatch(seedID))["status"] as? String == "rolled_back" && (try reopened.relationGet(observer: a, target: b)) == nil, "Relationship bootstrap rollback archives both directional views")
+            let evolved = persona.replacingOccurrences(of: "谨慎", with: "谨慎且诚实")
+            _ = try reopened.ingestPersona(characterID: a, markdown: evolved)
+            let restored = try reopened.ingestPersona(characterID: a, markdown: persona)
+            try check(restored["revision"] as? Int == 3 && (try reopened.latestPersona(characterID: a))?["markdown"] as? String == persona, "Restoring an older Persona creates the current revision instead of reviving stale claims")
+            let previewConflict = try reopened.personaChangePreview(characterID: a, markdown: evolved)
+            try check(!(previewConflict["conflicts"] as? [CompanionObject] ?? []).isEmpty, "Persona preview identifies changed identity claims")
+            try check(!(try reopened.memorySearch(owner: a, query: "")).contains { $0["provenance"] as? String == "world_seed" }, "Seed rollback removes background memories from normal recall")
+            let lifecycle = try NativeCompanionStore(root: root.appendingPathComponent("lifecycle"))
+            let ev1 = try lifecycle.memoryWrite(owner: a, type: "event", provenance: "experienced", content: "We verified the compiler output")["memoryId"] as! String
+            let ev2 = try lifecycle.memoryWrite(owner: a, type: "event", provenance: "told_by_other", content: "B told me the tests passed", sourceActorID: b)["memoryId"] as! String
+            _ = try lifecycle.memoryWrite(owner: b, type: "event", content: "Other actor private source")
+            let reflection = try lifecycle.reflectionPreview(owner: a).first!
+            let jobID = reflection["id"] as! String
+            try check(try lifecycle.reflectionPreview(owner: a).first?["id"] as? String == jobID, "Reflection preview is idempotent for the same evidence set")
+            let summarized = try lifecycle.commitReflection(owner: a, jobID: jobID)
+            let summaryID = summarized["memoryId"] as! String
+            try check(try lifecycle.memoryRead(summaryID, owner: a)?["provenance"] as? String == "inferred", "Reviewed consolidation preserves inferred provenance and evidence IDs")
+            var wrongOwner = false
+            do { _ = try lifecycle.commitReflection(owner: b, jobID: jobID) } catch { wrongOwner = true }
+            try check(wrongOwner && (try lifecycle.memoryRead(summaryID, owner: b)) == nil, "Reflection jobs and source memories cannot cross owners")
+            var repeatedCommit = false
+            do { _ = try lifecycle.commitReflection(owner: a, jobID: jobID) } catch { repeatedCommit = true }
+            try check(repeatedCommit, "A reviewed reflection cannot commit twice")
+            _ = try lifecycle.forgetMemory(ev1, owner: a)
+            try check((try lifecycle.memoryRead(summaryID, owner: a)) == nil && (try lifecycle.rows("SELECT content FROM memory_items WHERE id=?", [ev1]).first?["content"] as? String) == "", "Forgetting purges source text and invalidates derived summaries")
+            let afterRestart = try NativeCompanionStore(root: lifecycle.root)
+            try check((try afterRestart.memorySearch(owner: a, query: "compiler")).isEmpty, "Deleted evidence and summaries stay forgotten after restart")
+            let synthetic = try NativeCompanionStore(root: root.appendingPathComponent("synthetic"))
+            _ = try synthetic.memoryWrite(owner: a, type: "fact", provenance: "world_seed", content: "Synthetic history")
+            _ = try synthetic.memoryWrite(owner: a, type: "fact", provenance: "inferred", content: "Repeated guess")
+            try check((try synthetic.reflectionPreview(owner: a)).isEmpty, "Synthetic background and repeated inference cannot bootstrap reflection evidence")
+            _ = try lifecycle.memoryWrite(owner: a, type: "event", content: "Another real result")
+            let cancel = try lifecycle.reflectionPreview(owner: a).first!["id"] as! String
+            try check(try lifecycle.cancelReflection(owner: a, jobID: cancel) && !lifecycle.cancelReflection(owner: a, jobID: cancel), "Reflection cancellation is explicit and cannot report success twice")
+            let growthStore = try NativeCompanionStore(root: root.appendingPathComponent("growth"))
+            let seed = try growthStore.previewRelationshipBootstrap(worldID: "test", participants: [a, b], premise: "Test background", perspectives: [:], idempotencyKey: "growth-seed")
+            let growthSeed = seed["previewId"] as! String
+            _ = try growthStore.commitRelationshipBootstrap(previewID: growthSeed, approvedBy: "user")
+            let g1 = try growthStore.memoryWrite(owner: a, type: "event", provenance: "told_by_other", content: "B shared a real result", sourceActorID: b)["memoryId"] as! String
+            let g2 = try growthStore.memoryWrite(owner: a, type: "event", provenance: "experienced", content: "We collaborated again", sourceActorID: b)["memoryId"] as! String
+            let g = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.55, evidence: [g1, g2], reason: "Two actual exchanges")
+            let gid = g["id"] as! String
+            try check((try growthStore.relationGet(observer: a, target: b))?["familiarity"] as? Double == 0.5, "Growth previews never change live relationship state")
+            _ = try growthStore.commitGrowth(owner: a, jobID: gid)
+            try check((try growthStore.relationGet(observer: a, target: b))?["familiarity"] as? Double == 0.55 && (try growthStore.relationGet(observer: b, target: a))?["familiarity"] as? Double == 0.5, "Reviewed growth updates only the actor's directional relationship")
+            let stale = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.6, evidence: [g1, g2], reason: "Pending another review")
+            _ = try growthStore.rollbackGrowth(owner: a, jobID: gid)
+            var staleRejected = false
+            do { _ = try growthStore.commitGrowth(owner: a, jobID: stale["id"] as! String) } catch { staleRejected = true }
+            try check(staleRejected, "Stale growth proposals cannot overwrite a later rollback")
+            let capped = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.56, evidence: [g1, g2], reason: "Over daily allowance")
+            var cappedRejected = false
+            do { _ = try growthStore.commitGrowth(owner: a, jobID: capped["id"] as! String) } catch { cappedRejected = true }
+            try check(cappedRejected, "Daily growth caps include changes that were subsequently rolled back")
+            var identityRejected = false
+            do { _ = try growthStore.previewGrowth(owner: a, field: "identity", value: 0.51, evidence: [g1, g2], reason: "Not allowed") } catch { identityRejected = true }
+            try check(identityRejected, "Growth cannot change locked identity or system policy")
+            let trait = try growthStore.previewGrowth(owner: a, field: "carefulness", value: 0.53, evidence: [g1, g2], reason: "Learned to verify")
+            _ = try growthStore.commitGrowth(owner: a, jobID: trait["id"] as! String)
+            try check((try growthStore.growthState(owner: a)["traits"] as? [CompanionObject])?.first?["value"] as? Double == 0.53, "Reviewed trait growth is persisted separately from locked Persona")
+            let rolled = try growthStore.rollbackSeedBatch(growthSeed)
+            try check(!(rolled["conflicts"] as? [String] ?? []).isEmpty && (try growthStore.relationGet(observer: a, target: b)) != nil, "Seed rollback preserves later real relationship changes and reports conflicts")
+            _ = try growthStore.forgetMemory(g1, owner: a)
+            try check((try growthStore.growthState(owner: a)["traits"] as? [CompanionObject] ?? []).isEmpty, "Growth with invalidated evidence is withheld from runtime traits")
+            _ = ev2
             try check(try store.spend(1, now: 1_000_000) && !store.spend(1, now: 1_000_001), "Rolling request budget prevents overspend")
             try check(NativeCompanionData.text(["type": "thinking", "text": "secret"]).isEmpty && NativeCompanionData.text(["type": "tool_result", "content": "secret output"]) == "[tool completed]", "Observer normalization excludes reasoning and raw tool output")
             try check(NativeCompanionData.output("{\"command\":\"execute\"}")["skip"] as? Bool == true, "Malformed model JSON never becomes a command")
             let prompt = try NativeCompanionPrompt.load(promptFile)
-            try check(NativeCompanionMCP.tools(prompt).count == 20 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 20 tool schemas and unchanged Persona composition load natively")
+            try check(NativeCompanionMCP.tools(prompt).count == 21 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 21 tool schemas and unchanged Persona composition load natively")
             let searchResult: CompanionObject = ["jsonrpc": "2.0", "id": 1, "result": ["content": [["type": "text", "text": "Title: Example\nURL: https://example.com"]]]]
             let searchJSON = try NativeCompanionData.json(searchResult)
             let searchSSE = Data(("event: message\r\ndata: " + String(decoding: searchJSON, as: UTF8.self) + "\r\n\r\n").utf8)
@@ -159,7 +224,7 @@ private actor ServiceFixture {
             do { _ = try await NativeCompanionSearch.search(query: "public topic", objective: "find facts", session: searchSession) } catch { rateLimited = true }
             try check(rateLimited, "Search HTTP failures return errors instead of invented results")
             let allowed = NativeCompanionRoles.rules.filter { $0["effect"] as? String == "allow" }.compactMap { $0["action"] as? String }
-            try check(allowed.count == 60 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
+            try check(allowed.count == 63 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
             for invalid: CompanionObject in [["id": 1, "error": ["code": -1]], ["id": 1, "result": ["isError": true, "content": [["type": "text", "text": "failed"]]]], ["id": 2, "result": [:]]] {
                 var rejected = false
                 do { _ = try NativeCompanionSearch.result(NativeCompanionData.json(invalid)) } catch { rejected = true }

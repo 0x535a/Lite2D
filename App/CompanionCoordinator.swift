@@ -98,6 +98,8 @@ final class CompanionCoordinator: ObservableObject {
     @Published var roleErrors: [String: String] = [:]
     @Published var records: [[String: String]] = []
     @Published var memoryContents: [String: String] = [:]
+    @Published var structuredMemories: [String: [[String: Any]]] = [:]
+    @Published var growthStates: [String: [String: Any]] = [:]
     @Published var personaViews: [String: String] = [:]
     private var runtime: NativeCompanionRuntime?
     private var closingRuntime: Task<Void, Never>?
@@ -400,6 +402,10 @@ final class CompanionCoordinator: ObservableObject {
         if type == "topic.start" { busy = true }
         if type == "history" { loadHistory(event) }
         if type == "records" { records = event["records"] as? [[String: String]] ?? [] }
+        if type == "memory.items", let id = event["characterId"] as? String {
+            structuredMemories[id] = event["memories"] as? [[String: Any]] ?? []
+            growthStates[id] = event["growth"] as? [String: Any] ?? [:]
+        }
         if type == "memory", let id = event["characterId"] as? String, let content = event["content"] as? String { memoryContents[id] = content }
         if type == "persona", let id = event["characterId"] as? String, let content = event["content"] as? String {
             personaViews[id] = content

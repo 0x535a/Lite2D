@@ -351,3 +351,14 @@
 "companion.search_tools" = "搜索工具";
 "companion.web_search" = "允许角色联网搜索";
 "companion.web_search_help" = "搜索内容会发送给 Exa。仅开放联网搜索，其他第三方 MCP 工具保持禁用。角色交流和记忆工具继续可用。关闭后立即取消进行中的搜索并阻止新搜索。";
+
+"companion.structured_memory" = "结构化记忆";
+"companion.search_memory" = "搜索记忆";
+"companion.reflect_preview" = "预览记忆巩固";
+"companion.forget_item" = "遗忘这条记忆";
+"companion.reflection" = "反思";
+"companion.growth" = "成长提案";
+"companion.approve" = "审核通过";
+"companion.rollback" = "撤销变更";
+"companion.close_memory" = "关闭";
+"companion.growth_help" = "巩固会生成可审核的证据摘要，不唤醒模型。成长需要直接证据、每日变化限制和审核。遗忘会清除本地正文及派生摘要；外部历史和备份另有保留策略。";

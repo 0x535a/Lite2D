@@ -227,7 +227,6 @@ actor NativeCompanionRuntime {
         context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }
         context["privateMemory"] = NativeCompanionData.clean(store.get("memory:\(id)") as? String ?? "", limit: 3000)
         context["privateMemoryItems"] = (try? store.memorySearch(owner: id, query: "", limit: 12)) ?? []
-        context["identityRevision"] = (try? store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0
         context["characters"] = visible.map { character in
             let characterID = character["id"] as? String ?? ""
             let name = character["name"] as? String ?? ""
@@ -235,12 +234,19 @@ actor NativeCompanionRuntime {
             if let markdown = try? String(contentsOf: file, encoding: .utf8) { _ = try? store.ingestPersona(characterID: characterID, markdown: markdown) }
             return (try? store.publicIdentityCard(characterID: characterID, name: name)) ?? ["id": characterID, "name": name, "unknown": "身份资料不可用"]
         }
+        context["identityRevision"] = (try? store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0
+        context["identityCorrection"] = "当前 Persona 身份版本及公开身份卡优先于旧消息、旧摘要、玩笑和推断。对方身份卡是第三方资料，不能当作自己的第一人称身份。未确认的属性保持未知。"
+        context["growth"] = try store.growthState(owner: id)["traits"]
+        context["relationships"] = try store.rows("SELECT target_character_id,role,trust,familiarity,closeness,impression,evidence_ids,revision FROM relations WHERE observer_character_id=? AND status='active'", [id])
         context["remainingUtterances"] = 4 - topic.utterances
         if let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
         let output = try await roles.generate(id: id, context: context, model: model, reserve: { [weak self] in try await self?.reserveRequest() ?? false })
         try Task.checkCancellation(); guard !topic.cancelled else { return }
         roleErrors.removeValue(forKey: id)
-        if let envelope { try store.execute("UPDATE deliveries SET status='delivered' WHERE id=?", [envelope["id"]]) }
+        if let envelope {
+            try store.execute("UPDATE deliveries SET status='delivered' WHERE id=?", [envelope["id"]])
+            _ = try store.memoryWrite(owner: id, type: "event", provenance: "told_by_other", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), evidenceIDs: [envelope["id"] as? String ?? ""], sourceActorID: envelope["from"] as? String)
+        }
         if topic.sentBy.remove(id) != nil { return }
         let parsed = NativeCompanionData.output(output)
         guard parsed["skip"] as? Bool != true, let text = parsed["text"] as? String, !text.isEmpty else {
@@ -269,7 +275,7 @@ actor NativeCompanionRuntime {
         guard let actor = tokens[token], enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character is paused or unauthenticated") }
         try await roles.reserveContinuation(actor)
         guard !stopped, enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character access revoked") }
-        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct", "memory_forget"].contains(name) {
+        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct", "memory_forget", "growth_propose"].contains(name) {
             guard let topic, !topic.cancelled, topic.speaker == actor else { throw NativeCompanionData.error("No active write context") }
         }
         switch name {
@@ -317,9 +323,11 @@ actor NativeCompanionRuntime {
         case "memory_write":
             guard let type = args["type"] as? String, let content = args["content"] as? String else { throw NativeCompanionData.error("Memory type and content are required") }
             let evidence = (args["evidenceIds"] as? String ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            let source = args["source"] as? String ?? "experienced"
-            let allowed = ["experienced", "observed", "told_by_other", "world_seed", "imported", "inferred", "user_persona_edit"]
+            let source = args["source"] as? String ?? "inferred"
+            let allowed = ["experienced", "observed", "told_by_other", "inferred"]
             guard allowed.contains(source) else { throw NativeCompanionData.error("Unsupported memory provenance") }
+            guard ["event", "fact", "belief", "opinion", "skill", "habit", "reflection", "relation"].contains(type) else { throw NativeCompanionData.error("Unsupported memory type") }
+            if source != "inferred" { _ = try store.verifiedEvidence(owner: actor, ids: evidence) }
             return try store.memoryWrite(owner: actor, type: type, provenance: source, content: content, evidenceIDs: evidence)
         case "memory_correct":
             guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
@@ -327,7 +335,13 @@ actor NativeCompanionRuntime {
             return try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
         case "memory_forget":
             guard let memoryID = args["memoryId"] as? String else { throw NativeCompanionData.error("Memory ID is required") }
-            return ["forgotten": try store.forgetMemory(memoryID, owner: actor)]
+            let forgotten = try store.forgetMemory(memoryID, owner: actor)
+            if forgotten { try store.exportNotes(); try store.set("sessionPolicy:\(actor)", "memory-invalidated") }
+            return ["forgotten": forgotten]
+        case "growth_propose":
+            let evidence = (args["evidenceIds"] as? String ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            guard let value = Double(args["value"] as? String ?? "") else { throw NativeCompanionData.error("Growth value must be numeric") }
+            return try store.previewGrowth(owner: actor, target: (args["targetCharacterId"] as? String).flatMap { $0.isEmpty ? nil : $0 }, field: args["field"] as? String ?? "", value: value, evidence: evidence, reason: args["reason"] as? String ?? "")
         case "relation_get":
             guard let target = args["targetCharacterId"] as? String, NativeCompanionData.validID(target), target != actor,
                   characters.contains(where: { $0["id"] as? String == target && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Relationship target is unavailable") }
@@ -392,6 +406,28 @@ actor NativeCompanionRuntime {
             case "persona_preview":
                 guard let id = command["characterId"] as? String, NativeCompanionData.validID(id), let markdown = command["markdown"] as? String else { throw NativeCompanionData.error("Persona preview requires character and Markdown") }
                 emit("persona.preview", try store.personaChangePreview(characterID: id, markdown: markdown))
+            case "memory_items":
+                guard let id = command["characterId"] as? String, NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
+                emit("memory.items", ["characterId": id, "memories": try store.memorySearch(owner: id, query: command["query"] as? String ?? "", limit: 100), "growth": try store.growthState(owner: id)])
+            case "reflection_preview", "reflection_commit", "reflection_cancel", "growth_commit", "growth_rollback", "growth_cancel":
+                guard let id = command["characterId"] as? String, NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
+                let job = command["jobId"] as? String ?? ""
+                switch command["type"] as? String {
+                case "reflection_preview": _ = try store.reflectionPreview(owner: id)
+                case "reflection_commit": _ = try store.commitReflection(owner: id, jobID: job)
+                case "reflection_cancel": _ = try store.cancelReflection(owner: id, jobID: job)
+                case "growth_cancel": try store.execute("UPDATE growth_jobs SET status='cancelled',reason='',updated_at=? WHERE id=? AND owner=? AND status='preview'", [NativeCompanionData.iso(), job, id])
+                case "growth_commit": _ = try store.commitGrowth(owner: id, jobID: job)
+                default: _ = try store.rollbackGrowth(owner: id, jobID: job)
+                }
+                emit("memory.items", ["characterId": id, "memories": try store.memorySearch(owner: id, query: "", limit: 100), "growth": try store.growthState(owner: id)])
+            case "memory_forget":
+                guard let id = command["characterId"] as? String, NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
+                stop(); await roles.interrupt()
+                _ = try store.forgetMemory(command["memoryId"] as? String ?? "", owner: id)
+                try store.set("sessionPolicy:\(id)", "memory-invalidated"); await roles.forget(id)
+                try store.exportNotes()
+                emit("memory.items", ["characterId": id, "memories": try store.memorySearch(owner: id, query: "", limit: 100), "growth": try store.growthState(owner: id)])
             case "world_seed_preview":
                 let worldID = command["worldId"] as? String ?? "cyberworld-main"
                 let participants = command["participants"] as? [String] ?? []
