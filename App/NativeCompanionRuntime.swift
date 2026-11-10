@@ -237,6 +237,7 @@ actor NativeCompanionRuntime {
         topic.requests += 1; topic.speaker = id
         if let envelope { try store.execute("UPDATE deliveries SET status='delivering' WHERE id=?", [envelope["id"]]) }
         var context = input; context["topicId"] = topic.id; context["quotedEvidence"] = true; context["intent"] = prompt.turnIntent
+        context["currentTime"] = NativeCompanionData.currentTime()
         if input["reason"] as? String == "manual_test" { context["manualTest"] = prompt.manualTest }
         context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" && ($0["createdAt"] as? String ?? "") > (store.get("memoryCutoff:\(id)") as? String ?? "") }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
         context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }

@@ -15,6 +15,16 @@ enum NativeCompanionData {
     static func validID(_ value: String) -> Bool { UUID(uuidString: value) != nil }
     static func now() -> Double { Date().timeIntervalSince1970 * 1000 }
     static func iso(_ date: Date = Date()) -> String { ISO8601DateFormatter().string(from: date) }
+    static func currentTime(_ date: Date = Date(), timeZone: TimeZone = .current) -> CompanionObject {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = timeZone
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        return ["utc": iso(date), "local": formatter.string(from: date),
+                "timeZone": timeZone.identifier, "utcOffsetSeconds": timeZone.secondsFromGMT(for: date),
+                "weekday": weekdays[calendar.component(.weekday, from: date) - 1]]
+    }
     static func error(_ message: String) -> Error { NSError(domain: "Lite2D.Companion", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
     static func clean(_ input: String, limit: Int = 4000) -> String {
         var text = input

@@ -80,6 +80,13 @@ private actor ServiceFixture {
             let args = CommandLine.arguments
             guard args.count >= 5 else { throw NativeCompanionData.error("Expected helper, prompt, node and app paths") }
             let script = URL(fileURLWithPath: args[1]), promptFile = URL(fileURLWithPath: args[2]), node = args[3], executable = args[4]
+            let clock = ISO8601DateFormatter()
+            let singapore = NativeCompanionData.currentTime(clock.date(from: "2026-11-09T16:30:00Z")!, timeZone: TimeZone(identifier: "Asia/Singapore")!)
+            try check(singapore["local"] as? String == "2026-11-10T00:30:00+08:00" && singapore["weekday"] as? String == "Tuesday" && singapore["utcOffsetSeconds"] as? Int == 28800, "Local clock uses the local calendar date across UTC midnight")
+            let newYork = TimeZone(identifier: "America/New_York")!
+            let beforeDST = NativeCompanionData.currentTime(clock.date(from: "2026-11-01T05:30:00Z")!, timeZone: newYork)
+            let afterDST = NativeCompanionData.currentTime(clock.date(from: "2026-11-01T06:30:00Z")!, timeZone: newYork)
+            try check(beforeDST["local"] as? String == "2026-11-01T01:30:00-04:00" && afterDST["local"] as? String == "2026-11-01T01:30:00-05:00" && afterDST["utcOffsetSeconds"] as? Int == -18000, "Clock offsets follow daylight saving transitions at the supplied instant")
             let store = try NativeCompanionStore(root: root.appendingPathComponent("store"))
             try store.set("session:\(a)", "ses_existing"); try store.set("memory:\(a)", "private")
             let first = try store.readRecord("shared.md"), revision = first["revision"] as! String
@@ -450,6 +457,8 @@ private actor ServiceFixture {
             await runtime.command(["type": "configure", "config": ["enabled": true, "characters": chars, "intervalMinutes": 0, "hourlyRequests": 12]])
             await runtime.command(["type": "trigger", "characterId": b]); await runtime.waitForTopic()
             try check(await fake.last() == b && events.all().contains { $0["type"] as? String == "utterance" && $0["characterId"] as? String == b }, "Native manual trigger selects the requested Persona")
+            let timeContext = NativeCompanionData.object(await fake.contexts.last?["currentTime"])
+            try check(timeContext["timeZone"] as? String == TimeZone.current.identifier && (timeContext["utc"] as? String).flatMap(clock.date(from:)).map { abs($0.timeIntervalSinceNow) < 10 } == true, "Role generation receives a fresh host clock snapshot")
             await runtime.command(["type": "configure", "config": ["enabled": true, "paused": true, "characters": chars]])
             let count = await fake.count(); await runtime.command(["type": "trigger", "characterId": a])
             try check(await fake.count() == count && events.all().contains { $0["type"] as? String == "error" && $0["requestType"] as? String == "trigger" }, "Native Do Not Disturb rejects manual generation")
