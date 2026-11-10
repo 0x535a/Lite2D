@@ -346,6 +346,7 @@ private struct CompanionMemoryEditor: View {
 struct CompanionStructuredMemoryView: View {
     @ObservedObject var companion: CompanionCoordinator
     let characterID: String
+    var loadOnAppear = true
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     private var memories: [[String: Any]] { companion.structuredMemories[characterID] ?? [] }
@@ -386,7 +387,7 @@ struct CompanionStructuredMemoryView: View {
             }
             Text(L10n.text("companion.growth_help")).font(.caption).foregroundStyle(.secondary)
         }.padding(20).frame(width: 720, height: 600)
-        .onAppear { send("memory_items") }
+        .onAppear { if loadOnAppear { send("memory_items") } }
     }
     @ViewBuilder private func jobList(_ jobs: [[String: Any]], reflection: Bool) -> some View {
         ForEach(jobs.indices, id: \.self) { index in

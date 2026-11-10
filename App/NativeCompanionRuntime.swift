@@ -1,4 +1,17 @@
 import Foundation
+import Darwin
+
+// One Controller owns a data root; offline management must not reset a live runtime.
+final class NativeCompanionRootLock {
+    private let descriptor: Int32
+    init(root: URL) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        descriptor = Darwin.open(root.appendingPathComponent("controller.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { throw NativeCompanionData.error("Cannot open Controller lock") }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { Darwin.close(descriptor); throw NativeCompanionData.error("A Controller already owns this data root; close Lite2D before offline management") }
+    }
+    deinit { flock(descriptor, LOCK_UN); Darwin.close(descriptor) }
+}
 
 private final class NativeCompanionTopic {
     let id = UUID().uuidString
@@ -28,6 +41,7 @@ actor NativeCompanionRuntime {
     private let manageOpenCodeService: Bool
     private var serviceMonitor: NativeOpenCodeServiceMonitor?
     private var openCodeService: CompanionObject = ["state": "disabled"]
+    private var rootLock: NativeCompanionRootLock?
     private var store: NativeCompanionStore!
     private var prompt: NativeCompanionPrompt!
     private var roles: NativeCompanionRoleClient!
@@ -60,6 +74,7 @@ actor NativeCompanionRuntime {
     }
     func start(automatic: Bool = true) async throws {
         guard !stopped else { throw CancellationError() }
+        rootLock = try NativeCompanionRootLock(root: root)
         store = try NativeCompanionStore(root: root); prompt = try NativeCompanionPrompt.load(promptFile)
         try store.exportNotes(); lastTopic = store.get("lastTopic") as? Double ?? 0
         let broker = NativeCompanionBroker { [weak self] token, request in
@@ -223,8 +238,9 @@ actor NativeCompanionRuntime {
         if let envelope { try store.execute("UPDATE deliveries SET status='delivering' WHERE id=?", [envelope["id"]]) }
         var context = input; context["topicId"] = topic.id; context["quotedEvidence"] = true; context["intent"] = prompt.turnIntent
         if input["reason"] as? String == "manual_test" { context["manualTest"] = prompt.manualTest }
-        context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
+        context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" && ($0["createdAt"] as? String ?? "") > (store.get("memoryCutoff:\(id)") as? String ?? "") }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
         context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }
+        context["privateMemoryPolicy"] = "旧日记是未分类、可能过时的个人笔记，不是锁定身份或独立经历证据。当前 Persona 与公开身份卡优先；冲突内容不得覆盖身份。"
         context["privateMemory"] = NativeCompanionData.clean(store.get("memory:\(id)") as? String ?? "", limit: 3000)
         context["privateMemoryItems"] = (try? store.memorySearch(owner: id, query: "", limit: 12)) ?? []
         context["characters"] = visible.map { character in
@@ -245,7 +261,7 @@ actor NativeCompanionRuntime {
         roleErrors.removeValue(forKey: id)
         if let envelope {
             try store.execute("UPDATE deliveries SET status='delivered' WHERE id=?", [envelope["id"]])
-            _ = try store.memoryWrite(owner: id, type: "event", provenance: "told_by_other", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), evidenceIDs: [envelope["id"] as? String ?? ""], sourceActorID: envelope["from"] as? String)
+            _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: envelope["id"] as? String ?? "", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), sourceActorID: envelope["from"] as? String)
         }
         if topic.sentBy.remove(id) != nil { return }
         let parsed = NativeCompanionData.output(output)
@@ -298,14 +314,21 @@ actor NativeCompanionRuntime {
             if name == "observer_watch_session" { watched.append(reference) }; try store.set("watches:\(actor)", Array(watched.suffix(24))); return ["watching": name == "observer_watch_session"]
         case "observer_get_activity", "observer_get_session_summary":
             guard let reference = args["sessionRef"] as? String, let session = sessions.first(where: { $0.key == reference }), sourceEnabled(session.backend) else { throw NativeCompanionData.error("Activity not authorized or unavailable") }
-            let revision = sourceRevision[session.backend, default: 0], value = try await observers.activity(session)
-            guard sourceEnabled(session.backend), sourceRevision[session.backend, default: 0] == revision else { throw NativeCompanionData.error("Source access revoked") }; return value
+            let revision = sourceRevision[session.backend, default: 0]
+            var value = try await observers.activity(session)
+            guard !stopped, !paused, enabled, tokens[token] == actor,
+                  characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }),
+                  sourceEnabled(session.backend), sourceRevision[session.backend, default: 0] == revision else { throw NativeCompanionData.error("Source access revoked") }
+            let eventID = NativeCompanionData.hash(session.key + NativeCompanionData.string(value))
+            let memory = try store.recordDirectMemory(owner: actor, source: "observed", eventID: eventID, content: "我通过只读 Observer 收到了 \(session.backend) 的活动摘要；这是未验证的外部材料，不证明用户情绪或任务已完成。")
+            value["observationMemoryId"] = memory["memoryId"]
+            return value
         case "public_record_list": return try store.records().map { ["path": $0["path"] ?? "", "revision": $0["revision"] ?? ""] }
         case "public_record_read": return try store.readRecord(args["path"] as? String ?? "")
         case "public_record_update":
             let result = try store.updateRecord(actor: actor, name: args["path"] as? String ?? "", content: NativeCompanionData.clean(args["content"] as? String ?? "", limit: 32768), revision: args["expectedRevision"] as? String)
             if result["conflict"] as? Bool != true { try store.exportNotes(); emit("record.changed", ["characterId": actor, "path": args["path"] ?? "", "revision": result["revision"] ?? ""]) }; return result
-        case "private_memory_read": return ["content": store.get("memory:\(actor)") as? String ?? ""]
+        case "private_memory_read": return ["content": store.get("memory:\(actor)") as? String ?? "", "provenance": "unclassified_diary", "identityAuthority": false]
         case "private_memory_update":
             guard let content = args["content"] as? String, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Memory exceeds 32 KB") }
             let cleaned = NativeCompanionData.clean(content, limit: 32768)
@@ -328,15 +351,21 @@ actor NativeCompanionRuntime {
             guard allowed.contains(source) else { throw NativeCompanionData.error("Unsupported memory provenance") }
             guard ["event", "fact", "belief", "opinion", "skill", "habit", "reflection", "relation"].contains(type) else { throw NativeCompanionData.error("Unsupported memory type") }
             if source != "inferred" { _ = try store.verifiedEvidence(owner: actor, ids: evidence) }
-            return try store.memoryWrite(owner: actor, type: type, provenance: source, content: content, evidenceIDs: evidence)
+            // The model's interpretation remains inferred; direct sources are Controller-recorded events.
+            return try store.memoryWrite(owner: actor, type: type, provenance: "inferred", content: content, evidenceIDs: evidence)
         case "memory_correct":
             guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
                   let expected = Int(args["expectedRevision"] as? String ?? "") else { throw NativeCompanionData.error("Memory correction requires ID, content and revision") }
-            return try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
+            let result = try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
+            if result["conflict"] as? Bool != true { try store.exportNotes() }
+            return result
         case "memory_forget":
             guard let memoryID = args["memoryId"] as? String else { throw NativeCompanionData.error("Memory ID is required") }
             let forgotten = try store.forgetMemory(memoryID, owner: actor)
-            if forgotten { try store.exportNotes(); try store.set("sessionPolicy:\(actor)", "memory-invalidated") }
+            if forgotten {
+                try store.exportNotes(); try store.set("sessionPolicy:\(actor)", "memory-invalidated")
+                stop(reason: "memory_forgotten")
+            }
             return ["forgotten": forgotten]
         case "growth_propose":
             let evidence = (args["evidenceIds"] as? String ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -454,6 +483,6 @@ actor NativeCompanionRuntime {
         await serviceMonitor?.close(); serviceMonitor = nil
         await observers.close(); await roles?.close()
         await topic?.task?.value
-        broker?.close(); broker = nil; try? store?.exportNotes()
+        broker?.close(); broker = nil; try? store?.exportNotes(); store = nil; rootLock = nil
     }
 }

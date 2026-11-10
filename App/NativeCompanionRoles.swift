@@ -102,7 +102,9 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         guard !persona.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Persona is empty") }
         let runtimePersona = (try? store.runtimePersona(characterID: id, markdown: persona)) ?? persona
         let digest = NativeCompanionData.hash(prompt.system(persona: runtimePersona))
-        if let existing = instances[id], existing.digest == digest, existing.model == model { return existing }
+        if let existing = instances[id], existing.digest == digest, existing.model == model,
+           store.get("sessionPolicy:\(id)") as? String == "search-v1",
+           store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { return existing }
         let hadInstance = instances[id] != nil
         let token = await register(id)
         let config: CompanionObject = ["default_agent": "companion", "permissions": Self.rules,
@@ -203,7 +205,10 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
                     let text = NativeCompanionData.text(response)
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let delivered = Set(messages.compactMap { $0["id"] as? String })
-                        for row in try store.rows("SELECT id,remote_id FROM deliveries WHERE recipient=? AND status='accepted_pending_context'", [id]) where delivered.contains(row["remote_id"] as? String ?? "") { try store.execute("UPDATE deliveries SET status='context_consumed' WHERE id=?", [row["id"]]) }
+                        for row in try store.rows("SELECT id,remote_id,sender,text FROM deliveries WHERE recipient=? AND status='accepted_pending_context'", [id]) where delivered.contains(row["remote_id"] as? String ?? "") {
+                            try store.execute("UPDATE deliveries SET status='context_consumed' WHERE id=?", [row["id"]])
+                            _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: row["id"] as? String ?? "", content: "收到角色消息：" + (row["text"] as? String ?? ""), sourceActorID: row["sender"] as? String)
+                        }
                         budgets.removeValue(forKey: id); return text
                     }
                     if let error = response["error"] as? CompanionObject { throw NativeCompanionData.error(NativeCompanionData.clean(error["message"] as? String ?? "Companion generation failed", limit: 240)) }

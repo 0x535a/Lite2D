@@ -181,12 +181,15 @@ private actor ServiceFixture {
             try check((try growthStore.relationGet(observer: a, target: b))?["familiarity"] as? Double == 0.5, "Growth previews never change live relationship state")
             _ = try growthStore.commitGrowth(owner: a, jobID: gid)
             try check((try growthStore.relationGet(observer: a, target: b))?["familiarity"] as? Double == 0.55 && (try growthStore.relationGet(observer: b, target: a))?["familiarity"] as? Double == 0.5, "Reviewed growth updates only the actor's directional relationship")
-            let stale = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.6, evidence: [g1, g2], reason: "Pending another review")
+            let fresh = try ["Third collaboration", "Fourth collaboration", "Fifth collaboration", "Sixth collaboration"].map {
+                try growthStore.memoryWrite(owner: a, type: "event", content: $0, sourceActorID: b)["memoryId"] as! String
+            }
+            let stale = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.6, evidence: Array(fresh.prefix(2)), reason: "Pending another review")
             _ = try growthStore.rollbackGrowth(owner: a, jobID: gid)
             var staleRejected = false
             do { _ = try growthStore.commitGrowth(owner: a, jobID: stale["id"] as! String) } catch { staleRejected = true }
             try check(staleRejected, "Stale growth proposals cannot overwrite a later rollback")
-            let capped = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.56, evidence: [g1, g2], reason: "Over daily allowance")
+            let capped = try growthStore.previewGrowth(owner: a, target: b, field: "familiarity", value: 0.56, evidence: Array(fresh.suffix(2)), reason: "Over daily allowance")
             var cappedRejected = false
             do { _ = try growthStore.commitGrowth(owner: a, jobID: capped["id"] as! String) } catch { cappedRejected = true }
             try check(cappedRejected, "Daily growth caps include changes that were subsequently rolled back")
@@ -200,6 +203,82 @@ private actor ServiceFixture {
             try check(!(rolled["conflicts"] as? [String] ?? []).isEmpty && (try growthStore.relationGet(observer: a, target: b)) != nil, "Seed rollback preserves later real relationship changes and reports conflicts")
             _ = try growthStore.forgetMemory(g1, owner: a)
             try check((try growthStore.growthState(owner: a)["traits"] as? [CompanionObject] ?? []).isEmpty, "Growth with invalidated evidence is withheld from runtime traits")
+            let pack = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("doc/companion/persona_pack")
+            if FileManager.default.fileExists(atPath: pack.appendingPathComponent("persona_22.md").path) {
+                let personas = try ["22", "33"].map { try String(contentsOf: pack.appendingPathComponent("persona_\($0).md"), encoding: .utf8) }
+                let identity = try NativeCompanionStore(root: root.appendingPathComponent("pack-identities"))
+                _ = try identity.ingestPersona(characterID: a, markdown: personas[0])
+                _ = try identity.ingestPersona(characterID: b, markdown: personas[1])
+                let c22 = try identity.publicIdentityCard(characterID: a, name: "22")
+                let c33 = try identity.publicIdentityCard(characterID: b, name: "33")
+                let text22 = c22["confirmed"] as? String ?? "", text33 = c33["confirmed"] as? String ?? ""
+                try check(text22.contains("姐姐") && text22.contains("160cm") && !text22.contains("你是机娘"), "Actual 22 Persona projects her own identity without 33's machine-body setting")
+                try check(text33.contains("妹妹") && text33.contains("机娘") && text33.contains("146cm"), "Actual 33 Persona retains her own machine identity and younger-sister role")
+                try check(!text22.contains("呜哇，又报错") && !text33.contains("先给我完整错误"), "Persona examples do not become public identity facts")
+                try check(text22.contains("来源：S01") && text33.contains("来源：S01"), "Public identity cards preserve source attribution from the pack")
+                let inference = try identity.memoryWrite(owner: b, type: "belief", provenance: "inferred", content: "玩笑推测：姐姐可能也要充电")
+                let generated = try identity.runtimePersona(characterID: b, markdown: personas[1])
+                try check(generated.contains(inference["memoryId"] as? String ?? "missing") && generated.contains("not identity or independent evidence"), "Generated Persona continuity cites source memory and remains separate from identity")
+                try check((try identity.publicIdentityCard(characterID: a, name: "22"))["confirmed"] as? String == text22, "33's private joke cannot alter 22's identity card")
+                let edited = personas[0].replacingOccurrences(of: "身高160cm", with: "身高161cm")
+                _ = try identity.ingestPersona(characterID: a, markdown: edited)
+                let correctedCard = try identity.publicIdentityCard(characterID: a, name: "22")
+                try check((correctedCard["confirmed"] as? String)?.contains("161cm") == true && correctedCard["identityRevision"] as? String == "2", "Explicit user Persona correction changes only that actor's current public version")
+                let identityRestart = try NativeCompanionStore(root: identity.root)
+                try check((try identityRestart.publicIdentityCard(characterID: b, name: "33"))["confirmed"] as? String == text33, "Restart preserves the actual 33 identity independently of 22 revisions")
+            } else { print("SKIP: private Persona pack unavailable; release acceptance requires it locally") }
+            let timed = try growthStore.memoryWrite(owner: b, type: "event", content: "Yesterday's event learned today", eventID: "event-real", occurredAt: "2026-01-01T00:00:00Z", learnedAt: "2026-01-02T00:00:00Z")
+            let timedMemory = try growthStore.memoryRead(timed["memoryId"] as! String, owner: b)!
+            try check(timedMemory["occurred_at"] as? String != timedMemory["learned_at"] as? String && timedMemory["event_id"] as? String == "event-real", "Memory preserves separate occurred, learned and recorded times plus event identity")
+            _ = try growthStore.memoryWrite(owner: b, type: "fact", content: "三三是机娘，需要充电")
+            try check(!(try growthStore.memorySearch(owner: b, query: "机娘")).isEmpty, "Chinese substring recall falls back when the tokenizer has no matching token")
+            let revisionSource = try growthStore.memoryWrite(owner: b, type: "fact", content: "sensitive previous value")["memoryId"] as! String
+            let revised = try growthStore.memoryCorrect(revisionSource, owner: b, content: "corrected value", expectedRevision: 1, reason: "user correction")["memoryId"] as! String
+            _ = try growthStore.forgetMemory(revised, owner: b)
+            try check((try growthStore.rows("SELECT content FROM memory_items WHERE id=?", [revisionSource]).first?["content"] as? String) == "", "Forgetting a corrected memory also purges its predecessor chain")
+            // Simulate the original pre-edge-table database and verify migration reconstructs dependencies.
+            let oldEvent = try growthStore.memoryWrite(owner: b, type: "event", content: "old direct source")["memoryId"] as! String
+            let oldSummary = try growthStore.memoryWrite(owner: b, type: "reflection", provenance: "inferred", content: "old derived summary", evidenceIDs: [oldEvent])["memoryId"] as! String
+            try growthStore.execute("DELETE FROM memory_dependencies WHERE memory_id=?", [oldSummary])
+            let migrated = try NativeCompanionStore(root: growthStore.root)
+            _ = try migrated.forgetMemory(oldEvent, owner: b)
+            try check((try migrated.memoryRead(oldSummary, owner: b)) == nil, "Upgrade reconstructs dependency edges for pre-existing structured memories")
+            let provenance = try NativeCompanionStore(root: root.appendingPathComponent("provenance"))
+            let observed = try provenance.recordDirectMemory(owner: b, source: "observed", eventID: "actual-work-1", content: "Observer supplied an unverified activity summary")
+            let heard = try provenance.recordDirectMemory(owner: a, source: "told_by_other", eventID: "actual-work-1", content: "B told me about the result", sourceActorID: b)
+            try check((try provenance.memoryRead(observed["memoryId"] as! String, owner: b))?["provenance"] as? String == "observed" && (try provenance.memoryRead(heard["memoryId"] as! String, owner: a))?["provenance"] as? String == "told_by_other", "The same underlying event preserves independent observed and told-by-other perspectives")
+            let replayed = try provenance.recordDirectMemory(owner: a, source: "told_by_other", eventID: "actual-work-1", content: "Repeated delivery", sourceActorID: b)
+            try check(replayed["memoryId"] as? String == heard["memoryId"] as? String && (try provenance.memorySearch(owner: a, query: "")).count == 1, "Repeated direct event delivery does not create duplicate evidence")
+            _ = try provenance.forgetMemory(heard["memoryId"] as! String, owner: a)
+            _ = try provenance.recordDirectMemory(owner: a, source: "told_by_other", eventID: "actual-work-1", content: "Replay after deletion", sourceActorID: b)
+            try check((try provenance.memorySearch(owner: a, query: "")).isEmpty, "A forgotten direct event cannot be revived by delivery replay")
+            let same1 = try provenance.memoryWrite(owner: b, type: "event", content: "Another view", eventID: "same-event")["memoryId"] as! String
+            let same2 = try provenance.memoryWrite(owner: b, type: "event", content: "Repeated view", eventID: "same-event")["memoryId"] as! String
+            var duplicateEvidence = false
+            do { _ = try provenance.verifiedEvidence(owner: b, ids: [same1, same2], minimum: 2) } catch { duplicateEvidence = true }
+            try check(duplicateEvidence, "Different memories of one event do not count as independent growth evidence")
+            let expired = try provenance.memoryWrite(owner: b, type: "fact", content: "No longer valid", validTo: "2020-01-01T00:00:00Z")["memoryId"] as! String
+            let future = try provenance.memoryWrite(owner: b, type: "fact", content: "Not yet valid", validFrom: "2099-01-01T00:00:00Z")["memoryId"] as! String
+            try check((try provenance.memoryRead(expired, owner: b)) == nil && (try provenance.memoryRead(future, owner: b)) == nil, "Ordinary recall excludes expired and not-yet-valid facts")
+            try check(reopened.get("sessionPolicy:\(a)") as? String == "memory-invalidated", "Correcting a memory invalidates cached role Session policy")
+            let rollbackStore = try NativeCompanionStore(root: root.appendingPathComponent("seed-transactions"))
+            let firstSeed = try rollbackStore.previewRelationshipBootstrap(worldID: "test", participants: [a, b], premise: "First setting", perspectives: [a: ["role": "younger_sister", "trust": 0.8]], idempotencyKey: "layer-one")["previewId"] as! String
+            _ = try rollbackStore.commitRelationshipBootstrap(previewID: firstSeed, approvedBy: "user")
+            let secondSeed = try rollbackStore.previewRelationshipBootstrap(worldID: "test", participants: [a, b], premise: "Replacement setting", perspectives: [a: ["role": "friend", "trust": 0.3]], idempotencyKey: "layer-two")["previewId"] as! String
+            _ = try rollbackStore.commitRelationshipBootstrap(previewID: secondSeed, approvedBy: "user")
+            _ = try rollbackStore.rollbackSeedBatch(secondSeed)
+            try check((try rollbackStore.relationGet(observer: a, target: b))?["trust"] as? Double == 0.8, "Rolling back a replacement seed restores the previous directional relationship")
+            let failureStore = try NativeCompanionStore(root: root.appendingPathComponent("seed-failure"))
+            let failedSeed = try failureStore.previewRelationshipBootstrap(worldID: "test", participants: [a, b], premise: "Atomic setting", perspectives: [:], idempotencyKey: "failure")["previewId"] as! String
+            try failureStore.execute("CREATE TRIGGER fail_second_edge BEFORE INSERT ON relations WHEN NEW.observer_character_id='\(b)' BEGIN SELECT RAISE(ABORT,'fixture failure'); END")
+            var atomicFailure = false
+            do { _ = try failureStore.commitRelationshipBootstrap(previewID: failedSeed, approvedBy: "user") } catch { atomicFailure = true }
+            try check(atomicFailure && (try failureStore.rows("SELECT id FROM relations")).isEmpty && (try failureStore.rows("SELECT id FROM world_events")).isEmpty && (try failureStore.memorySearch(owner: a, query: "")).isEmpty, "A failed seed transaction leaves no half relationship, world event or background memory")
+            let third = "33333333-3333-4333-8333-333333333333"
+            let multi = try failureStore.previewRelationshipBootstrap(worldID: "test", participants: [a, b, third], premise: "Three separate perspectives", perspectives: [a: [b: ["role": "friend"], third: ["role": "colleague"]]], idempotencyKey: "multi")["previewId"] as! String
+            try failureStore.execute("DROP TRIGGER fail_second_edge")
+            _ = try failureStore.commitRelationshipBootstrap(previewID: multi, approvedBy: "user")
+            try check((try failureStore.rows("SELECT id FROM relations WHERE status='active'")).count == 6 && (try failureStore.relationGet(observer: a, target: third))?["role"] as? String == "colleague", "Three-character initialization creates all six directional perspectives atomically")
             _ = ev2
             try check(try store.spend(1, now: 1_000_000) && !store.spend(1, now: 1_000_001), "Rolling request budget prevents overspend")
             try check(NativeCompanionData.text(["type": "thinking", "text": "secret"]).isEmpty && NativeCompanionData.text(["type": "tool_result", "content": "secret output"]) == "[tool completed]", "Observer normalization excludes reasoning and raw tool output")
@@ -265,6 +344,22 @@ private actor ServiceFixture {
             await fixture.stopService()
             try await Task.sleep(nanoseconds: 200_000_000)
             try check(await fixture.stats().starts == 2, "Disabled monitoring never restarts the service")
+            let gatedFixture = ServiceFixture(), healthEntered = NativeAsyncValue<Bool>(), healthRelease = NativeAsyncValue<Bool>()
+            let gatedMonitor = NativeOpenCodeServiceMonitor(executable: "/missing/opencode", interval: 10,
+                health: {
+                    let value = try await gatedFixture.health()
+                    healthEntered.resolve(.success(true))
+                    _ = try await healthRelease.wait(seconds: 5)
+                    return value
+                }, starter: { try await gatedFixture.start() }, changed: { _ in })
+            await gatedMonitor.setEnabled(true)
+            let gatedAttempt = Task { try await gatedMonitor.ensureRunning() }
+            _ = try await healthEntered.wait(seconds: 5)
+            await gatedMonitor.setEnabled(false)
+            healthRelease.resolve(.success(true))
+            _ = try? await gatedAttempt.value
+            try check(await gatedMonitor.snapshot()["state"] as? String == "disabled", "A late startup health response cannot overwrite the disabled service state")
+            await gatedMonitor.close()
             let failing = ServiceFixture(); await failing.setFail()
             let failedMonitor = NativeOpenCodeServiceMonitor(executable: "/missing/opencode", interval: 0.05,
                 health: { try await failing.health() }, starter: { try await failing.start() }, changed: { _ in })

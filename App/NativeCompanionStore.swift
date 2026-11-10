@@ -83,6 +83,7 @@ final class NativeCompanionStore {
             "CREATE INDEX IF NOT EXISTS persona_claims_character ON persona_claims(character_id,status)",
             "CREATE TABLE IF NOT EXISTS persona_views(character_id TEXT NOT NULL,view_kind TEXT NOT NULL,content TEXT NOT NULL,content_hash TEXT NOT NULL,identity_revision TEXT NOT NULL,memory_cursor TEXT,generated_at TEXT NOT NULL,PRIMARY KEY(character_id,view_kind))",
             "CREATE TABLE IF NOT EXISTS memory_items(id TEXT PRIMARY KEY,owner_character_id TEXT NOT NULL,memory_type TEXT NOT NULL,scope TEXT NOT NULL,provenance TEXT NOT NULL,content TEXT NOT NULL,evidence_ids TEXT NOT NULL,source_actor_id TEXT,revision INTEGER NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,supersedes_id TEXT)",
+            "CREATE TABLE IF NOT EXISTS memory_details(memory_id TEXT PRIMARY KEY REFERENCES memory_items(id),event_id TEXT,subject_ids TEXT NOT NULL,source_ref TEXT,confidence REAL NOT NULL,salience REAL NOT NULL,occurred_at TEXT,learned_at TEXT NOT NULL,recorded_at TEXT NOT NULL,valid_from TEXT,valid_to TEXT,created_by TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS memory_items_owner_status ON memory_items(owner_character_id,status)",
             "CREATE TABLE IF NOT EXISTS world_events(id TEXT PRIMARY KEY,world_id TEXT NOT NULL,event_type TEXT NOT NULL,happened_at TEXT,source_kind TEXT NOT NULL,synthetic INTEGER NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS relations(id TEXT PRIMARY KEY,observer_character_id TEXT NOT NULL,target_character_id TEXT NOT NULL,role TEXT,trust REAL NOT NULL,familiarity REAL NOT NULL,closeness REAL NOT NULL,impression TEXT,evidence_ids TEXT NOT NULL,seed_batch_id TEXT,revision INTEGER NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(observer_character_id,target_character_id))",
@@ -101,6 +102,13 @@ final class NativeCompanionStore {
             ftsAvailable = true
         } catch { ftsAvailable = false }
         try backfillLegacyMemories()
+        try transaction {
+            for row in try rows("SELECT id,evidence_ids FROM memory_items WHERE status!='deleted'") {
+                for evidence in Set(evidenceIDs(row)) { try execute("INSERT OR IGNORE INTO memory_dependencies VALUES (?,?)", [row["id"], evidence]) }
+            }
+            try execute("INSERT OR IGNORE INTO memory_details SELECT id,NULL,'[]',NULL,0.5,0.5,NULL,created_at,created_at,NULL,NULL,owner_character_id FROM memory_items")
+            try execute("PRAGMA user_version=3")
+        }
     }
     deinit { sqlite3_close(database) }
     // Hold the recursive lock for the entire transaction, including reads and CAS.
@@ -242,15 +250,35 @@ final class NativeCompanionStore {
         return view
     }
 
-    @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil) throws -> CompanionObject {
+    @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil, eventID: String? = nil, subjectIDs: [String] = [], sourceRef: String? = nil, confidence: Double = 0.8, salience: Double = 0.5, occurredAt: String? = nil, learnedAt: String? = nil, validFrom: String? = nil, validTo: String? = nil, createdBy: String? = nil) throws -> CompanionObject {
         return try transaction {
         guard NativeCompanionData.validID(owner), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Invalid memory") }
+        guard confidence.isFinite, salience.isFinite, (0...1).contains(confidence), (0...1).contains(salience),
+              ["private"].contains(scope), ["event", "fact", "belief", "opinion", "skill", "habit", "reflection", "relation", "diary"].contains(type) else { throw NativeCompanionData.error("Invalid memory classification or score") }
+        let dateParser = ISO8601DateFormatter()
+        for date in [occurredAt, learnedAt, validFrom, validTo].compactMap({ $0 }) { guard dateParser.date(from: date) != nil else { throw NativeCompanionData.error("Invalid memory time") } }
+        if let from = validFrom, let to = validTo, dateParser.date(from: from)! > dateParser.date(from: to)! { throw NativeCompanionData.error("Invalid memory validity interval") }
+        if let sourceRef { guard sourceRef.count <= 200, !sourceRef.contains("/"), !sourceRef.contains("\\"), NativeCompanionData.clean(sourceRef) == sourceRef else { throw NativeCompanionData.error("Source reference must be an opaque evidence ID") } }
         let id = UUID().uuidString, now = NativeCompanionData.iso()
         let cleaned = NativeCompanionData.clean(content, limit: 32768)
         try execute("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [id, owner, type, scope, provenance, cleaned, NativeCompanionData.string(evidenceIDs), sourceActorID, 1, "active", now, now, supersedesID])
+        try execute("INSERT INTO memory_details VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [id, eventID, NativeCompanionData.string(subjectIDs), sourceRef, confidence, salience, occurredAt, learnedAt ?? now, now, validFrom, validTo, createdBy ?? owner])
         if ftsAvailable { try execute("INSERT INTO memory_fts(memory_id,owner_character_id,content) VALUES (?,?,?)", [id, owner, cleaned]) }
         for evidence in Set(evidenceIDs) { try execute("INSERT INTO memory_dependencies VALUES (?,?)", [id, evidence]) }
         return ["memoryId": id, "revision": 1, "status": "active"]
+        }
+    }
+
+    func memoryDetails(_ items: [CompanionObject]) throws -> [CompanionObject] {
+        try items.compactMap { item -> CompanionObject? in
+            var result = item
+            if let details = try rows("SELECT event_id,subject_ids,source_ref,confidence,salience,occurred_at,learned_at,recorded_at,valid_from,valid_to,created_by FROM memory_details WHERE memory_id=?", [item["id"]]).first {
+                let parser = ISO8601DateFormatter(), now = Date()
+                if let from = details["valid_from"] as? String, let date = parser.date(from: from), date > now { return nil }
+                if let to = details["valid_to"] as? String, let date = parser.date(from: to), date <= now { return nil }
+                for (key, value) in details { result[key] = value }
+            }
+            return result
         }
     }
 
@@ -263,26 +291,30 @@ final class NativeCompanionStore {
                 var ftsSQL = "SELECT m.id,m.memory_type,m.scope,m.provenance,m.content,m.evidence_ids,m.source_actor_id,m.revision,m.status,m.created_at,m.updated_at,m.supersedes_id FROM memory_items m JOIN memory_fts f ON f.memory_id=m.id WHERE m.owner_character_id=? AND m.status='active' AND f.owner_character_id=? AND f.content MATCH ?"
                 var ftsArgs: [Any?] = [owner, owner, query]
                 if !types.isEmpty { ftsSQL += " AND m.memory_type IN (" + Array(repeating: "?", count: types.count).joined(separator: ",") + ")"; ftsArgs.append(contentsOf: types) }
-                ftsSQL += " ORDER BY m.updated_at DESC LIMIT ?"; ftsArgs.append(safeLimit)
-                return try rows(ftsSQL, ftsArgs)
+                ftsSQL += " ORDER BY bm25(memory_fts),m.updated_at DESC,m.rowid DESC LIMIT ?"; ftsArgs.append(safeLimit)
+                let matches = try rows(ftsSQL, ftsArgs)
+                if !matches.isEmpty { return try memoryDetails(matches) }
             } catch { }
         }
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { sql += " AND content LIKE ?"; args.append("%\(query.replacingOccurrences(of: "%", with: ""))%") }
         if !types.isEmpty { sql += " AND memory_type IN (" + Array(repeating: "?", count: types.count).joined(separator: ",") + ")"; args.append(contentsOf: types) }
-        sql += " ORDER BY updated_at DESC LIMIT ?"; args.append(safeLimit)
-        return try rows(sql, args)
+        sql += " ORDER BY updated_at DESC,rowid DESC LIMIT ?"; args.append(safeLimit)
+        return try memoryDetails(rows(sql, args))
     }
 
     func memoryRead(_ id: String, owner: String) throws -> CompanionObject? {
-        try rows("SELECT id,memory_type,scope,provenance,content,evidence_ids,source_actor_id,revision,status,created_at,updated_at,supersedes_id FROM memory_items WHERE id=? AND owner_character_id=? AND status='active'", [id, owner]).first
+        try memoryDetails(rows("SELECT id,memory_type,scope,provenance,content,evidence_ids,source_actor_id,revision,status,created_at,updated_at,supersedes_id FROM memory_items WHERE id=? AND owner_character_id=? AND status='active'", [id, owner])).first
     }
 
     func memoryCorrect(_ id: String, owner: String, content: String, expectedRevision: Int, reason: String) throws -> CompanionObject {
         return try transaction {
         guard let old = try memoryRead(id, owner: owner), let revision = old["revision"] as? Int, revision == expectedRevision else { return ["conflict": true] }
-        let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id)
+        let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id, eventID: old["event_id"] as? String, occurredAt: old["occurred_at"] as? String)
         try execute("UPDATE memory_items SET status='superseded',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
         try invalidateDependents(of: [id], owner: owner)
+        try set("memory:\(owner)", "")
+        try set("sessionPolicy:\(owner)", "memory-invalidated")
+        try set("memoryCutoff:\(owner)", NativeCompanionData.iso())
         try audit(owner: owner, operation: "memory.correct", target: id)
         var result = next; result["reason"] = NativeCompanionData.clean(reason); result["supersedesId"] = id; return result
         }
@@ -322,10 +354,22 @@ final class NativeCompanionStore {
     @discardableResult func forgetMemory(_ id: String, owner: String) throws -> Bool {
         try transaction {
             guard try rows("SELECT id FROM memory_items WHERE id=? AND owner_character_id=? AND status!='deleted'", [id, owner]).first != nil else { return false }
-            try invalidateDependents(of: [id], owner: owner)
-            try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
-            if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
+            var chain = Set([id]), pending = [id]
+            while !pending.isEmpty {
+                let current = pending.removeFirst()
+                let parents = try rows("SELECT supersedes_id AS id FROM memory_items WHERE id=? AND owner_character_id=?", [current, owner])
+                let children = try rows("SELECT id FROM memory_items WHERE supersedes_id=? AND owner_character_id=?", [current, owner])
+                for row in parents + children { if let next = row["id"] as? String, chain.insert(next).inserted { pending.append(next) } }
+            }
+            try invalidateDependents(of: Array(chain), owner: owner)
+            for item in chain {
+                try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), item, owner])
+                if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [item]) }
+            }
             try set("memory:\(owner)", "")
+            try set("memoryCutoff:\(owner)", NativeCompanionData.iso())
+            try set("sessionPolicy:\(owner)", "memory-invalidated")
+            try execute("UPDATE deliveries SET status='cancelled' WHERE recipient=? AND status IN ('queued','accepted_pending_context')", [owner])
             try audit(owner: owner, operation: "memory.forget", target: id)
             return true
         }
@@ -337,6 +381,7 @@ final class NativeCompanionStore {
             if ftsAvailable { try execute("DELETE FROM memory_fts WHERE owner_character_id=?", [owner]) }
             try set("memory:\(owner)", "")
             try set("legacyMigrated:\(owner)", true)
+            try set("memoryCutoff:\(owner)", NativeCompanionData.iso())
             try execute("UPDATE reflection_jobs SET status='invalidated',proposed_content='' WHERE owner_character_id=?", [owner])
             try execute("UPDATE growth_jobs SET status='invalidated',reason='' WHERE owner=?", [owner])
             try execute("DELETE FROM traits WHERE owner=?", [owner])
@@ -347,15 +392,28 @@ final class NativeCompanionStore {
     }
 
     // Only direct, active sources belonging to this actor qualify as growth evidence.
+    func recordDirectMemory(owner: String, source: String, eventID: String, content: String, sourceActorID: String? = nil) throws -> CompanionObject {
+        try transaction {
+            guard ["experienced", "observed", "told_by_other"].contains(source), !eventID.isEmpty else { throw NativeCompanionData.error("Invalid direct event") }
+            if let old = try rows("SELECT m.id,m.status FROM memory_items m JOIN memory_details d ON d.memory_id=m.id WHERE m.owner_character_id=? AND d.event_id=? AND m.memory_type='event' ORDER BY m.rowid DESC LIMIT 1", [owner, eventID]).first {
+                return ["memoryId": old["id"] ?? "", "status": old["status"] ?? "", "duplicate": true]
+            }
+            return try memoryWrite(owner: owner, type: "event", provenance: source, content: content, sourceActorID: sourceActorID, eventID: eventID)
+        }
+    }
+
     func verifiedEvidence(owner: String, ids: [String], minimum: Int = 1) throws -> [CompanionObject] {
         let unique = Array(Set(ids)).sorted()
         guard unique.count >= minimum, unique.count <= 20 else { throw NativeCompanionData.error("Independent evidence is required") }
-        return try unique.map { id in
+        let records = try unique.map { id in
             guard let item = try memoryRead(id, owner: owner),
                   ["experienced", "observed", "told_by_other"].contains(item["provenance"] as? String ?? ""),
                   ["event", "fact"].contains(item["memory_type"] as? String ?? "") else { throw NativeCompanionData.error("Evidence is unavailable, synthetic or derived") }
             return item
         }
+        let events = Set(records.map { ($0["event_id"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ($0["id"] as? String ?? "") })
+        guard events.count >= minimum else { throw NativeCompanionData.error("Repeated views of the same event are not independent evidence") }
+        return records
     }
 
     func reflectionPreview(owner: String, limit: Int = 20) throws -> [CompanionObject] {
@@ -365,6 +423,7 @@ final class NativeCompanionStore {
             }
             guard memories.count >= 2 else { return [] }
             let evidence = memories.compactMap { $0["id"] as? String }.sorted()
+            _ = try verifiedEvidence(owner: owner, ids: evidence, minimum: 2)
             let encoded = NativeCompanionData.string(evidence)
             if let existing = try rows("SELECT * FROM reflection_jobs WHERE owner_character_id=? AND evidence_ids=? AND status IN ('preview','committed','cancelled') ORDER BY created_at DESC LIMIT 1", [owner, encoded]).first { return [existing] }
             let snippets = memories.map { "[\($0["id"] as? String ?? "")] (\($0["provenance"] as? String ?? "")) \(String(($0["content"] as? String ?? "").prefix(240)))" }
@@ -427,6 +486,8 @@ final class NativeCompanionStore {
                   let revision = job["base_revision"] as? Int else { throw NativeCompanionData.error("Growth proposal is unavailable") }
             let sources = try verifiedEvidence(owner: owner, ids: evidenceIDs(job), minimum: 2)
             let target = job["target"] as? String
+            let reused = try rows("SELECT id FROM growth_jobs WHERE owner=? AND field=? AND COALESCE(target,'')=? AND evidence_ids=? AND status IN ('committed','rolled_back','needs_review') LIMIT 1", [owner, field, target ?? "", job["evidence_ids"]])
+            guard reused.isEmpty else { throw NativeCompanionData.error("This evidence has already supported a change; new experiences are required") }
             let date = String(NativeCompanionData.iso().prefix(10))
             let spent = try rows("SELECT old_value,new_value FROM growth_jobs WHERE owner=? AND field=? AND COALESCE(target,'')=? AND status IN ('committed','rolled_back','needs_review') AND updated_at>=?", [owner, field, target ?? "", date]).reduce(0.0) { $0 + abs(($1["new_value"] as? Double ?? 0) - ($1["old_value"] as? Double ?? 0)) }
             guard spent + abs(value - old) <= (target == nil ? 0.05 : 0.1) + 0.000001 else { throw NativeCompanionData.error("Daily growth allowance is exhausted") }
@@ -485,11 +546,11 @@ final class NativeCompanionStore {
     }
 
     func commitRelationshipBootstrap(previewID: String, approvedBy: String) throws -> CompanionObject {
+        lock.lock(); defer { lock.unlock() }
         guard !approvedBy.isEmpty, let batch = try rows("SELECT id,world_id,status,payload FROM seed_batches WHERE id=?", [previewID]).first,
               let status = batch["status"] as? String, status == "preview",
               let payloadText = batch["payload"] as? String, let payloadData = payloadText.data(using: .utf8), let payload = try NativeCompanionData.decode(payloadData) as? CompanionObject,
               let participants = payload["participants"] as? [String] else { throw NativeCompanionData.error("Seed preview is unavailable or already committed") }
-        lock.lock(); defer { lock.unlock() }
         let now = NativeCompanionData.iso(), eventID = UUID().uuidString
         try execute("BEGIN IMMEDIATE")
         do {
@@ -521,6 +582,8 @@ final class NativeCompanionStore {
     func rollbackSeedBatch(_ batchID: String) throws -> CompanionObject {
         try transaction {
             guard let batch = try rows("SELECT status FROM seed_batches WHERE id=?", [batchID]).first, batch["status"] as? String == "committed" else { throw NativeCompanionData.error("Seed batch is not committed") }
+            let legacyRelations = try rows("SELECT * FROM relations WHERE seed_batch_id=?", [batchID])
+            let legacyEvents = legacyRelations.flatMap { evidenceIDs($0) }
             var conflicts: [String] = []
             for saved in try rows("SELECT observer,target,payload FROM seed_relation_backups WHERE batch_id=?", [batchID]) {
                 let observer = saved["observer"] as? String ?? "", target = saved["target"] as? String ?? ""
@@ -534,13 +597,21 @@ final class NativeCompanionStore {
                     try execute("UPDATE relations SET status='archived',updated_at=? WHERE observer_character_id=? AND target_character_id=?", [NativeCompanionData.iso(), observer, target])
                 }
             }
+            for relation in legacyRelations {
+                if relation["revision"] as? Int == 1 {
+                    try execute("UPDATE relations SET status='archived' WHERE id=? AND seed_batch_id=?", [relation["id"], batchID])
+                } else {
+                    let edge = "\(relation["observer_character_id"] as? String ?? "")->\(relation["target_character_id"] as? String ?? "")"
+                    if !conflicts.contains(edge) { conflicts.append(edge) }
+                }
+            }
             // Match the event through its participant memory and seed's creation audit.
             let eventRows = try rows("SELECT id,payload FROM world_events WHERE event_type='relationship_bootstrap' AND source_kind='world_seed'")
             let ownedEvents = eventRows.filter { row in
                 let payload = NativeCompanionData.object((row["payload"] as? String)?.data(using: .utf8).flatMap { try? NativeCompanionData.decode($0) })
                 return payload["seedBatchId"] as? String == batchID
             }.compactMap { $0["id"] as? String }
-            for event in ownedEvents {
+            for event in Set(ownedEvents + legacyEvents) {
                 let memories = try rows("SELECT m.id,m.owner_character_id FROM memory_items m JOIN memory_dependencies d ON d.memory_id=m.id WHERE d.evidence_id=? AND m.provenance='world_seed'", [event])
                 for memory in memories {
                     let id = memory["id"] as? String ?? "", owner = memory["owner_character_id"] as? String ?? ""

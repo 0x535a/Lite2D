@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 // Exercises our own view hierarchy and rendering inputs. No accessibility,
 // desktop capture, keyboard/mouse automation, or external-app control.
@@ -60,6 +61,20 @@ final class CompanionSelfTest {
                         try check(!rows.isEmpty && rows.allSatisfy { $0["speaker"] as? String == speaker }, "Persona \(speaker) imports only its own optional style examples")
                     }
                 }
+                let characterID = a.settings.id.uuidString
+                c.receive(["type": "memory.items", "characterId": characterID,
+                    "memories": [["id": "memory-fixture", "content": "A directly experienced event", "memory_type": "event", "provenance": "experienced", "evidence_ids": "[]"]],
+                    "growth": ["reflections": [["id": "reflection-fixture", "status": "preview", "proposed_content": "Evidence summary awaiting review", "evidence_ids": "[memory-fixture]"]],
+                               "proposals": [["id": "growth-fixture", "status": "preview", "field": "carefulness", "old_value": 0.5, "new_value": 0.53, "reason": "Repeated verification", "evidence_ids": "[memory-fixture]"]]]])
+                try check(c.structuredMemories[characterID]?.count == 1 && c.growthStates[characterID] != nil, "Structured memory and review jobs arrive under the correct character")
+                try check(c.structuredMemories[b.settings.id.uuidString] == nil, "Review state does not leak into another character's view")
+                let memoryWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+                memoryWindow.contentView = NSHostingView(rootView: CompanionStructuredMemoryView(companion: c, characterID: characterID, loadOnAppear: false))
+                memoryWindow.orderFront(nil)
+                try await Task.sleep(nanoseconds: 200_000_000)
+                try capture(memoryWindow, "companion-structured-memory")
+                try check(memoryWindow.contentView?.bounds.width == 720, "Structured memory and growth review render in the native application")
+                memoryWindow.orderOut(nil)
                 let legacySource = try JSONDecoder().decode(CompanionSourceSettings.self, from: Data(#"{"enabled":true,"projects":["/old/project"]}"#.utf8))
                 let migratedSource = String(decoding: try JSONEncoder().encode(legacySource), as: UTF8.self)
                 try check(legacySource.enabled && !migratedSource.contains("projects"), "Old project scopes migrate to source-wide toggles")

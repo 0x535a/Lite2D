@@ -101,6 +101,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var structuredMemories: [String: [[String: Any]]] = [:]
     @Published var growthStates: [String: [String: Any]] = [:]
     @Published var personaViews: [String: String] = [:]
+    private var pendingCommands: [[String: Any]] = []
     private var runtime: NativeCompanionRuntime?
     private var closingRuntime: Task<Void, Never>?
     private var runtimeGeneration = UUID()
@@ -388,12 +389,19 @@ final class CompanionCoordinator: ObservableObject {
         }
     }
     func send(_ command: [String: Any]) {
+        let adminCommands = ["memory_items", "memory_forget", "reflection_preview", "reflection_commit", "reflection_cancel", "growth_commit", "growth_rollback", "growth_cancel", "world_seed_preview", "world_seed_commit", "world_seed_rollback"]
+        if runtime == nil && adminCommands.contains(command["type"] as? String ?? "") { reconcile(readOnly: true) }
         guard let runtime else { return }
+        if runtimeState == "starting" { pendingCommands.append(command); return }
         Task { await runtime.command(command) }
     }
     func receive(_ event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
-        if type == "ready" { runtimeState = settings.enabled ? "running" : "stopped"; error = nil; loadHistory(event); sync(force: true) }
+        if type == "ready" {
+            runtimeState = settings.enabled ? "running" : "stopped"; error = nil; loadHistory(event); sync(force: true)
+            let commands = pendingCommands; pendingCommands.removeAll()
+            if let runtime { Task { for command in commands { await runtime.command(command) } } }
+        }
         if type == "status" {
             sources = event["sources"] as? [String: [String: Any]] ?? [:]; busy = event["busy"] as? Bool ?? false
             openCodeService = event["openCodeService"] as? [String: Any] ?? ["state": "disabled"]
@@ -402,6 +410,7 @@ final class CompanionCoordinator: ObservableObject {
         if type == "topic.start" { busy = true }
         if type == "history" { loadHistory(event) }
         if type == "records" { records = event["records"] as? [[String: String]] ?? [] }
+        if type == "memory.items" { error = nil }
         if type == "memory.items", let id = event["characterId"] as? String {
             structuredMemories[id] = event["memories"] as? [[String: Any]] ?? []
             growthStates[id] = event["growth"] as? [String: Any] ?? [:]
@@ -664,7 +673,7 @@ final class CompanionCoordinator: ObservableObject {
         if FileManager.default.fileExists(atPath: file.path) { NSWorkspace.shared.open(file) }
     }
     private func stopProcess() {
-        cancelPresentation(); runtimeGeneration = UUID()
+        cancelPresentation(); runtimeGeneration = UUID(); pendingCommands.removeAll()
         if let old = runtime {
             runtime = nil
             let previous = closingRuntime

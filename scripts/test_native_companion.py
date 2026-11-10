@@ -33,7 +33,7 @@ def main():
                     str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
-    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'trySearch': False, 'searchDenied': False}
+    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False}
 
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -46,6 +46,7 @@ def main():
             names = [t.get('function', {}).get('name', t.get('name', '')) for t in request.get('tools', [])]
             state['tools'].update(names)
             state['prompts'].append(system)
+            state['messages'].append(request.get('messages', []))
             for message in request.get('messages', []):
                 if message.get('role') == 'tool' and 'Web search is disabled by the user' in str(message.get('content', '')):
                     state['searchDenied'] = True
@@ -183,9 +184,54 @@ def main():
         assert db.execute("SELECT COUNT(*) FROM deliveries WHERE status='context_consumed'").fetchone()[0] == 1
         assert state['calls'] == 8, state['calls']
         db.close()
+        # The actual private pack is a release gate locally; no redistribution is required.
+        pack = ROOT / 'doc/companion/persona_pack'
+        identity_rotation = False
+        if pack.exists():
+            for role, speaker, marker in [(A, '22', 'TEST_CHARACTER_A'), (B, '33', 'TEST_CHARACTER_B')]:
+                text = (pack / f'persona_{speaker}.md').read_text()
+                (root / 'characters' / role / 'persona.md').write_text(text + '\n' + marker)
+            child, send, until = launch()
+            try:
+                # A second Controller must fail before opening the existing database.
+                duplicate = subprocess.run([str(APP), '--companion-runtime-probe'], env=env, input='', capture_output=True, text=True, timeout=10)
+                assert duplicate.returncode != 0 and 'already owns' in duplicate.stdout, duplicate.stdout
+                send({'type': 'trigger', 'characterId': A})
+                until('topic.end', timeout=75)
+                prompt22 = state['prompts'][-1]
+                assert '身高160cm' in prompt22 and '你是机娘' not in prompt22
+                contexts = []
+                for message in state['messages'][-1]:
+                    if message.get('role') == 'system':
+                        continue
+                    content = message.get('content', '')
+                    if isinstance(content, str):
+                        try:
+                            value = json.loads(content)
+                            if isinstance(value, dict) and 'identityRevision' in value:
+                                contexts.append(value)
+                        except ValueError:
+                            pass
+                assert contexts and contexts[-1]['identityRevision'] >= 2, contexts
+                cards = {c['id']: c for c in contexts[-1]['characters']}
+                assert '机娘' not in cards[A]['confirmed'] and '机娘' in cards[B]['confirmed'], cards
+                assert contexts[-1]['identityCorrection']
+                send({'type': 'trigger', 'characterId': B})
+                until('topic.end', timeout=75)
+                assert '你是机娘' in state['prompts'][-1] and 'TEST_CHARACTER_A' not in state['prompts'][-1]
+            finally:
+                child.stdin.close()
+                child.wait(timeout=15)
+            assert child.returncode == 0
+            with sqlite3.connect(root / 'state.sqlite') as db:
+                current_a = json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{A}',)).fetchone()[0])
+                current_b = json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{B}',)).fetchone()[0])
+                assert current_a != session_a and current_b != session_b and current_a != current_b
+                assert db.execute('SELECT COUNT(*) FROM persona_revisions').fetchone()[0] >= 4
+            identity_rotation = True
         report = {'passed': True, 'upstreamCalls': state['calls'], 'toolCount': len(state['tools']), 'utterances': [e['text'] for e in all_events if e['type'] == 'utterance'],
                   'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True,
-                  'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved']}
+                  'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved'], 'actual2233IdentityRotation': identity_rotation}
         (OUT / 'native-protocol.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
     server.shutdown()

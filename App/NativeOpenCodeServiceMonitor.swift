@@ -68,6 +68,7 @@ actor NativeOpenCodeServiceMonitor {
                     try Task.checkCancellation()
                     guard enabled && expected == revision else { throw CancellationError() }
                     if let client = try? await health() {
+                        guard enabled && expected == revision else { throw CancellationError() }
                         failures = 0; nextRetry = .distantPast; await publish(running(client)); return client
                     }
                     try await Task.sleep(nanoseconds: 250_000_000)
