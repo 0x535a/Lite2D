@@ -97,6 +97,7 @@ final class NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS traits(owner TEXT NOT NULL,field TEXT NOT NULL,value REAL NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(owner,field))",
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
+        try monitorSchema()
         do {
             try execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED,owner_character_id UNINDEXED,content)")
             ftsAvailable = true
@@ -107,7 +108,7 @@ final class NativeCompanionStore {
                 for evidence in Set(evidenceIDs(row)) { try execute("INSERT OR IGNORE INTO memory_dependencies VALUES (?,?)", [row["id"], evidence]) }
             }
             try execute("INSERT OR IGNORE INTO memory_details SELECT id,NULL,'[]',NULL,0.5,0.5,NULL,created_at,created_at,NULL,NULL,owner_character_id FROM memory_items")
-            try execute("PRAGMA user_version=3")
+            try execute("PRAGMA user_version=4")
         }
     }
     deinit { sqlite3_close(database) }
@@ -127,8 +128,10 @@ final class NativeCompanionStore {
             throw error
         }
     }
-    func audit(owner: String, operation: String, target: String) throws {
-        try execute("INSERT INTO memory_audit VALUES (?,?,?,?,?)", [UUID().uuidString, owner, operation, target, NativeCompanionData.iso()])
+    func audit(owner: String, operation: String, target: String, actor: String? = nil, result: String? = nil) throws {
+        let id = UUID().uuidString
+        try execute("INSERT INTO memory_audit VALUES (?,?,?,?,?)", [id, owner, operation, target, NativeCompanionData.iso()])
+        if actor != nil || result != nil { try execute("INSERT INTO monitor_audit_details VALUES (?,?,?)", [id, actor, result]) }
     }
     func evidenceIDs(_ row: CompanionObject) -> [String] {
         guard let value = row["evidence_ids"] as? String, let data = value.data(using: .utf8) else { return [] }
@@ -265,6 +268,7 @@ final class NativeCompanionStore {
         try execute("INSERT INTO memory_details VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [id, eventID, NativeCompanionData.string(subjectIDs), sourceRef, confidence, salience, occurredAt, learnedAt ?? now, now, validFrom, validTo, createdBy ?? owner])
         if ftsAvailable { try execute("INSERT INTO memory_fts(memory_id,owner_character_id,content) VALUES (?,?,?)", [id, owner, cleaned]) }
         for evidence in Set(evidenceIDs) { try execute("INSERT INTO memory_dependencies VALUES (?,?)", [id, evidence]) }
+        try audit(owner: owner, operation: "memory.write", target: id)
         return ["memoryId": id, "revision": 1, "status": "active"]
         }
     }
@@ -354,6 +358,7 @@ final class NativeCompanionStore {
     @discardableResult func forgetMemory(_ id: String, owner: String) throws -> Bool {
         try transaction {
             guard try rows("SELECT id FROM memory_items WHERE id=? AND owner_character_id=? AND status!='deleted'", [id, owner]).first != nil else { return false }
+            try execute("DELETE FROM monitor_previews")
             var chain = Set([id]), pending = [id]
             while !pending.isEmpty {
                 let current = pending.removeFirst()
@@ -377,6 +382,7 @@ final class NativeCompanionStore {
 
     func forgetCharacter(_ owner: String) throws {
         try transaction {
+            try execute("DELETE FROM monitor_previews")
             try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE owner_character_id=?", [NativeCompanionData.iso(), owner])
             if ftsAvailable { try execute("DELETE FROM memory_fts WHERE owner_character_id=?", [owner]) }
             try set("memory:\(owner)", "")
@@ -442,6 +448,7 @@ final class NativeCompanionStore {
             _ = try verifiedEvidence(owner: owner, ids: ids, minimum: 2)
             let result = try memoryWrite(owner: owner, type: "reflection", provenance: "inferred", content: content, evidenceIDs: ids)
             try execute("UPDATE reflection_jobs SET status='committed',updated_at=? WHERE id=?", [NativeCompanionData.iso(), jobID])
+            try execute("INSERT INTO reflection_outputs VALUES (?,?)", [jobID, result["memoryId"]])
             try audit(owner: owner, operation: "reflection.commit", target: jobID)
             var output = result; output["jobId"] = jobID; output["evidenceIds"] = ids; return output
         }
@@ -451,6 +458,7 @@ final class NativeCompanionStore {
         try transaction {
             guard let job = try rows("SELECT status FROM reflection_jobs WHERE id=? AND owner_character_id=?", [jobID, owner]).first, job["status"] as? String == "preview" else { return false }
             try execute("UPDATE reflection_jobs SET status='cancelled',proposed_content='',updated_at=? WHERE id=?", [NativeCompanionData.iso(), jobID])
+            try audit(owner: owner, operation: "reflection.cancel", target: jobID)
             return true
         }
     }
@@ -651,17 +659,15 @@ final class NativeCompanionStore {
     }
     func updateRecord(actor: String, name: String, content: String, revision: String? = nil) throws -> CompanionObject {
         guard content.utf8.count <= 32768 else { throw NativeCompanionData.error("Record exceeds 32 KB") }
-        lock.lock(); defer { lock.unlock() }
-        try execute("BEGIN IMMEDIATE")
-        do {
+        return try transaction {
             let before = try readRecord(name)
             let matches = revision.map { $0 == before["revision"] as? String } ?? (before["exists"] as? Bool == false)
-            guard matches else { try execute("ROLLBACK"); return ["conflict": true, "revision": before["revision"] ?? ""] }
+            guard matches else { return ["conflict": true, "revision": before["revision"] ?? ""] }
             let next = NativeCompanionData.hash(content)
             try execute("INSERT OR REPLACE INTO records VALUES (?,?,?)", [name, content, next])
             try execute("INSERT INTO changes(at,actor,path,before_revision,revision,content) VALUES (?,?,?,?,?,?)", [NativeCompanionData.iso(), actor, name, revision, next, content])
-            try execute("COMMIT"); return ["revision": next]
-        } catch { try? execute("ROLLBACK"); throw error }
+            return ["revision": next]
+        }
     }
     func records() throws -> [CompanionObject] {
         try rows("SELECT path FROM records ORDER BY path").map { row in var r = try readRecord(row["path"] as! String); r["path"] = row["path"]; return r }

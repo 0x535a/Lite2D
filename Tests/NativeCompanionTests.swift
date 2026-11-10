@@ -463,6 +463,7 @@ private actor ServiceFixture {
             await runtime.command(["type": "stop"]); await runtime.waitForTopic()
             try check(!events.all().contains { $0["text"] as? String == "late speech" }, "Cancellation prevents delayed generated speech from appearing")
             await runtime.close()
+            try CompanionMonitorTests.run(root: root, check: check)
             print("PASS: \(checks.count) native Companion checks")
             try FileManager.default.removeItem(at: root)
         } catch { fputs("FAIL: \(error.localizedDescription)\n", stderr); exit(1) }

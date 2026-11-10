@@ -352,12 +352,13 @@ actor NativeCompanionRuntime {
             guard ["event", "fact", "belief", "opinion", "skill", "habit", "reflection", "relation"].contains(type) else { throw NativeCompanionData.error("Unsupported memory type") }
             if source != "inferred" { _ = try store.verifiedEvidence(owner: actor, ids: evidence) }
             // The model's interpretation remains inferred; direct sources are Controller-recorded events.
-            return try store.memoryWrite(owner: actor, type: type, provenance: "inferred", content: content, evidenceIDs: evidence)
+            let result = try store.memoryWrite(owner: actor, type: type, provenance: "inferred", content: content, evidenceIDs: evidence)
+            emit("monitor.invalidate", ["owner": actor]); return result
         case "memory_correct":
             guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
                   let expected = Int(args["expectedRevision"] as? String ?? "") else { throw NativeCompanionData.error("Memory correction requires ID, content and revision") }
             let result = try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
-            if result["conflict"] as? Bool != true { try store.exportNotes() }
+            if result["conflict"] as? Bool != true { try store.exportNotes(); emit("monitor.invalidate", ["owner": actor]) }
             return result
         case "memory_forget":
             guard let memoryID = args["memoryId"] as? String else { throw NativeCompanionData.error("Memory ID is required") }
@@ -365,6 +366,7 @@ actor NativeCompanionRuntime {
             if forgotten {
                 try store.exportNotes(); try store.set("sessionPolicy:\(actor)", "memory-invalidated")
                 stop(reason: "memory_forgotten")
+                emit("monitor.invalidate", ["owner": actor, "purge": true])
             }
             return ["forgotten": forgotten]
         case "growth_propose":
@@ -398,6 +400,34 @@ actor NativeCompanionRuntime {
         guard ready && !stopped else { return }
         do {
             switch command["type"] as? String {
+            case "monitor_query":
+                let query = try CompanionMonitorCoding.decode(CompanionMonitorQuery.self, NativeCompanionData.object(command["query"]))
+                var page = try store.monitorPage(query, requestID: command["requestID"] as? String ?? "", owners: characters.compactMap { $0["id"] as? String })
+                if query.section == "L1" {
+                    var state = CompanionMonitorItem(id: "working", kind: "working", owner: query.owner, title: "working")
+                    state.fields = [
+                        .init(key: "session", value: store.get("session:\(query.owner)") as? String ?? ""),
+                        .init(key: "state", value: paused ? "paused" : (!enabled ? "disabled" : "running")),
+                        .init(key: "topic", value: topic?.participants.contains(query.owner) == true ? topic?.id ?? "" : ""),
+                        .init(key: "speaker", value: topic?.speaker == query.owner ? query.owner : "")]
+                    page.items = [state]; page.total = 1
+                }
+                emit("monitor.page", try CompanionMonitorCoding.object(page))
+            case "monitor_preview":
+                let action = try CompanionMonitorCoding.decode(CompanionMonitorAction.self, NativeCompanionData.object(command["action"]))
+                let plan = try store.monitorPreview(action)
+                emit("monitor.plan", ["requestID": command["requestID"] ?? "", "plan": try CompanionMonitorCoding.object(plan)])
+            case "monitor_commit":
+                stop(reason: "memory_management"); await roles.interrupt()
+                let action = try store.monitorCommit(command["planID"] as? String ?? "")
+                if !action.owner.isEmpty { await roles.forget(action.owner) }
+                try store.exportNotes()
+                emit("monitor.outcome", try CompanionMonitorCoding.object(CompanionMonitorOutcome(requestID: command["requestID"] as? String ?? "", operation: action.operation, owner: action.owner, target: action.target, result: "completed")))
+            case "monitor_reflect":
+                guard let id = command["characterId"] as? String, NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
+                let jobs = try store.reflectionPreview(owner: id)
+                try store.audit(owner: id, operation: "user.reflection_preview", target: jobs.first?["id"] as? String ?? id, actor: "user", result: jobs.isEmpty ? "insufficient_evidence" : "completed")
+                emit("monitor.outcome", try CompanionMonitorCoding.object(CompanionMonitorOutcome(requestID: command["requestID"] as? String ?? "", operation: "reflect", owner: id, target: "", result: jobs.isEmpty ? "insufficient_evidence" : "completed")))
             case "configure": await configure(NativeCompanionData.object(command["config"]))
             case "stop": stop()
             case "trigger":
@@ -471,7 +501,11 @@ actor NativeCompanionRuntime {
                 emit("world_seed.rolled_back", result)
             default: throw NativeCompanionData.error("Unknown host command")
             }
-        } catch { emit("error", ["requestType": command["type"] ?? "", "message": NativeCompanionData.clean(error.localizedDescription, limit: 240)]) }
+        } catch {
+            if (command["type"] as? String ?? "").hasPrefix("monitor_") {
+                emit("monitor.error", ["requestID": command["requestID"] ?? "", "message": NativeCompanionData.clean(error.localizedDescription, limit: 400)])
+            } else { emit("error", ["requestType": command["type"] ?? "", "message": NativeCompanionData.clean(error.localizedDescription, limit: 240)]) }
+        }
     }
     func waitForTopic() async { await topic?.task?.value }
     func helperDiagnostics() async -> CompanionObject { await helper.diagnostics() }

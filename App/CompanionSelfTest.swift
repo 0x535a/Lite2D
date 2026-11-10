@@ -25,8 +25,79 @@ final class CompanionSelfTest {
         }
         guard let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw NSError(domain: "capture", code: 1) }
         view.layoutSubtreeIfNeeded(); view.cacheDisplay(in: view.bounds, to: bitmap)
-        guard let data = bitmap.representation(using: .png, properties: [:]) else { throw NSError(domain: "capture", code: 2) }
+        // Cached SwiftUI layers can retain transparency; composite our own view
+        // over the window color so the artifact represents the actual appearance.
+        let canvas = NSImage(size: view.bounds.size)
+        canvas.lockFocus()
+        window.effectiveAppearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSBezierPath.fill(NSRect(origin: .zero, size: view.bounds.size))
+            bitmap.draw(in: NSRect(origin: .zero, size: view.bounds.size))
+        }
+        canvas.unlockFocus()
+        guard let tiff = canvas.tiffRepresentation, let flat = NSBitmapImageRep(data: tiff),
+              let data = flat.representation(using: .png, properties: [:]) else { throw NSError(domain: "capture", code: 2) }
         try data.write(to: output.appendingPathComponent(name + ".png"))
+    }
+    @MainActor private func verifyMemoryMonitor(_ c: CompanionCoordinator, a: UUID, b: UUID) async throws {
+        let store = try NativeCompanionStore(root: c.root)
+        let owner = a.uuidString
+        _ = try store.ingestPersona(characterID: owner, markdown: String(contentsOf: c.personaURL(a), encoding: .utf8))
+        for index in 0..<35 { _ = try store.memoryWrite(owner: owner, type: "fact", provenance: "inferred", content: "监控测试 / Monitor fixture \(index): separate evidence, time and source.") }
+        let original = L10n.language
+        let model = c.monitor; model.companion = c
+        func waitForRead() async throws {
+            for _ in 0..<100 {
+                if !model.loading { break }
+                try await Task.sleep(nanoseconds: 30_000_000)
+            }
+            try check(!model.loading && model.error == nil && model.page != nil, "Monitor host query returns a typed page without model generation")
+        }
+        model.navigate(owner: owner, section: "L3")
+        try await waitForRead()
+        try check(model.page?.total == 35 && model.page?.items.count == 30, "Monitor UI consumes server totals and a bounded first page")
+        let stalePage = model.page!
+        model.navigate(owner: b.uuidString, section: "L3")
+        model.receive(try CompanionMonitorCoding.object(stalePage).merging(["type": "monitor.page"], uniquingKeysWith: { _, new in new }))
+        try check(model.page == nil, "A late response cannot replace the newly selected character")
+        try await waitForRead()
+        model.navigate(owner: owner, section: "L3"); try await waitForRead()
+        model.select(model.page!.items[0]); model.begin("archive")
+        for _ in 0..<100 {
+            if !model.busy { break }; try await Task.sleep(nanoseconds: 30_000_000)
+        }
+        try check(model.plan?.action.operation == "archive", "Native management flow obtains an impact preview before confirmation")
+        model.commit()
+        for _ in 0..<100 {
+            if !model.busy && !model.loading { break }; try await Task.sleep(nanoseconds: 30_000_000)
+        }
+        try check(model.error == nil && model.plan == nil && model.result == "completed", "Confirmed management refreshes the typed panel and reports completion")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 780), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        for lang in [AppLanguage.simplifiedChinese, .traditionalChinese, .english, .japanese] {
+            LanguageStore.shared.selection = lang
+            for dark in [false, true] {
+                window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                model.navigate(owner: owner, section: "L3"); try await waitForRead()
+                model.select(model.page!.items[0])
+                window.contentView = NSHostingView(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: "L3"))
+                window.setContentSize(NSSize(width: 1160, height: 780)); window.orderFront(nil)
+                try await Task.sleep(nanoseconds: 120_000_000)
+                try capture(window, "memory-monitor-\(lang.rawValue)-\(dark ? "dark" : "light")")
+            }
+        }
+        for section in ["role_overview", "L0", "L1", "L2", "L4", "L5"] {
+            model.navigate(owner: owner, section: section); try await waitForRead()
+            window.contentView = NSHostingView(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: section))
+            window.setContentSize(NSSize(width: 920, height: 650))
+            try await Task.sleep(nanoseconds: 80_000_000)
+            try capture(window, "memory-monitor-\(section)-minimum")
+        }
+        window.orderOut(nil)
+        LanguageStore.shared.selection = original
+        model.activate(); try check(model.isPolling, "Visible memory monitor enables bounded fallback refresh")
+        model.deactivate(); try check(!model.isPolling && !model.visible, "Closing the monitor stops its dedicated polling")
+        let spent = try store.rows("SELECT COUNT(*) AS n FROM requests").first?["n"] as? Int
+        try check(spent == 0, "Monitoring and explicit memory management do not spend the model budget")
     }
     func run() {
         Task { @MainActor in
@@ -232,10 +303,7 @@ final class CompanionSelfTest {
                 try await Task.sleep(nanoseconds: 150_000_000)
                 try check(c.speechTexts(a.settings.id).isEmpty && !c.hasSpeech, "Stopping cancels typing and prevents late callbacks")
                 try await verifyGroups(c, a: a, b: b)
-                let history = CompanionHistoryView.makeWindow(coordinator: c)
-                history.makeKeyAndOrderFront(nil)
-                try await Task.sleep(nanoseconds: 160_000_000)
-                try capture(history, "companion-history"); history.close()
+                try await verifyMemoryMonitor(c, a: a.settings.id, b: b.settings.id)
                 c.shutdown()
                 try JSONSerialization.data(withJSONObject: ["passed": true, "checks": checks], options: .prettyPrinted).write(to: output.appendingPathComponent("passed.json"))
                 complete(0)

@@ -101,6 +101,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var structuredMemories: [String: [[String: Any]]] = [:]
     @Published var growthStates: [String: [String: Any]] = [:]
     @Published var personaViews: [String: String] = [:]
+    let monitor = CompanionMonitorController()
     private var pendingCommands: [[String: Any]] = []
     private var runtime: NativeCompanionRuntime?
     private var closingRuntime: Task<Void, Never>?
@@ -385,18 +386,35 @@ final class CompanionCoordinator: ObservableObject {
             catch { await MainActor.run { [weak self] in
                 guard let self, self.runtimeGeneration == generation else { return }
                 self.runtimeState = "unavailable"; self.error = error.localizedDescription
+                self.monitor.fail(error.localizedDescription)
             } }
         }
     }
     func send(_ command: [String: Any]) {
+        monitor.companion = self
+        if (command["type"] as? String ?? "").hasPrefix("monitor_"), runtimeState == "unavailable" { stopProcess() }
         let adminCommands = ["memory_items", "memory_forget", "reflection_preview", "reflection_commit", "reflection_cancel", "growth_commit", "growth_rollback", "growth_cancel", "world_seed_preview", "world_seed_commit", "world_seed_rollback"]
-        if runtime == nil && adminCommands.contains(command["type"] as? String ?? "") { reconcile(readOnly: true) }
+        if runtime == nil && (adminCommands.contains(command["type"] as? String ?? "") || (command["type"] as? String ?? "").hasPrefix("monitor_")) { reconcile(readOnly: true) }
         guard let runtime else { return }
         if runtimeState == "starting" { pendingCommands.append(command); return }
         Task { await runtime.command(command) }
     }
     func receive(_ event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
+        if type == "monitor.invalidate" {
+            monitor.invalidate(owner: event["owner"] as? String ?? "", purge: event["purge"] as? Bool == true)
+            return
+        }
+        if ["utterance", "topic.end", "topic.start", "record.changed"].contains(type) {
+            monitor.invalidate()
+        }
+        if type.hasPrefix("monitor.") {
+            monitor.receive(event)
+            if type == "monitor.outcome", let id = event["owner"] as? String {
+                structuredMemories.removeValue(forKey: id); growthStates.removeValue(forKey: id); memoryContents.removeValue(forKey: id); personaViews.removeValue(forKey: id)
+            }
+            return
+        }
         if type == "ready" {
             runtimeState = settings.enabled ? "running" : "stopped"; error = nil; loadHistory(event); sync(force: true)
             let commands = pendingCommands; pendingCommands.removeAll()
@@ -660,9 +678,11 @@ final class CompanionCoordinator: ObservableObject {
             historyWindow = CompanionHistoryView.makeWindow(coordinator: self)
             historyCloseObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: historyWindow, queue: .main) { [weak self] _ in
                 guard let self else { return }
+                self.monitor.deactivate()
                 if !self.settings.enabled { self.stopProcess() }
             }
         }
+        monitor.companion = self; monitor.activate()
         NSApp.activate(ignoringOtherApps: true); historyWindow?.makeKeyAndOrderFront(nil)
     }
     func exportMemory(_ id: UUID) { send(["type": "memory", "characterId": id.uuidString]) }
@@ -682,6 +702,7 @@ final class CompanionCoordinator: ObservableObject {
         runtimeState = "stopped"; busy = false; sources = [:]; openCodeService = ["state": "disabled"]
     }
     func shutdown() {
+        monitor.deactivate()
         shutdownRequested = true
         if let id = groupEditingID { finishGroupPlacement(id, save: true) }
         timer?.invalidate(); timer = nil; stopProcess()
