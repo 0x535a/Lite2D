@@ -66,7 +66,7 @@ enum L10n {
     static func useResources(_ bundle: Bundle) {
         lock.lock(); resources = bundle; lock.unlock()
     }
-    static func template(_ key: String) -> String {
+    static func lookup(_ key: String) -> String? {
         lock.lock(); let root = resources; lock.unlock()
         let language = resolvedLanguage
         let fallback = root.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:))
@@ -76,8 +76,9 @@ enum L10n {
         if let translated, translated != missing { return translated }
         let english = fallback?.localizedString(forKey: key, value: missing, table: nil)
         // Even damaged resources must not expose an implementation key to users.
-        return english.flatMap { $0 == missing ? nil : $0 } ?? "…"
+        return english.flatMap { $0 == missing ? nil : $0 }
     }
+    static func template(_ key: String) -> String { lookup(key) ?? "…" }
     static func text(_ key: String, _ arguments: String...) -> String { format(key, arguments) }
     static func format(_ key: String, _ arguments: [String]) -> String {
         let source = template(key)

@@ -538,3 +538,47 @@
 "monitor.value.created_at" = "创建时间";
 "monitor.value.sender" = "发送者";
 "monitor.value.recipient" = "接收者";
+
+// Monitor layout and readable data fixes
+"monitor.updated" = "更新于 {0}";
+"monitor.pagination" = "第 {0}/{1} 页 · 共 {2} 条";
+"monitor.no_records" = "暂无记录";
+"monitor.more_filters" = "更多筛选";
+"monitor.back_overview" = "返回概览";
+"monitor.retained_content" = "已保存的正文与修订链";
+"monitor.content_removed" = "清理正文，并使派生项失效";
+"monitor.value.current_revision" = "当前版本";
+"monitor.value.historical_revision" = "历史版本";
+"monitor.value.identity" = "身份";
+"monitor.value.relationship" = "关系";
+"monitor.value.persona" = "人格资料";
+"monitor.value.memory.write" = "新增记忆";
+"monitor.value.memory.correct" = "纠正记忆";
+"monitor.value.memory.forget" = "遗忘记忆";
+"monitor.value.character.forget" = "清理角色记忆";
+"monitor.value.persona.revision" = "修订 Persona";
+"monitor.value.reflection.commit" = "提交反思";
+"monitor.value.reflection.cancel" = "取消反思";
+"monitor.value.growth.commit" = "通过成长提案";
+"monitor.value.growth.rollback" = "撤销成长变更";
+"monitor.value.public.record.changed" = "更新公共记录";
+"monitor.value.user.correct" = "确认纠错";
+"monitor.value.user.archive" = "归档记忆";
+"monitor.value.user.restore" = "恢复归档";
+"monitor.value.user.forget" = "确认遗忘";
+"monitor.value.user.approve" = "审核通过提案";
+"monitor.value.user.cancel" = "取消提案";
+"monitor.value.user.rollback" = "撤销变更";
+"monitor.value.user.persona_restore" = "恢复 Persona 版本";
+"monitor.value.user.public_edit" = "编辑公共记录";
+"monitor.value.user.reflection_preview" = "生成反思预览";
+
+"monitor.value.queued" = "等待投递";
+"monitor.value.delivering" = "投递中";
+"monitor.value.delivered" = "已投递";
+"monitor.value.accepted_pending_context" = "已接收，等待进入上下文";
+"monitor.value.context_consumed" = "已进入上下文";
+"monitor.value.delivery_unknown" = "投递结果未确认";
+"monitor.value.known_person" = "已认识的角色";
+
+"monitor.selected_memory" = "所选记忆";

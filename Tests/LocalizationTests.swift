@@ -53,6 +53,21 @@ import Foundation
             precondition(!L10n.error(NSError(domain: "Vendor", code: 1, userInfo: [NSLocalizedDescriptionKey: "RAW SDK DETAIL"])).isEmpty)
         }
         precondition(renderedErrors.count == 4 && renderedDefaults.count == 4, "Cached errors and generated names must translate at display time")
+        for language in [AppLanguage.english, .simplifiedChinese, .traditionalChinese, .japanese] {
+            L10n.setLanguage(language)
+            precondition(L10n.lookup("monitor.value.unregistered") == nil)
+            for literal in ["", "0.8", "22", "Custom Name", "custom-operation", "2026-11-10T04:46:43Z"] {
+                precondition(CompanionMonitorPresentation.label(literal) == literal)
+            }
+            precondition(CompanionMonitorPresentation.label("active") != "…")
+            precondition(CompanionMonitorPresentation.pagination(page: 0, pageSize: 30, total: 865).contains("29"))
+            precondition(!CompanionMonitorPresentation.pagination(page: 0, pageSize: 30, total: 0).contains("1"))
+        }
+        L10n.setLanguage(.english)
+        let local = CompanionMonitorPresentation.date("2026-11-10T04:46:43Z", timeZone: TimeZone(secondsFromGMT: 8 * 3600)!)
+        precondition(local.contains("12:46:43"), local)
+        let archived = CompanionMonitorPresentation.previewValues(operation: "archive", kind: "memory", before: "body", after: "body")
+        precondition(archived.0 != archived.1 && !archived.0.contains("body"))
         L10n.setLanguage(.english)
         precondition(L10n.count("outfit.count", 0) == "0 outfits")
         precondition(L10n.count("outfit.count", 1) == "1 outfit")

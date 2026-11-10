@@ -538,3 +538,47 @@
 "monitor.value.created_at" = "Created at";
 "monitor.value.sender" = "Sender";
 "monitor.value.recipient" = "Recipient";
+
+// Monitor layout and readable data fixes
+"monitor.updated" = "Updated {0}";
+"monitor.pagination" = "Page {0}/{1} · {2} records";
+"monitor.no_records" = "No records";
+"monitor.more_filters" = "More filters";
+"monitor.back_overview" = "Back to overview";
+"monitor.retained_content" = "Stored content and revision chain";
+"monitor.content_removed" = "Content removed; derived items invalidated";
+"monitor.value.current_revision" = "Current revision";
+"monitor.value.historical_revision" = "Historical revision";
+"monitor.value.identity" = "Identity";
+"monitor.value.relationship" = "Relationship";
+"monitor.value.persona" = "Persona";
+"monitor.value.memory.write" = "Memory added";
+"monitor.value.memory.correct" = "Memory corrected";
+"monitor.value.memory.forget" = "Memory forgotten";
+"monitor.value.character.forget" = "Character memory cleared";
+"monitor.value.persona.revision" = "Persona revised";
+"monitor.value.reflection.commit" = "Reflection committed";
+"monitor.value.reflection.cancel" = "Reflection cancelled";
+"monitor.value.growth.commit" = "Growth approved";
+"monitor.value.growth.rollback" = "Growth rolled back";
+"monitor.value.public.record.changed" = "Shared record updated";
+"monitor.value.user.correct" = "Correction confirmed";
+"monitor.value.user.archive" = "Memory archived";
+"monitor.value.user.restore" = "Archive restored";
+"monitor.value.user.forget" = "Forgetting confirmed";
+"monitor.value.user.approve" = "Proposal approved";
+"monitor.value.user.cancel" = "Proposal cancelled";
+"monitor.value.user.rollback" = "Change rolled back";
+"monitor.value.user.persona_restore" = "Persona revision restored";
+"monitor.value.user.public_edit" = "Shared record edited";
+"monitor.value.user.reflection_preview" = "Reflection preview requested";
+
+"monitor.value.queued" = "Queued";
+"monitor.value.delivering" = "Delivering";
+"monitor.value.delivered" = "Delivered";
+"monitor.value.accepted_pending_context" = "Received, awaiting context";
+"monitor.value.context_consumed" = "Context received";
+"monitor.value.delivery_unknown" = "Delivery unconfirmed";
+"monitor.value.known_person" = "Known person";
+
+"monitor.selected_memory" = "Selected memory";

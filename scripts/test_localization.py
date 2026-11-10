@@ -47,7 +47,7 @@ def bundle(name, languages):
 full = bundle('Full', catalogs)
 fallback = bundle('Fallback', ['en'])
 exe = OUTPUT / 'localization-tests'
-sources = ['Localization.swift', 'DisplayLayout.swift', 'ModelInstanceSettings.swift', 'ModelFileValidator.swift', 'ModelOutfit.swift', 'ModelMotion.swift']
+sources = ['CompanionMonitorPresentation.swift', 'Localization.swift', 'DisplayLayout.swift', 'ModelInstanceSettings.swift', 'ModelFileValidator.swift', 'ModelOutfit.swift', 'ModelMotion.swift']
 subprocess.run(['xcrun', 'swiftc', '-parse-as-library', *[str(ROOT / 'App' / source) for source in sources], str(ROOT / 'Tests/LocalizationTests.swift'), '-o', str(exe)], check=True)
 suite = f'local.lite2d.tests.localization.{uuid.uuid4().hex}'
 try:

@@ -538,3 +538,47 @@
 "monitor.value.created_at" = "建立時間";
 "monitor.value.sender" = "傳送者";
 "monitor.value.recipient" = "接收者";
+
+// Monitor layout and readable data fixes
+"monitor.updated" = "更新於 {0}";
+"monitor.pagination" = "第 {0}/{1} 頁 · 共 {2} 筆";
+"monitor.no_records" = "暫無記錄";
+"monitor.more_filters" = "更多篩選";
+"monitor.back_overview" = "返回概覽";
+"monitor.retained_content" = "已儲存的正文與修訂鏈";
+"monitor.content_removed" = "清除正文，並使衍生項目失效";
+"monitor.value.current_revision" = "目前版本";
+"monitor.value.historical_revision" = "歷史版本";
+"monitor.value.identity" = "身分";
+"monitor.value.relationship" = "關係";
+"monitor.value.persona" = "人格資料";
+"monitor.value.memory.write" = "新增記憶";
+"monitor.value.memory.correct" = "修正記憶";
+"monitor.value.memory.forget" = "遺忘記憶";
+"monitor.value.character.forget" = "清除角色記憶";
+"monitor.value.persona.revision" = "修訂 Persona";
+"monitor.value.reflection.commit" = "提交反思";
+"monitor.value.reflection.cancel" = "取消反思";
+"monitor.value.growth.commit" = "通過成長提案";
+"monitor.value.growth.rollback" = "撤銷成長變更";
+"monitor.value.public.record.changed" = "更新公共記錄";
+"monitor.value.user.correct" = "確認修正";
+"monitor.value.user.archive" = "封存記憶";
+"monitor.value.user.restore" = "還原封存";
+"monitor.value.user.forget" = "確認遺忘";
+"monitor.value.user.approve" = "審核通過提案";
+"monitor.value.user.cancel" = "取消提案";
+"monitor.value.user.rollback" = "撤銷變更";
+"monitor.value.user.persona_restore" = "還原 Persona 版本";
+"monitor.value.user.public_edit" = "編輯公共記錄";
+"monitor.value.user.reflection_preview" = "產生反思預覽";
+
+"monitor.value.queued" = "等待傳送";
+"monitor.value.delivering" = "傳送中";
+"monitor.value.delivered" = "已傳送";
+"monitor.value.accepted_pending_context" = "已接收，等待進入上下文";
+"monitor.value.context_consumed" = "已進入上下文";
+"monitor.value.delivery_unknown" = "傳送結果未確認";
+"monitor.value.known_person" = "已認識的角色";
+
+"monitor.selected_memory" = "所選記憶";

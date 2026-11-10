@@ -14,6 +14,8 @@ final class CompanionMonitorController: ObservableObject {
     @Published var draft = ""
     @Published var reason = ""
     @Published var editingOperation: String?
+    var layoutFrames: [String: CGRect] = [:]
+    var activeLayoutID = ""
     private var queryID = "", operationID = ""
     private var timer: Timer?
     private(set) var visible = false
@@ -43,7 +45,9 @@ final class CompanionMonitorController: ObservableObject {
         request.detailOwner = selected?.owner ?? query.owner
         companion.send(["type": "monitor_query", "requestID": queryID, "query": (try? CompanionMonitorCoding.object(request)) ?? [:]])
     }
-    func filterChanged() { query.page = 0; selected = nil; refresh() }
+    func filterChanged() {
+        query.page = 0; selected = nil; plan = nil; editingOperation = nil; draft = ""; reason = ""; refresh()
+    }
     func select(_ item: CompanionMonitorItem) { selected = item; editingOperation = nil; plan = nil; draft = ""; reason = "" }
     func follow(_ link: CompanionMonitorLink) {
         draft = ""; reason = ""; editingOperation = nil; plan = nil
@@ -93,9 +97,9 @@ final class CompanionMonitorController: ObservableObject {
                 if let selection = selected {
                     if let updated = value.items.first(where: { $0.key == selection.key }) { selected = updated }
                     else if let detail = value.detail { selected = detail }
-                    else { selected = nil }
+                    else { selected = value.items.first }
                     if selected?.status == "deleted" { plan = nil; draft = ""; reason = ""; editingOperation = nil }
-                }
+                } else { selected = value.items.first }
             } catch { self.error = error.localizedDescription; loading = false }
         case "monitor.plan":
             guard id == operationID else { return }

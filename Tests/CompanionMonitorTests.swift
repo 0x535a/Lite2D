@@ -62,6 +62,11 @@ enum CompanionMonitorTests {
         try check(restore.before == persona2 && restore.after == persona1, "Persona restore preview compares current source against the selected historical revision")
         _ = try store.monitorCommit(restore.id)
         try check((try store.latestPersona(characterID: a))?["revision"] as? Int == 3 && (try store.monitorPersonaFile(a)) == persona1, "Persona restore commits a new revision and updates the user file explicitly")
+        let currentRevision = try store.latestPersona(characterID: a)!["id"] as! String
+        let currentItem = try store.monitorReference(owner: a, id: currentRevision, kind: "persona")
+        var noOpRejected = false
+        do { _ = try store.monitorPreview(.init(operation: "persona_restore", owner: a, kind: "persona", target: currentRevision)) } catch { noOpRejected = true }
+        try check(currentItem.status == "current_revision" && currentItem.actions.isEmpty && noOpRejected, "Current Persona revisions cannot create no-op restoration plans")
         let record = try store.updateRecord(actor: a, name: "shared.md", content: "before")
         let publicPlan = try store.monitorPreview(.init(operation: "public_edit", owner: "", kind: "public", target: "shared.md", content: "after", reason: "approved edit"))
         _ = try store.monitorCommit(publicPlan.id)

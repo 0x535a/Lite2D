@@ -39,6 +39,55 @@ final class CompanionSelfTest {
               let data = flat.representation(using: .png, properties: [:]) else { throw NSError(domain: "capture", code: 2) }
         try data.write(to: output.appendingPathComponent(name + ".png"))
     }
+    @MainActor private func verifyMonitorGeometry(_ window: NSWindow, model: CompanionMonitorController, name: String, browser: Bool, rowsExpected: Bool = false) async throws {
+        for _ in 0..<100 {
+            window.contentView?.layoutSubtreeIfNeeded()
+            if let content = model.layoutFrames["content"], content.width > 0,
+               (!browser || abs(content.height - window.contentLayoutRect.height) < 3), model.layoutFrames["header"] != nil,
+               !browser || model.layoutFrames["split"] != nil { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let frames = model.layoutFrames
+        var rawFrames = frames.mapValues { ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] }
+        if let view = window.contentView { rawFrames["host_bounds"] = ["width": view.bounds.width, "height": view.bounds.height, "safe_top": view.safeAreaInsets.top, "safe_bottom": view.safeAreaInsets.bottom, "layout_height": window.contentLayoutRect.height] }
+        try JSONSerialization.data(withJSONObject: rawFrames, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("layout-raw-" + name + ".json"))
+        guard let content = frames["content"], let header = frames["header"] else { throw NSError(domain: "MonitorGeometry", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing measured layout for \(name)"]) }
+        let contentTop = window.frame.height - window.contentLayoutRect.maxY
+        try check(abs(header.minY - contentTop) <= 3 && header.height < 115, "\(name): header is pinned immediately below the actual window chrome")
+        let availableHeight = window.contentLayoutRect.height
+        if browser {
+            try check(abs(content.height - availableHeight) < 3, "\(name): browser fills the available window content height")
+        } else if let root = window.contentView {
+            // Native Form owns an NSScrollView that may extend past SwiftUI's
+            // ideal-size preference. Measure its real AppKit viewport instead.
+            func scrolls(_ view: NSView) -> [NSScrollView] { (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls) }
+            let rects = scrolls(root).map { $0.convert($0.bounds, to: root) }.filter { $0.width > root.bounds.width * 0.5 }
+            let fullHeight = rects.contains { rect in
+                let bottom = root.isFlipped ? rect.maxY : root.bounds.height - rect.minY
+                return abs(bottom - root.bounds.height) < 3 && rect.height >= availableHeight * 0.45
+            }
+            rawFrames["native_form"] = rects.first.map { ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] }
+            try check(fullHeight, "\(name): native Form viewport reaches the actual bottom of the window")
+        }
+        var visibleRows = 0
+        if browser {
+            guard let split = frames["split"], let footer = frames["pagination"], let column = frames["list_column"] else { throw NSError(domain: "MonitorGeometry", code: 2) }
+            try check(split.height >= content.height * 0.45 && abs(split.maxY - content.maxY) < 2, "\(name): data browser fills remaining height")
+            try check(abs(column.height - split.height) < 2 && abs(footer.maxY - split.maxY) < 2, "\(name): pagination is anchored to the bottom of the list column")
+            func tables(_ view: NSView) -> [NSTableView] { (view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables) }
+            if rowsExpected, let view = window.contentView {
+                let candidates = tables(view).filter { $0.numberOfRows >= 20 }
+                visibleRows = candidates.map { table in
+                    let range = table.rows(in: table.visibleRect)
+                    return range.location == NSNotFound ? 0 : range.length
+                }.max() ?? 0
+                try check(visibleRows >= 4, "\(name): populated list exposes at least four native table rows (\(visibleRows))")
+            }
+        }
+        var result: [String: Any] = ["visibleRows": visibleRows]
+        result["frames"] = rawFrames
+        try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("layout-" + name + ".json"))
+    }
     @MainActor private func verifyMemoryMonitor(_ c: CompanionCoordinator, a: UUID, b: UUID) async throws {
         let store = try NativeCompanionStore(root: c.root)
         let owner = a.uuidString
@@ -79,19 +128,44 @@ final class CompanionSelfTest {
                 window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                 model.navigate(owner: owner, section: "L3"); try await waitForRead()
                 model.select(model.page!.items[0])
-                window.contentView = NSHostingView(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: "L3"))
+                model.layoutFrames = [:]
+                let host = NSHostingController(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: "L3")); host.sizingOptions = []
+                window.contentViewController = host
                 window.setContentSize(NSSize(width: 1160, height: 780)); window.orderFront(nil)
                 try await Task.sleep(nanoseconds: 120_000_000)
+                try await verifyMonitorGeometry(window, model: model, name: "\(lang.rawValue)-\(dark ? "dark" : "light")", browser: true, rowsExpected: true)
                 try capture(window, "memory-monitor-\(lang.rawValue)-\(dark ? "dark" : "light")")
             }
         }
-        for section in ["role_overview", "L0", "L1", "L2", "L4", "L5"] {
+        for section in ["role_overview", "L0", "L1", "L2", "L3", "L4", "L5", "views", "relations", "traits", "reflections", "growth", "legacy"] {
             model.navigate(owner: owner, section: section); try await waitForRead()
-            window.contentView = NSHostingView(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: section))
+            model.layoutFrames = [:]
+            let host = NSHostingController(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: section)); host.sizingOptions = []
+                window.contentViewController = host
             window.setContentSize(NSSize(width: 920, height: 650))
             try await Task.sleep(nanoseconds: 80_000_000)
+            try await verifyMonitorGeometry(window, model: model, name: section + "-minimum", browser: !["role_overview", "L1"].contains(section), rowsExpected: section == "L3")
             try capture(window, "memory-monitor-\(section)-minimum")
         }
+        _ = try store.event("utterance", ["characterId": owner, "text": "Layout conversation fixture"])
+        _ = try store.updateRecord(actor: owner, name: "layout-test.md", content: "Layout shared note", revision: try store.readRecord("layout-test.md")["revision"] as? String)
+        for section in ["overview", "conversation", "public", "audit"] {
+            model.navigate(section: section); try await waitForRead()
+            model.layoutFrames = [:]
+            let host = NSHostingController(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialSection: section)); host.sizingOptions = []
+                window.contentViewController = host
+            window.setContentSize(NSSize(width: 1160, height: 780))
+            try await Task.sleep(nanoseconds: 100_000_000)
+            try await verifyMonitorGeometry(window, model: model, name: section, browser: section != "overview")
+        }
+        let action = CompanionMonitorAction(operation: "forget", owner: owner, kind: "memory", target: "fixture")
+        let longPlan = CompanionMonitorPlan(id: "layout-confirmation", action: action, before: String(repeating: "Long source text ", count: 400), after: "", affected: (0..<200).map { .init(id: "evidence-\($0)", kind: "memory") }, expiresAt: "2099-01-01T00:00:00Z")
+        var confirmationFrames: [String: CGRect] = [:]
+        let confirmationHost = NSHostingController(rootView: CompanionMonitorConfirmationView(plan: longPlan, expandImpact: true, cancel: {}, confirm: {}, reportFrames: { confirmationFrames = $0 }))
+        confirmationHost.sizingOptions = []; window.contentViewController = confirmationHost
+        try await Task.sleep(nanoseconds: 180_000_000)
+        guard let sheet = confirmationFrames["confirmation"], let footer = confirmationFrames["confirmation_footer"], let scroll = confirmationFrames["confirmation_scroll"] else { throw NSError(domain: "MonitorGeometry", code: 3) }
+        try check(abs(footer.maxY - sheet.maxY) < 2 && scroll.maxY <= footer.minY + 2 && sheet.height <= 650, "Long confirmation with 200 affected items keeps its footer visible within bounded height")
         window.orderOut(nil)
         LanguageStore.shared.selection = original
         model.activate(); try check(model.isPolling, "Visible memory monitor enables bounded fallback refresh")
@@ -146,6 +220,12 @@ final class CompanionSelfTest {
                 try capture(memoryWindow, "companion-structured-memory")
                 try check(memoryWindow.contentView?.bounds.width == 720, "Structured memory and growth review render in the native application")
                 memoryWindow.orderOut(nil)
+                if ProcessInfo.processInfo.environment["LITE2D_MONITOR_ONLY"] == "1" {
+                    try await verifyMemoryMonitor(c, a: a.settings.id, b: b.settings.id)
+                    c.shutdown()
+                    try JSONSerialization.data(withJSONObject: ["passed": true, "checks": checks], options: .prettyPrinted).write(to: output.appendingPathComponent("passed.json"))
+                    complete(0); return
+                }
                 let legacySource = try JSONDecoder().decode(CompanionSourceSettings.self, from: Data(#"{"enabled":true,"projects":["/old/project"]}"#.utf8))
                 let migratedSource = String(decoding: try JSONEncoder().encode(legacySource), as: UTF8.self)
                 try check(legacySource.enabled && !migratedSource.contains("projects"), "Old project scopes migrate to source-wide toggles")

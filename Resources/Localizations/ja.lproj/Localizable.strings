@@ -538,3 +538,47 @@
 "monitor.value.created_at" = "作成日時";
 "monitor.value.sender" = "送信者";
 "monitor.value.recipient" = "受信者";
+
+// Monitor layout and readable data fixes
+"monitor.updated" = "更新: {0}";
+"monitor.pagination" = "{0}/{1} ページ · 全 {2} 件";
+"monitor.no_records" = "記録なし";
+"monitor.more_filters" = "その他の絞り込み";
+"monitor.back_overview" = "概要に戻る";
+"monitor.retained_content" = "保存された本文と改訂履歴";
+"monitor.content_removed" = "本文を削除し、派生項目を無効化";
+"monitor.value.current_revision" = "現在の版";
+"monitor.value.historical_revision" = "過去の版";
+"monitor.value.identity" = "身元";
+"monitor.value.relationship" = "関係";
+"monitor.value.persona" = "人格データ";
+"monitor.value.memory.write" = "記憶を追加";
+"monitor.value.memory.correct" = "記憶を訂正";
+"monitor.value.memory.forget" = "記憶を削除";
+"monitor.value.character.forget" = "キャラクターの記憶を削除";
+"monitor.value.persona.revision" = "Persona を改訂";
+"monitor.value.reflection.commit" = "振り返りを確定";
+"monitor.value.reflection.cancel" = "振り返りを取り消し";
+"monitor.value.growth.commit" = "成長提案を承認";
+"monitor.value.growth.rollback" = "成長の変更を取り消し";
+"monitor.value.public.record.changed" = "共有記録を更新";
+"monitor.value.user.correct" = "訂正を確定";
+"monitor.value.user.archive" = "記憶をアーカイブ";
+"monitor.value.user.restore" = "アーカイブを復元";
+"monitor.value.user.forget" = "削除を確定";
+"monitor.value.user.approve" = "提案を承認";
+"monitor.value.user.cancel" = "提案を取り消し";
+"monitor.value.user.rollback" = "変更を取り消し";
+"monitor.value.user.persona_restore" = "Persona の版を復元";
+"monitor.value.user.public_edit" = "共有記録を編集";
+"monitor.value.user.reflection_preview" = "振り返りをプレビュー";
+
+"monitor.value.queued" = "配信待ち";
+"monitor.value.delivering" = "配信中";
+"monitor.value.delivered" = "配信済み";
+"monitor.value.accepted_pending_context" = "受信済み・コンテキスト待ち";
+"monitor.value.context_consumed" = "コンテキストに反映済み";
+"monitor.value.delivery_unknown" = "配信結果が未確認";
+"monitor.value.known_person" = "知っている人物";
+
+"monitor.selected_memory" = "選択した記憶";

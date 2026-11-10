@@ -97,7 +97,12 @@ extension NativeCompanionStore {
     private func monitorPersona(_ row: CompanionObject) -> CompanionMonitorItem {
         var item = CompanionMonitorItem(id: monitorText(row["id"]), kind: "persona", owner: monitorText(row["character_id"]), title: "persona_revision")
         item.content = monitorText(row["markdown"]); item.version = monitorText(row["revision"]); item.source = monitorText(row["source_kind"]); item.at = monitorText(row["created_at"])
-        item.fields = monitorFields(row, ["actor", "raw_hash", "base_hash"]); item.actions = ["persona_restore"]; return item
+        item.fields = monitorFields(row, ["actor", "raw_hash", "base_hash"])
+        let current = try? monitorPersonaFile(item.owner)
+        let latest = try? latestPersona(characterID: item.owner)
+        item.status = latest?["id"] as? String == item.id && current == item.content ? "current_revision" : "historical_revision"
+        item.actions = current == item.content ? [] : ["persona_restore"]
+        return item
     }
     func monitorPage(_ input: CompanionMonitorQuery, requestID: String, owners: [String]) throws -> CompanionMonitorPage {
         var q = input; q.page = min(max(0, q.page), 10_000_000); q.pageSize = min(max(q.pageSize, 1), 100)
@@ -263,6 +268,9 @@ extension NativeCompanionStore {
             if action.operation == "restore", status != "archived" { throw NativeCompanionData.error("Only archived memories can be restored") }
             if ["approve", "cancel"].contains(action.operation), status != "preview" { throw NativeCompanionData.error("Proposal has already changed") }
             if action.operation == "rollback", status != "committed" { throw NativeCompanionData.error("Only committed proposals can be rolled back") }
+            if action.operation == "persona_restore", try monitorPersonaFile(action.owner) == row["markdown"] as? String {
+                throw NativeCompanionData.error("This Persona is already current; there is no change to restore")
+            }
             var ids: [String] = []
             if action.kind == "memory" { ids = try monitorAffected(owner: action.owner, id: action.target) }
             if action.kind == "reflection", action.operation == "rollback" {
