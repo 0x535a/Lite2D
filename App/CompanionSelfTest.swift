@@ -181,6 +181,10 @@ final class CompanionSelfTest {
                 let c = CompanionCoordinator(manager: manager); manager.companion = c
                 let legacySettings = try JSONDecoder().decode(CompanionSettings.self, from: Data("{}".utf8))
                 try check(legacySettings.bubbleRetentionSeconds == 8, "Existing settings default to eight-second bubble retention")
+                try check(legacySettings.dailyConsolidationMinute == 240, "Existing settings default daily memory organization to 04:00")
+                var dailySettings = CompanionSettings(); dailySettings.dailyConsolidationMinute = 345
+                let restoredDaily = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(dailySettings))
+                try check(restoredDaily.dailyConsolidationMinute == 345, "Custom daily memory time survives settings serialization")
                 try check(legacySettings.webSearchEnabled, "Existing settings enable search-only MCP access")
                 var searchSettings = CompanionSettings(); searchSettings.webSearchEnabled = false
                 let restoredSearch = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(searchSettings))

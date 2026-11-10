@@ -8,6 +8,8 @@ protocol NativeCompanionRoleClient: AnyObject {
     func interrupt() async
     func reapStale() async
     func close() async
+    func consolidate(id: String, job: CompanionObject, model: String, hourlyLimit: Int) async throws -> CompanionObject
+    func rotate(id: String, jobID: String, model: String) async throws -> String
 }
 
 actor NativeCompanionRoles: NativeCompanionRoleClient {
@@ -161,6 +163,13 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         let instance = try await prepare(id: id, model: model); guard let client else { throw NativeCompanionData.error("Role service stopped") }
         try Task.checkCancellation()
         var context = input
+        if store.get("dailyWakeSession:\(id)") as? String != instance.session {
+            var recollection = try store.dailyWake(id)
+            if let since = store.get("dailyBridgeFrom:\(id)") as? Double {
+                recollection["interveningDialogue"] = try store.dailyDialogue(owner: id, from: Date(timeIntervalSince1970: since), to: Date())
+            }
+            context["recollection"] = recollection
+        }
         let exampleFile = instance.directory.appendingPathComponent("style_examples.jsonl")
         if let attributes = try? exampleFile.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey]), attributes.isSymbolicLink != true, (attributes.fileSize ?? Int.max) < 262144,
            let text = try? String(contentsOf: exampleFile, encoding: .utf8) {
@@ -185,6 +194,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         let admitted = try await client.post("api/session/\(instance.session)/synthetic", ["text": NativeCompanionData.string(context), "delivery": "queue", "resume": true,
             "metadata": ["lite2d": true, "topicId": input["topicId"] ?? "", "synchronizedDeliveries": pending.compactMap { $0["id"] as? String }]])
         let inputID = NativeCompanionData.object(admitted["data"])["id"] as? String ?? ""
+        try store.set("dailyWakeSession:\(id)", instance.session)
         for row in pending { try store.execute("UPDATE deliveries SET remote_id=? WHERE id=?", [inputID, row["id"]]) }
         let deadline = Date().addingTimeInterval(60)
         do {
@@ -207,6 +217,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
                         let delivered = Set(messages.compactMap { $0["id"] as? String })
                         for row in try store.rows("SELECT id,remote_id,sender,text FROM deliveries WHERE recipient=? AND status='accepted_pending_context'", [id]) where delivered.contains(row["remote_id"] as? String ?? "") {
                             try store.execute("UPDATE deliveries SET status='context_consumed' WHERE id=?", [row["id"]])
+                            try store.execute("INSERT OR IGNORE INTO daily_receipts VALUES (?,?)", [row["id"], NativeCompanionData.iso()])
                             _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: row["id"] as? String ?? "", content: "收到角色消息：" + (row["text"] as? String ?? ""), sourceActorID: row["sender"] as? String)
                         }
                         budgets.removeValue(forKey: id); return text
@@ -228,6 +239,86 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         guard let id = NativeCompanionData.object(response["data"])["id"] as? String else { throw NativeCompanionData.error("No message receipt") }; return id
     }
     func forget(_ id: String) { instances.removeValue(forKey: id) }
+    func rotate(id: String, jobID: String, model: String) async throws -> String {
+        let instance = try await prepare(id: id, model: model)
+        let client = self.client!
+        if let saved = store.get("dailyRotation:\(jobID)") as? String { return saved }
+        var input: CompanionObject = ["title": "Lite2D \(id)", "agent": "companion", "location": ["directory": instance.directory.path], "permissions": Self.rules,
+            "metadata": ["lite2dCompanion": true, "characterId": id, "dailyArchive": jobID]]
+        if let slash = model.firstIndex(of: "/") { input["model"] = ["providerID": String(model[..<slash]), "id": String(model[model.index(after: slash)...])] }
+        let created = NativeCompanionData.object(try await client.post("api/session", input)["data"])
+        guard let session = created["id"] as? String else { throw NativeCompanionData.error("Cannot create daily role session") }
+        try Task.checkCancellation()
+        try store.transaction {
+            guard try store.dailyCanRotate(jobID, owner: id) else { throw NativeCompanionData.error("Daily archive changed before session rotation") }
+            try store.set("session:\(id)", session)
+            try store.set("dailyRotation:\(jobID)", session)
+            if let end = try store.rows("SELECT end_at FROM daily_archives WHERE id=?", [jobID]).first?["end_at"] as? Double { try store.set("dailyBridgeFrom:\(id)", end) }
+            try store.set("contextSince:\(id)", NativeCompanionData.iso())
+        }
+        instances[id] = Instance(session: session, digest: instance.digest, model: instance.model, directory: instance.directory)
+        return session
+    }
+    private func archiveUsage(session: String, jobID: String) async {
+        guard let client,
+              let response = try? await client.request("GET", "api/session/\(session)/message", query: ["limit": "100", "order": "desc"], timeout: 3) else { return }
+        let messages = NativeCompanionData.array(NativeCompanionData.object(response)["data"]).filter { $0["type"] as? String == "assistant" }
+        let usage = messages.map { ["model": $0["model"] ?? [:], "tokens": $0["tokens"] ?? [:], "cost": $0["cost"] ?? 0, "retry": $0["retry"] ?? [:]] }
+        let old = (try? store.rows("SELECT usage FROM daily_archives WHERE id=?", [jobID]).first?["usage"] as? String) ?? "[]"
+        var attempts = NativeCompanionData.array(try? NativeCompanionData.decode(Data(old.utf8)))
+        attempts.removeAll { $0["session"] as? String == session }
+        attempts.append(["session": session, "calls": usage])
+        try? store.execute("UPDATE daily_archives SET usage=? WHERE id=?", [NativeCompanionData.string(attempts), jobID])
+    }
+    func consolidate(id: String, job: CompanionObject, model: String, hourlyLimit: Int) async throws -> CompanionObject {
+        let client = try await server(), jobID = job["id"] as! String
+        // Independent location: no Companion MCP, inherited plugins or permitted tools.
+        let directory = root.appendingPathComponent("daily/\(id)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let deny: [CompanionObject] = [["action": "*", "resource": "*", "effect": "deny"]]
+        let cfg: CompanionObject = ["default_agent": "archivist", "agents": ["archivist": ["mode": "primary", "system": NativeCompanionDaily.instruction, "permissions": deny, "steps": 1]], "permissions": deny, "mcp": [:], "plugins": [], "snapshots": false]
+        try NativeCompanionData.json(cfg).write(to: directory.appendingPathComponent("opencode.json"), options: .atomic)
+        // A new attempt gets a fresh task session. An interrupted task's partial answer is never reused.
+        var input: CompanionObject = ["title": "Lite2D memory archive \(id)", "agent": "archivist", "location": ["directory": directory.path], "permissions": deny,
+            "metadata": ["lite2dCompanion": true, "characterId": id, "dailyArchive": jobID]]
+        if let slash = model.firstIndex(of: "/") { input["model"] = ["providerID": String(model[..<slash]), "id": String(model[model.index(after: slash)...])] }
+        guard let session = NativeCompanionData.object(try await client.post("api/session", input)["data"])["id"] as? String else { throw NativeCompanionData.error("Cannot create memory archive task") }
+        try store.set("dailyTaskSession:\(session)", session)
+        do {
+            _ = try await client.post("api/session/\(session)/synthetic", ["text": job["input"] ?? "{}", "delivery": "queue", "resume": true, "metadata": ["lite2d": true]])
+            let deadline = Date().addingTimeInterval(180)
+            var reserved = 1
+            while Date() < deadline {
+                try Task.checkCancellation()
+                let messages = NativeCompanionData.array(try await client.get("api/session/\(session)/message", ["limit": "20", "order": "desc"])["data"])
+                let responses = messages.filter { $0["type"] as? String == "assistant" }
+                let attempts = max(1, responses.count) + (NativeCompanionData.object(responses.first?["retry"])["attempt"] as? Int ?? 0)
+                while reserved < attempts {
+                    guard try store.spend(hourlyLimit) else { throw NativeCompanionData.error("Hourly model budget reached during daily consolidation") }
+                    reserved += 1
+                }
+                let active = NativeCompanionData.object(try await client.get("api/session/active")["data"])
+                if active[session] == nil, let response = responses.first, NativeCompanionData.object(response["time"])["completed"] != nil {
+                    await archiveUsage(session: session, jobID: jobID)
+                    if let error = response["error"] as? CompanionObject { throw NativeCompanionData.error(NativeCompanionData.clean(error["message"] as? String ?? "Daily archive failed")) }
+                    let raw = NativeCompanionData.text(response).trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
+                    guard let result = try NativeCompanionData.decode(Data(raw.utf8)) as? CompanionObject else { throw NativeCompanionData.error("Invalid daily archive JSON") }
+                    return result
+                }
+                if (NativeCompanionData.object(responses.first?["retry"])["attempt"] as? Int ?? 0) >= 2 { throw NativeCompanionData.error("Daily archive provider unavailable") }
+                try await Task.sleep(nanoseconds: 300_000_000)
+            }
+            throw NativeCompanionData.error("Daily archive timed out")
+        } catch {
+            // Cleanup must still reach the local service when the caller was cancelled.
+            let cleanup = Task {
+                _ = try? await client.request("POST", "api/session/\(session)/interrupt", body: ["resume": false], timeout: 2.5)
+                await archiveUsage(session: session, jobID: jobID)
+            }
+            await cleanup.value
+            throw error
+        }
+    }
     func interrupt() async {
         guard let client else { return }
         for instance in instances.values { _ = try? await client.request("POST", "api/session/\(instance.session)/interrupt", body: ["resume": false], timeout: 2.5) }

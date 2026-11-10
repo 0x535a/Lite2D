@@ -108,6 +108,7 @@ final class NativeCompanionStore {
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
         try monitorSchema()
+        try dailySchema()
         do {
             try execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED,owner_character_id UNINDEXED,content)")
             ftsAvailable = true
@@ -118,7 +119,7 @@ final class NativeCompanionStore {
                 for evidence in Set(evidenceIDs(row)) { try execute("INSERT OR IGNORE INTO memory_dependencies VALUES (?,?)", [row["id"], evidence]) }
             }
             try execute("INSERT OR IGNORE INTO memory_details SELECT id,NULL,'[]',NULL,0.5,0.5,NULL,created_at,created_at,NULL,NULL,owner_character_id FROM memory_items")
-            try execute("PRAGMA user_version=4")
+            try execute("PRAGMA user_version=5")
         }
     }
     deinit { sqlite3_close(database) }
@@ -286,6 +287,7 @@ final class NativeCompanionStore {
     func memoryDetails(_ items: [CompanionObject]) throws -> [CompanionObject] {
         try items.compactMap { item -> CompanionObject? in
             var result = item
+            if let loop = try rows("SELECT status FROM daily_open_loops WHERE memory_id=?", [item["id"]]).first { result["continuityStatus"] = loop["status"] }
             if let details = try rows("SELECT event_id,subject_ids,source_ref,confidence,salience,occurred_at,learned_at,recorded_at,valid_from,valid_to,created_by FROM memory_details WHERE memory_id=?", [item["id"]]).first {
                 let parser = ISO8601DateFormatter(), now = Date()
                 if let from = details["valid_from"] as? String, let date = parser.date(from: from), date > now { return nil }
@@ -336,6 +338,7 @@ final class NativeCompanionStore {
 
     // Invalidation traverses explicit dependencies; derived text must never outlive its evidence.
     func invalidateDependents(of ids: [String], owner: String) throws {
+        try dailyInvalidate(owner)
         var pending = ids, seen = Set(ids)
         while !pending.isEmpty {
             let source = pending.removeFirst()
@@ -392,6 +395,7 @@ final class NativeCompanionStore {
 
     func forgetCharacter(_ owner: String) throws {
         try transaction {
+            try dailyInvalidate(owner)
             try execute("DELETE FROM monitor_previews")
             try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE owner_character_id=?", [NativeCompanionData.iso(), owner])
             if ftsAvailable { try execute("DELETE FROM memory_fts WHERE owner_character_id=?", [owner]) }

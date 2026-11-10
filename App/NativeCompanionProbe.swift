@@ -23,6 +23,10 @@ enum NativeCompanionProbe {
                 while let line = readLine() {
                     guard let data = line.data(using: .utf8), let command = try NativeCompanionData.decode(data) as? CompanionObject else { continue }
                     switch command["type"] as? String {
+                    case "daily-run":
+                        let now = Date(timeIntervalSince1970: command["now"] as? Double ?? Date().timeIntervalSince1970)
+                        await runtime.runDaily(now: now)
+                        print(NativeCompanionData.string(["type": "daily.done", "data": await runtime.diagnostics()])); fflush(stdout)
                     case "poll": await runtime.tick()
                     case "wait": await runtime.waitForTopic()
                     case "diagnostics": print(NativeCompanionData.string(["type": "diagnostics", "data": await runtime.diagnostics()])); fflush(stdout)

@@ -582,3 +582,11 @@
 "monitor.value.known_person" = "已認識的角色";
 
 "monitor.selected_memory" = "所選記憶";
+
+"companion.daily_time" = "每日記憶整理時間";
+"companion.daily_help" = "到達本地設定時間後，在閒置時儲存記憶並開始新對話。錯過時恢復後補做，勿擾期間可靜默整理。";
+"companion.daily_state" = "記憶整理狀態";
+"companion.daily.pending" = "等待或重試中";
+"companion.daily.committed" = "記憶已儲存，準備新對話";
+"companion.daily.completed" = "已完成";
+"companion.daily.invalidated" = "記憶變更後已失效";

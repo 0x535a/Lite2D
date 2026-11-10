@@ -72,6 +72,21 @@ extension NativeCompanionStore {
         return item
     }
     func monitorReference(owner: String, id: String, kind: String = "reference") throws -> CompanionMonitorItem {
+        let cutoff = get("memoryCutoff:\(owner)") as? String ?? ""
+        if id.hasPrefix("dialogue:"), let seq = Int(id.dropFirst(9)),
+           let row = try rows("SELECT at,payload FROM events WHERE seq=? AND type='utterance' AND at>=?", [seq, cutoff]).first {
+            let data = NativeCompanionData.object(try NativeCompanionData.decode(Data((row["payload"] as! String).utf8)))
+            if data["characterId"] as? String == owner {
+                var item = CompanionMonitorItem(id: id, kind: "event", owner: owner, title: String((data["text"] as? String ?? "").prefix(90)))
+                item.content = data["text"] as? String ?? ""; item.at = row["at"] as? String ?? ""; item.source = "experienced"
+                return item
+            }
+        }
+        if id.hasPrefix("delivery:"), let row = try rows("SELECT d.*,r.received_at AS at FROM deliveries d JOIN daily_receipts r ON r.delivery_id=d.id WHERE d.id=? AND d.recipient=? AND d.status IN ('delivered','context_consumed') AND r.received_at>=?", [String(id.dropFirst(9)), owner, cutoff]).first {
+            var item = CompanionMonitorItem(id: id, kind: "event", owner: owner, title: String((row["text"] as? String ?? "").prefix(90)))
+            item.content = row["text"] as? String ?? ""; item.at = row["at"] as? String ?? ""; item.source = "told_by_other"
+            return item
+        }
         if kind == "public", let row = try? readRecord(id), row["exists"] as? Bool == true {
             var item = CompanionMonitorItem(id: id, kind: "public", owner: "", title: id)
             item.content = monitorText(row["content"]); item.version = monitorText(row["revision"]); item.actions = ["public_edit"]; return item
@@ -359,6 +374,7 @@ extension NativeCompanionStore {
                 default: throw NativeCompanionData.error("Unknown management operation")
                 }
                 if !a.owner.isEmpty {
+                    try dailyInvalidate(a.owner)
                     try set("sessionPolicy:\(a.owner)", "memory-invalidated")
                     try set("memoryCutoff:\(a.owner)", NativeCompanionData.iso())
                     try execute("DELETE FROM persona_views WHERE character_id=?", [a.owner])

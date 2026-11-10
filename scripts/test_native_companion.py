@@ -27,13 +27,13 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 def main():
     sources = ['CompanionMonitorModels.swift', 'NativeCompanionMonitor.swift', 'NativePersonaMemory.swift', 'NativeCompanionStore.swift', 'NativeCompanionTransport.swift', 'NativeClaudeHelper.swift',
-               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift']
+               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift']
     unit = OUT / 'native-tests'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *[str(ROOT / 'App' / name) for name in sources],
-                    str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
+                    str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
-    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False}
+    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0}
 
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -68,6 +68,25 @@ def main():
                 state['read'] = True
                 call = {'name': read_name, 'arguments': '{}'}
             content = '{"skip":true}' if 'TEST_CHARACTER_A' in system else '{"text":"Independent native reply from B","emotion":"neutral"}'
+            if 'You consolidate one character' in system:
+                assert not names, 'Archive tasks must not expose tools'
+                snapshots = []
+                for message in request.get('messages', []):
+                    value = message.get('content', '')
+                    if isinstance(value, list):
+                        value = '\n'.join(part.get('text', '') for part in value)
+                    try:
+                        parsed = json.loads(value)
+                        if isinstance(parsed, dict) and 'dialogue' in parsed:
+                            snapshots.append(parsed)
+                    except (ValueError, TypeError):
+                        pass
+                assert snapshots, request
+                ids = [row['id'] for row in snapshots[-1]['dialogue']]
+                state['dailyCalls'] += 1
+                call = None
+                content = json.dumps({'summary': 'We exchanged greetings and agreed to watch a movie.', 'summaryEvidenceIds': ids,
+                                      'items': [{'kind': 'open_loop', 'content': 'Watch a movie tomorrow.', 'evidenceIds': ids}], 'resolved': []})
             delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': f'call_{state["calls"]}', 'type': 'function', 'function': call}]} if call else {'role': 'assistant', 'content': content}
             self.send_response(200)
             self.send_header('content-type', 'text/event-stream')
@@ -229,9 +248,42 @@ def main():
                 assert current_a != session_a and current_b != session_b and current_a != current_b
                 assert db.execute('SELECT COUNT(*) FROM persona_revisions').fetchone()[0] >= 4
             identity_rotation = True
+        # Exercise the real OpenCode archivist, session rotation and one-time wake memory.
+        config["hourlyRequests"] = 120
+        child, send, until = launch()
+        try:
+            now = time.time()
+            send({'type': 'daily-run', 'now': now})
+            until('daily.done')  # initialize the calendar schedule without a model call
+            with sqlite3.connect(root / 'state.sqlite') as db:
+                due = max(json.loads(row[0])['due'] for row in db.execute("SELECT value FROM state WHERE key LIKE 'dailySchedule:%'"))
+            send({'type': 'daily-run', 'now': due + 1})
+            done = until('daily.done', timeout=120)
+            assert state['dailyCalls'] == 2, done
+            assert all(job['status'] == 'completed' for job in done['data']['dailyArchives']), done
+            send({'type': 'trigger', 'characterId': A})
+            until('topic.end', timeout=75)
+            first_messages = state['messages'][-1]
+            assert 'Watch a movie tomorrow.' in json.dumps(first_messages), first_messages
+            send({'type': 'trigger', 'characterId': A})
+            until('topic.end', timeout=75)
+            send({'type': 'daily-run', 'now': due + 1})
+            until('daily.done')
+            assert state['dailyCalls'] == 2, 'A completed daily batch was generated twice'
+        finally:
+            child.stdin.close()
+            child.wait(timeout=15)
+        assert child.returncode == 0
+        with sqlite3.connect(root / 'state.sqlite') as db:
+            rotated_a = json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{A}',)).fetchone()[0])
+            assert rotated_a != session_a
+            assert db.execute("SELECT COUNT(*) FROM daily_archives WHERE status='completed' AND new_session IS NOT NULL").fetchone()[0] == 2
+            assert db.execute("SELECT COUNT(*) FROM daily_open_loops WHERE status='open'").fetchone()[0] == 2
+            assert all(json.loads(row[0]) for row in db.execute('SELECT usage FROM daily_archives'))
         report = {'passed': True, 'upstreamCalls': state['calls'], 'toolCount': len(state['tools']), 'utterances': [e['text'] for e in all_events if e['type'] == 'utterance'],
                   'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True,
-                  'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved'], 'actual2233IdentityRotation': identity_rotation}
+                  'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved'], 'actual2233IdentityRotation': identity_rotation,
+                  'dailyArchiveCalls': state['dailyCalls'], 'dailyRotationAndRecall': True}
         (OUT / 'native-protocol.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
     server.shutdown()

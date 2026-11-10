@@ -582,3 +582,11 @@
 "monitor.value.known_person" = "Known person";
 
 "monitor.selected_memory" = "Selected memory";
+
+"companion.daily_time" = "Daily memory time";
+"companion.daily_help" = "At this local time, memories are saved and a fresh conversation starts when idle. Missed days are processed after returning. Quiet hours allow silent organization.";
+"companion.daily_state" = "Memory organization";
+"companion.daily.pending" = "Waiting / retrying";
+"companion.daily.committed" = "Memories saved; preparing conversation";
+"companion.daily.completed" = "Completed";
+"companion.daily.invalidated" = "Invalidated after a memory change";

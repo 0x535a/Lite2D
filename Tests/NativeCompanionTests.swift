@@ -40,6 +40,13 @@ private actor FakeRoles: NativeCompanionRoleClient {
         calls.append(id); contexts.append(context)
         return try await handler?(id, context) ?? "{\"text\":\"hello\",\"emotion\":\"happy\"}"
     }
+    func consolidate(id: String, job: CompanionObject, model: String, hourlyLimit: Int) async throws -> CompanionObject {
+        let input = NativeCompanionData.object(try NativeCompanionData.decode(Data((job["input"] as! String).utf8)))
+        let ids = NativeCompanionData.array(input["dialogue"]).compactMap { $0["id"] as? String }
+        return ["summary": "A promised to watch a movie tomorrow.", "summaryEvidenceIds": ids,
+                "items": [["kind": "open_loop", "content": "Watch a movie tomorrow", "evidenceIds": ids]], "resolved": []]
+    }
+    func rotate(id: String, jobID: String, model: String) async throws -> String { "ses_daily_" + jobID }
     func receive(id: String, from: String, text: String, messageID: String, model: String) async throws -> String { receipts += 1; return "msg_receipt" }
     func reserveContinuation(_ id: String) async throws {}
     func forget(_ id: String) {}
@@ -472,6 +479,7 @@ private actor ServiceFixture {
             await runtime.command(["type": "stop"]); await runtime.waitForTopic()
             try check(!events.all().contains { $0["text"] as? String == "late speech" }, "Cancellation prevents delayed generated speech from appearing")
             await runtime.close()
+            try await CompanionDailyTests.run(root: root, prompt: promptFile, helper: script, node: node, executable: executable, check: check)
             try CompanionMonitorTests.run(root: root, check: check)
             print("PASS: \(checks.count) native Companion checks")
             try FileManager.default.removeItem(at: root)

@@ -55,6 +55,9 @@ actor NativeCompanionRuntime {
     private var candidates: [String: CompanionObject] = [:]
     private var topic: NativeCompanionTopic?
     private var timer: Task<Void, Never>?
+    private var dailyTask: Task<Void, Never>?
+    private var dailyBusy = false
+    private var dailyCheckAt = Date.distantPast
     private var pollAt = Date.distantPast
     private var polling = false
     private var nextIdle = Double.infinity
@@ -119,7 +122,9 @@ actor NativeCompanionRuntime {
     private var visible: [CompanionObject] { characters.filter { $0["enabled"] as? Bool == true && $0["visible"] as? Bool == true } }
     private func sourceEnabled(_ backend: String) -> Bool { enabled && NativeCompanionData.object(NativeCompanionData.object(config["sources"])[backend])["enabled"] as? Bool == true }
     private func status() {
-        emit("status", ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil, "roleErrors": roleErrors, "nextIdle": nextIdle.isFinite ? nextIdle : NSNull()])
+        emit("status", ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil || dailyBusy, "roleErrors": roleErrors,
+            "dailyArchives": (try? store.rows("SELECT owner,status,end_at,error FROM daily_archives ORDER BY end_at DESC LIMIT 20")) ?? [],
+            "nextIdle": nextIdle.isFinite ? nextIdle : NSNull()])
     }
     private func serviceChanged(_ state: CompanionObject) {
         guard !stopped else { return }
@@ -132,6 +137,8 @@ actor NativeCompanionRuntime {
         let previousInterval = interval, previousEnabled = enabled, previousPaused = paused
         let old = Dictionary(uniqueKeysWithValues: NativeCompanionData.backends.map { ($0, sourceEnabled($0)) })
         config = next
+        dailyCheckAt = .distantPast
+        if !enabled || next["sleeping"] as? Bool == true { dailyTask?.cancel() }
         if next["webSearchEnabled"] as? Bool == false {
             for task in searches.values { task.cancel() }
             searches.removeAll()
@@ -148,15 +155,23 @@ actor NativeCompanionRuntime {
             }
             pollAt = .distantPast
         }
-        if !enabled || paused || topic?.participants.contains(where: { id in !visible.contains(where: { $0["id"] as? String == id }) }) == true || topic?.source.map({ !sourceEnabled($0) }) == true { stop() }
+        if !enabled || paused || topic?.participants.contains(where: { id in !visible.contains(where: { $0["id"] as? String == id }) }) == true || topic?.source.map({ !sourceEnabled($0) }) == true { stop(cancelArchive: false) }
         status()
     }
     private func scheduleIdle() { nextIdle = interval > 0 ? NativeCompanionData.now() + interval * 60000 : .infinity }
     func tick() async {
         guard ready, !stopped, enabled else { return }
+        if dailyBusy { return }
+        if topic == nil, Date() >= dailyCheckAt, config["sleeping"] as? Bool != true {
+            dailyCheckAt = Date().addingTimeInterval(15)
+            dailyBusy = true
+            dailyTask = Task { [weak self] in await self?.runDaily() }
+            await dailyTask?.value
+        }
+        guard !stopped, enabled, !dailyBusy else { return }
         if Date() >= pollAt && !polling {
             polling = true; pollAt = Date().addingTimeInterval(15)
-            let own = Set(((try? store.rows("SELECT value FROM state WHERE key LIKE 'session:%'")) ?? []).compactMap { row -> String? in
+            let own = Set(((try? store.rows("SELECT value FROM state WHERE key LIKE 'session:%' OR key LIKE 'dailyTaskSession:%' OR key LIKE 'dailyRotation:%'")) ?? []).compactMap { row -> String? in
                 (row["value"] as? String)?.data(using: .utf8).flatMap { try? NativeCompanionData.decode($0) } as? String
             })
             // The observers are independent. A failed source never disables others.
@@ -190,7 +205,7 @@ actor NativeCompanionRuntime {
         } else if now >= nextIdle { scheduleIdle(); startTopic(reason: "idle_opportunity") }
     }
     private func startTopic(reason: String, evidence: CompanionObject? = nil, source: String? = nil, characterID: String? = nil) {
-        guard !stopped, enabled, !paused, topic == nil else { return }
+        guard !stopped, enabled, !paused, topic == nil, !dailyBusy else { return }
         var choices = visible
         if let characterID { choices = choices.filter { $0["id"] as? String == characterID } }
         guard !choices.isEmpty else { return }
@@ -239,7 +254,8 @@ actor NativeCompanionRuntime {
         var context = input; context["topicId"] = topic.id; context["quotedEvidence"] = true; context["intent"] = prompt.turnIntent
         context["currentTime"] = NativeCompanionData.currentTime()
         if input["reason"] as? String == "manual_test" { context["manualTest"] = prompt.manualTest }
-        context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" && ($0["createdAt"] as? String ?? "") > (store.get("memoryCutoff:\(id)") as? String ?? "") }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
+        let contextSince = max(store.get("memoryCutoff:\(id)") as? String ?? "", store.get("contextSince:\(id)") as? String ?? "")
+        context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" && ($0["createdAt"] as? String ?? "") > contextSince }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
         context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }
         context["privateMemoryPolicy"] = "旧日记是未分类、可能过时的个人笔记，不是锁定身份或独立经历证据。当前 Persona 与公开身份卡优先；冲突内容不得覆盖身份。"
         context["privateMemory"] = NativeCompanionData.clean(store.get("memory:\(id)") as? String ?? "", limit: 3000)
@@ -262,6 +278,7 @@ actor NativeCompanionRuntime {
         roleErrors.removeValue(forKey: id)
         if let envelope {
             try store.execute("UPDATE deliveries SET status='delivered' WHERE id=?", [envelope["id"]])
+            try store.execute("INSERT OR IGNORE INTO daily_receipts VALUES (?,?)", [envelope["id"], NativeCompanionData.iso()])
             _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: envelope["id"] as? String ?? "", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), sourceActorID: envelope["from"] as? String)
         }
         if topic.sentBy.remove(id) != nil { return }
@@ -388,7 +405,8 @@ actor NativeCompanionRuntime {
         default: throw NativeCompanionData.error("Tool denied")
         }
     }
-    func stop(reason: String = "cancelled") {
+    func stop(reason: String = "cancelled", cancelArchive: Bool = true) {
+        if cancelArchive { dailyTask?.cancel() }
         for task in searches.values { task.cancel() }
         searches.removeAll()
         candidates = [:]; scheduleIdle()
@@ -433,7 +451,7 @@ actor NativeCompanionRuntime {
             case "stop": stop()
             case "trigger":
                 guard enabled, !paused else { throw NativeCompanionData.error("Companion is disabled or in Do Not Disturb") }
-                guard topic == nil else { throw NativeCompanionData.error("A conversation is already running") }
+                guard topic == nil, !dailyBusy else { throw NativeCompanionData.error("A conversation or memory consolidation is already running") }
                 guard let id = command["characterId"] as? String, visible.contains(where: { $0["id"] as? String == id }) else { throw NativeCompanionData.error("Enable and show this character before testing") }
                 guard try store.requestCount() < hourly else { throw NativeCompanionData.error("Hourly model budget reached") }
                 startTopic(reason: "manual_test", characterID: id)
@@ -509,12 +527,78 @@ actor NativeCompanionRuntime {
         }
     }
     func waitForTopic() async { await topic?.task?.value }
+    // One job at a time; calendar catch-up does not rotate through empty intermediate Sessions.
+    func runDaily(now: Date = Date(), zone: TimeZone = .current) async {
+        guard ready, !stopped, enabled, topic == nil, config["sleeping"] as? Bool != true else { dailyBusy = false; return }
+        dailyBusy = true
+        defer { dailyBusy = false; if !stopped { status() } }
+        let memoryStore = store!
+        let minute = min(1439, max(0, config["dailyConsolidationMinute"] as? Int ?? 240))
+        for character in characters where character["enabled"] as? Bool == true {
+            let id = character["id"] as! String
+            var batch: CompanionObject?
+            do {
+                try Task.checkCancellation()
+                guard enabled, !stopped else { return }
+                guard var job = try memoryStore.dailyPlan(owner: id, minute: minute, now: now, zone: zone),
+                      (job["retry_at"] as? Double ?? 0) <= now.timeIntervalSince1970 else { continue }
+                batch = job
+                let jobID = job["id"] as! String
+                if job["status"] as? String == "pending" {
+                    let input = NativeCompanionData.object(try NativeCompanionData.decode(Data((job["input"] as! String).utf8)))
+                    // Discard stale candidates after user corrections/forgetting. Never regenerate forgotten text.
+                    if input["revision"] as? String != (try memoryStore.dailyRevision(id)) {
+                        try memoryStore.execute("UPDATE daily_archives SET input=?,error=NULL WHERE id=?", [NativeCompanionData.string([
+                            "owner": id, "from": input["from"] ?? "", "to": input["to"] ?? "", "timeZone": zone.identifier,
+                            "dialogue": try memoryStore.dailyDialogue(owner: id, from: Date(timeIntervalSince1970: job["start_at"] as! Double), to: Date(timeIntervalSince1970: job["end_at"] as! Double)),
+                            "existingMemories": try memoryStore.memorySearch(owner: id, query: "", limit: 100), "openLoops": try memoryStore.dailyLoops(id), "revision": try memoryStore.dailyRevision(id), "identity": try memoryStore.publicIdentityCard(characterID: id, name: "")]), jobID])
+                        job = try memoryStore.rows("SELECT * FROM daily_archives WHERE id=?", [jobID]).first!
+                    }
+                    let snapshot = NativeCompanionData.object(try NativeCompanionData.decode(Data((job["input"] as! String).utf8)))
+                    let result: CompanionObject
+                    if NativeCompanionData.array(snapshot["dialogue"]).isEmpty { result = ["summary": "", "items": [], "resolved": []] }
+                    else {
+                        guard try memoryStore.spend(hourly) else { throw NativeCompanionData.error("Hourly model budget reached; daily consolidation will retry") }
+                        try memoryStore.execute("UPDATE daily_archives SET attempts=attempts+1 WHERE id=?", [jobID])
+                        result = try await roles.consolidate(id: id, job: job, model: model, hourlyLimit: hourly)
+                    }
+                    try Task.checkCancellation()
+                    guard enabled, !stopped else { return }
+                    try memoryStore.dailyCommit(jobID, output: result)
+                }
+                try Task.checkCancellation()
+                guard enabled, !stopped else { return }
+                // Invalidated while awaiting a model: never switch Sessions for that batch.
+                guard try memoryStore.rows("SELECT status FROM daily_archives WHERE id=?", [jobID]).first?["status"] as? String == "committed" else { continue }
+                let end = job["end_at"] as! Double
+                let caughtUp = NativeCompanionDaily.next(after: Date(timeIntervalSince1970: end), minute: minute, zone: zone) > now
+                // Empty days with no role Session need no remote work.
+                var session: String?
+                if caughtUp, memoryStore.get("session:\(id)") is String, memoryStore.get("dailyNeedsRotation:\(id)") as? Bool == true {
+                    session = try await roles.rotate(id: id, jobID: jobID, model: model)
+                    try memoryStore.set("dailyBridgeFrom:\(id)", end)
+                }
+                try memoryStore.dailyFinish(jobID, newSession: session, minute: minute, zone: zone, now: now)
+                try memoryStore.exportNotes()
+                emit("monitor.invalidate", ["owner": id])
+            } catch {
+                guard !stopped else { return }
+                if let job = batch {
+                    let attempts = job["attempts"] as? Int ?? 0
+                    let delay = min(3600.0, 60 * pow(2, Double(min(attempts, 6))))
+                    try? memoryStore.execute("UPDATE daily_archives SET retry_at=?,error=? WHERE id=? AND status IN ('pending','committed')", [now.timeIntervalSince1970 + delay, NativeCompanionData.clean(error.localizedDescription, limit: 240), job["id"]])
+                }
+            }
+        }
+    }
     func helperDiagnostics() async -> CompanionObject { await helper.diagnostics() }
-    func diagnostics() async -> CompanionObject { ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil, "helper": await helper.diagnostics()] }
+    func diagnostics() async -> CompanionObject { ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil || dailyBusy,
+        "dailyArchives": (try? store.rows("SELECT owner,status,end_at,error,attempts,usage FROM daily_archives ORDER BY end_at DESC LIMIT 20")) ?? [], "helper": await helper.diagnostics()] }
     func reconcileAfterWake() async { await observers.reconcileClaude(); pollAt = .distantPast }
     func close() async {
         guard !stopped else { return }
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
+        dailyTask?.cancel(); await dailyTask?.value; dailyTask = nil
         await serviceMonitor?.close(); serviceMonitor = nil
         await observers.close(); await roles?.close()
         await topic?.task?.value

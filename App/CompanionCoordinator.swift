@@ -45,6 +45,7 @@ struct CompanionSettings: Codable {
     var bubbleRetentionSeconds = 8
     var intervalMinutes = 30
     var hourlyRequests = 12
+    var dailyConsolidationMinute = 240
     var model = ""
     var nodePath = ""
     var opencodePath = ""
@@ -53,7 +54,7 @@ struct CompanionSettings: Codable {
     var characters: [String: CompanionCharacterSettings] = [:]
     var groups: [CompanionGroupSettings] = []
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, model, nodePath, opencodePath, codexPath, sources, characters, groups
+        case enabled, paused, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, dailyConsolidationMinute, model, nodePath, opencodePath, codexPath, sources, characters, groups
     }
     init() {}
     init(from decoder: Decoder) throws {
@@ -64,6 +65,7 @@ struct CompanionSettings: Codable {
         bubbleRetentionSeconds = min(max((try? c.decodeIfPresent(Int.self, forKey: .bubbleRetentionSeconds)) ?? 8, 1), 300)
         intervalMinutes = (try? c.decodeIfPresent(Int.self, forKey: .intervalMinutes)) ?? 30
         hourlyRequests = (try? c.decodeIfPresent(Int.self, forKey: .hourlyRequests)) ?? 12
+        dailyConsolidationMinute = min(1439, max(0, (try? c.decodeIfPresent(Int.self, forKey: .dailyConsolidationMinute)) ?? 240))
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
         nodePath = (try? c.decodeIfPresent(String.self, forKey: .nodePath)) ?? ""
         opencodePath = (try? c.decodeIfPresent(String.self, forKey: .opencodePath)) ?? ""
@@ -95,6 +97,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var entries: [CompanionEntry] = []
     @Published private(set) var hasSpeech = false
     @Published var busy = false
+    @Published var dailyArchives: [[String: Any]] = []
     @Published var roleErrors: [String: String] = [:]
     @Published var records: [[String: String]] = []
     @Published var memoryContents: [String: String] = [:]
@@ -189,6 +192,7 @@ final class CompanionCoordinator: ObservableObject {
         }
         settings.intervalMinutes = min(max(settings.intervalMinutes, 0), 1440)
         settings.hourlyRequests = min(max(settings.hourlyRequests, 1), 120)
+        settings.dailyConsolidationMinute = min(max(settings.dailyConsolidationMinute, 0), 1439)
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -424,6 +428,7 @@ final class CompanionCoordinator: ObservableObject {
             sources = event["sources"] as? [String: [String: Any]] ?? [:]; busy = event["busy"] as? Bool ?? false
             openCodeService = event["openCodeService"] as? [String: Any] ?? ["state": "disabled"]
             roleErrors = event["roleErrors"] as? [String: String] ?? [:]
+            dailyArchives = event["dailyArchives"] as? [[String: Any]] ?? []
         }
         if type == "topic.start" { busy = true }
         if type == "history" { loadHistory(event) }
@@ -491,6 +496,7 @@ final class CompanionCoordinator: ObservableObject {
         let value: [String: Any] = ["enabled": settings.enabled, "paused": settings.paused || manager.sleeping,
             "webSearchEnabled": settings.webSearchEnabled,
             "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model,
+            "dailyConsolidationMinute": settings.dailyConsolidationMinute, "sleeping": manager.sleeping,
             "sources": settings.sources.mapValues { ["enabled": $0.enabled] as [String: Any] }, "characters": characters]
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: .sortedKeys), let encoded = String(data: data, encoding: .utf8) else { return }
         if force || encoded != lastSync { lastSync = encoded; send(["type": "configure", "config": value]) }

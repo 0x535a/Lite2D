@@ -162,6 +162,19 @@ struct CompanionGeneralSections: View {
                     Stepper(L10n.text("companion.interval"), value: binding(\.intervalMinutes), in: 0...1440, step: 1).labelsHidden()
                 }
             }
+            DatePicker(L10n.text("companion.daily_time"), selection: Binding(get: {
+                Calendar.current.date(bySettingHour: companion.settings.dailyConsolidationMinute / 60, minute: companion.settings.dailyConsolidationMinute % 60, second: 0, of: Date()) ?? Date()
+            }, set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                companion.settings.dailyConsolidationMinute = (parts.hour ?? 4) * 60 + (parts.minute ?? 0)
+                companion.changed()
+            }), displayedComponents: .hourAndMinute)
+            Text(L10n.text("companion.daily_help")).font(.caption).foregroundStyle(.secondary)
+            if let archive = companion.dailyArchives.first {
+                let state = archive["status"] as? String ?? "pending"
+                LabeledContent(L10n.text("companion.daily_state")) { Text(L10n.text("companion.daily." + state)).foregroundStyle(.secondary) }
+                if let error = archive["error"] as? String { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
+            }
             Stepper(L10n.text("companion.budget", String(companion.settings.hourlyRequests)), value: binding(\.hourlyRequests), in: 1...120)
         } header: { Text(L10n.text("companion.initiative")) } footer: { Text(L10n.text("companion.interval_help")).fixedSize(horizontal: false, vertical: true) }
         Section {
