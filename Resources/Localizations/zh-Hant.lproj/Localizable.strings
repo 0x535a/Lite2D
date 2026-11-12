@@ -244,7 +244,7 @@
 "companion.budget" = "每小時最多 {0} 次生成請求";
 "companion.interval_help" = "計時器只提供思考機會，角色可以保持安靜。關閉閒聊不影響工作事件觸發；冷卻和全域預算始終生效。";
 "companion.observers" = "工作觀察";
-"companion.observer_help" = "開啟後觀察此來源在本機可讀取的全部對話，涵蓋所有專案與工作樹。篩選後的內容可能傳送給角色使用的模型服務。關閉後停止讀取，已有上下文仍會保留。";
+"companion.observer_help" = "觀察跨專案與工作樹的工作階段中繼資料。角色模型僅接收不透明的活動參照與不確定的更新時間，不接收標題、路徑或訊息正文。關閉後停止後續讀取；既有外部歷史不會自動刪除。";
 "companion.source.available" = "已連線";
 "companion.source.disabled" = "未觀察";
 "companion.source.unavailable" = "暫時無法使用";
@@ -622,3 +622,17 @@
 "perception.state.permission_denied" = "存取遭拒";
 "perception.live" = "適時主動表達";
 "perception.share_schedule" = "允許泛化的行程提醒";
+
+// Experimental read-only notification adapter
+"perception.notifications" = "其他 App 通知（實驗性）";
+"perception.notification_apps" = "允許的 App Bundle ID，以逗號分隔";
+"perception.notification_content" = "在本機檢查所選通知內容的敏感模式";
+"perception.fda_settings" = "開啟完整磁碟存取設定…";
+"perception.notification_help" = "此非公開唯讀介面可能需要完整磁碟存取，系統升級後可能失效。只查詢白名單 App；正文檢查預設關閉。標題及正文不會儲存或傳送給角色模型，首次啟用不補播歷史。";
+"perception.macos.notification.usernoted" = "通知";
+"perception.state.needs_allowlist" = "請先選擇允許的 App";
+"perception.state.not_supported" = "目前環境不支援";
+"perception.state.unsupported_schema" = "資料庫格式不相容";
+"perception.state.temporarily_unavailable" = "暫時無法使用";
+"perception.notification_metrics" = "最近一批：新增或更新 {0} · 已去重 {1} · 本機敏感分類 {2}";
+"perception.notification_coverage" = "擷取範圍有限，部分歷史或更新可能無法取得。通知記錄不證明橫幅送達或使用者已讀。";

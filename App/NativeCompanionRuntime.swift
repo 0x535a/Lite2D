@@ -56,6 +56,7 @@ actor NativeCompanionRuntime {
     private var config: CompanionObject = [:]
     private var macPerception: NativeMacPerception?
     private var calendarPerception: NativeCalendarPerception?
+    private var notificationPerception: NativeNotificationPerception?
     private var perceptionSettings = CompanionPerceptionSettings()
     private var perceptionStatus: [String: CompanionObject] = [:]
     private var activityContext: CompanionActivityContext?
@@ -201,6 +202,11 @@ actor NativeCompanionRuntime {
             if settings.shareSchedule && ["macos.calendar", "macos.reminders"].contains(source) {
                 policy.allowedUses.append(.expression); policy.remoteInferenceAllowed = true
             }
+            if source == NativeNotificationPerception.source {
+                policy.allowedCharacterIds = []; policy.allowedUses = [.audit]
+                policy.remoteInferenceAllowed = false; policy.memoryAllowed = false
+                policy.resourceScopeRevision = CompanionNotificationDatabase.scopeRevision(apps: settings.notificationAllowlist, content: settings.notificationContent)
+            }
             if let effective = try? store.setPerceptionConsent(source: source, enabled: settings.enabled(source), policy: policy) {
                 if settings.enabled(source) { epochs[source] = effective.consentEpoch }
                 if perceptionStatus[source]?["consentEpoch"] as? Int != effective.consentEpoch || !settings.enabled(source) {
@@ -222,7 +228,34 @@ actor NativeCompanionRuntime {
             calendarPerception = await MainActor.run { NativeCalendarPerception { [weak self] signal in Task { await self?.receiveCalendarSignal(signal) } } }
         }
         guard requestID == perceptionConfiguration, !stopped else { return }
-        await calendarPerception?.configure(epochs: epochs, sleeping: sleeping)
+        await calendarPerception?.configure(epochs: epochs, sleeping: sleeping || perceptionSleeping)
+        if notificationPerception == nil {
+            notificationPerception = NativeNotificationPerception(store: store) { [weak self] signal in Task { await self?.receiveNotificationSignal(signal) } }
+        }
+        guard requestID == perceptionConfiguration, !stopped else { return }
+        await notificationPerception?.configure(epoch: epochs[NativeNotificationPerception.source], apps: settings.notificationAllowlist, contentAllowed: settings.notificationContent, sleeping: sleeping || perceptionSleeping)
+    }
+    private func syncOptionalPerceptionPause() async {
+        guard managePerceptionSensors, !stopped else { return }
+        let request = perceptionConfiguration
+        var epochs: [String: Int] = [:]
+        for source in CompanionPerceptionSettings.sourceNames where perceptionSettings.enabled(source) {
+            epochs[source] = try? store.perceptionPolicy(source)?.consentEpoch
+        }
+        let paused = perceptionSleeping || config["sleeping"] as? Bool == true
+        await calendarPerception?.configure(epochs: epochs, sleeping: paused)
+        guard request == perceptionConfiguration, !stopped else { return }
+        await notificationPerception?.configure(epoch: epochs[NativeNotificationPerception.source], apps: perceptionSettings.notificationAllowlist,
+            contentAllowed: perceptionSettings.notificationContent, sleeping: paused)
+    }
+    private func receiveNotificationSignal(_ signal: CompanionNotificationSignal) {
+        let source = NativeNotificationPerception.source
+        guard !stopped, ready, enabled, perceptionSettings.enabled(source),
+              let policy = try? store.perceptionPolicy(source), policy.consentEpoch == signal.epoch else { return }
+        perceptionStatus[source] = ["state": signal.state, "consentEpoch": signal.epoch, "checkedAt": NativeCompanionData.iso(),
+            "baseline": signal.baseline, "observed": signal.observed, "duplicates": signal.duplicates,
+            "restricted": signal.restricted, "malformed": signal.malformed, "gaps": signal.gaps]
+        status()
     }
     private func receiveCalendarSignal(_ signal: CompanionCalendarSignal) {
         guard !stopped, ready, enabled, perceptionSettings.enabled(signal.source),
@@ -261,7 +294,10 @@ actor NativeCompanionRuntime {
         perceptionStatus[signal.source] = ["state": signal.health, "checkedAt": NativeCompanionData.iso(now), "consentEpoch": signal.epoch]
         if let seconds = signal.idleSeconds { perceptionIdleSeconds = seconds }
         if let available = signal.sessionAvailable { perceptionSessionAvailable = available }
-        if let sleeping = signal.sleeping { perceptionSleeping = sleeping }
+        if let sleeping = signal.sleeping, sleeping != perceptionSleeping {
+            perceptionSleeping = sleeping
+            Task { [weak self] in await self?.syncOptionalPerceptionPause() }
+        }
         if signal.source == "macos.idle", signal.subject == "active", activityContext?.category == .idle { activityContext = nil }
         if let category = signal.category, granted.allowedUses.contains(.activityContext) {
             activityContext = CompanionActivityContext(category: category, confidence: signal.confidence, observedAt: now, expiresAt: now.addingTimeInterval(300), source: signal.source, consentEpoch: signal.epoch)
@@ -900,6 +936,7 @@ actor NativeCompanionRuntime {
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
         dailyTask?.cancel(); await dailyTask?.value; dailyTask = nil
         await serviceMonitor?.close(); serviceMonitor = nil
+        await notificationPerception?.stop(); notificationPerception = nil
         await calendarPerception?.stop(); calendarPerception = nil
         await macPerception?.stop(); macPerception = nil
         await observers.close(); await roles?.close()

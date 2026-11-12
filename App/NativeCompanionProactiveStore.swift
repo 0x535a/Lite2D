@@ -51,6 +51,7 @@ extension NativeCompanionStore {
         try invalidateProactiveDependency(kind: "source", id: source, reason: "source_revoked")
         let events = try rows("SELECT id FROM perception_events WHERE source=?", [source]).compactMap { $0["id"] as? String }
         for event in events { try invalidateProactiveDependency(kind: "event", id: event, reason: "source_revoked") }
+        try execute("DELETE FROM notification_versions WHERE source=?", [source])
         try execute("DELETE FROM perception_events WHERE source=?", [source]); try execute("DELETE FROM perception_cursors WHERE source=?", [source])
     }
     // `retentionSeconds=0`: persist only opaque dedupe identity, never the observation body.

@@ -244,7 +244,7 @@
 "companion.budget" = "1 時間に最大 {0} 回の生成";
 "companion.interval_help" = "タイマーは考える機会を与えるだけで、発言を強制しません。オフでも作業に応じた発言は続きます。クールダウンと共有予算は常に適用されます。";
 "companion.observers" = "作業の観察";
-"companion.observer_help" = "有効にすると、このソースからローカルで読める全プロジェクトとワークツリーの会話を観察します。抜粋はキャラクターのモデルサービスに送信される場合があります。オフにすると以後の読み取りは停止しますが、既存の文脈は残ります。";
+"companion.observer_help" = "プロジェクトやワークツリーをまたぐセッションのメタデータを観察します。モデルに渡すのは不透明な参照と不確かな更新時刻だけで、タイトル、パス、メッセージ本文は含みません。無効化すると以後の読み取りは停止しますが、既存の外部履歴は自動削除されません。";
 "companion.source.available" = "接続済み";
 "companion.source.disabled" = "観察していません";
 "companion.source.unavailable" = "利用できません";
@@ -622,3 +622,17 @@
 "perception.state.permission_denied" = "アクセス拒否";
 "perception.live" = "適切な時に話しかける";
 "perception.share_schedule" = "一般的な予定リマインダーを許可";
+
+// Experimental read-only notification adapter
+"perception.notifications" = "他アプリの通知（実験的）";
+"perception.notification_apps" = "許可するアプリの Bundle ID（カンマ区切り）";
+"perception.notification_content" = "選択した通知内容の機密パターンを端末内で検出";
+"perception.fda_settings" = "フルディスクアクセス設定を開く…";
+"perception.notification_help" = "非公開の読み取り専用機能です。フルディスクアクセスが必要になる場合があり、OS更新で利用できなくなることがあります。許可アプリのみを対象とし、本文検査は初期状態で無効です。タイトルや本文を保存したりモデルへ送信したりせず、過去の履歴も再生しません。";
+"perception.macos.notification.usernoted" = "通知";
+"perception.state.needs_allowlist" = "許可アプリを選択してください";
+"perception.state.not_supported" = "この環境では未対応";
+"perception.state.unsupported_schema" = "未対応のデータベース形式";
+"perception.state.temporarily_unavailable" = "一時的に利用できません";
+"perception.notification_metrics" = "直近の処理：新規・更新 {0} · 重複除外 {1} · 端末内で機密分類 {2}";
+"perception.notification_coverage" = "取得範囲には上限があり、一部の履歴や更新を取得できないことがあります。記録は通知の表示や既読を証明しません。";

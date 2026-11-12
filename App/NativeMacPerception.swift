@@ -11,10 +11,13 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var network = false
     var calendar = false
     var reminders = false
+    var notifications = false
+    var notificationContent = false
+    var notificationApps = ""
     var shareActivity = false
     var shareSchedule = false
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, shareActivity, shareSchedule, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -25,11 +28,17 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         network = (try? c.decode(Bool.self, forKey: .network)) ?? false
         calendar = (try? c.decode(Bool.self, forKey: .calendar)) ?? false
         reminders = (try? c.decode(Bool.self, forKey: .reminders)) ?? false
+        notifications = (try? c.decode(Bool.self, forKey: .notifications)) ?? false
+        notificationContent = (try? c.decode(Bool.self, forKey: .notificationContent)) ?? false
+        notificationApps = (try? c.decode(String.self, forKey: .notificationApps)) ?? ""
         shareActivity = (try? c.decode(Bool.self, forKey: .shareActivity)) ?? false
         shareSchedule = (try? c.decode(Bool.self, forKey: .shareSchedule)) ?? false
         appOverrides = (try? c.decode([String: CompanionActivityCategory].self, forKey: .appOverrides)) ?? [:]
     }
-    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders"]
+    var notificationAllowlist: [String] {
+        Array(Set(notificationApps.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
+    }
+    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted"]
     func enabled(_ source: String) -> Bool {
         guard mode != .off else { return false }
         switch source {
@@ -40,6 +49,7 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         case "macos.network": return network
         case "macos.calendar": return calendar
         case "macos.reminders": return reminders
+        case "macos.notification.usernoted": return notifications
         default: return false
         }
     }

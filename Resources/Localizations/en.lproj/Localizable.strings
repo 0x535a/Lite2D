@@ -244,7 +244,7 @@
 "companion.budget" = "Up to {0} generation requests per hour";
 "companion.interval_help" = "The timer offers a chance to think, not an obligation to speak. Turning it off keeps work-triggered comments. Cooldowns and the shared budget still apply.";
 "companion.observers" = "Work Observation";
-"companion.observer_help" = "When enabled, observes all locally available conversations for this source, across projects and worktrees. Filtered excerpts may be sent to the character’s model service. Turning it off stops future reads; existing context remains.";
+"companion.observer_help" = "Observe session metadata across projects and worktrees. Character models receive only opaque activity references and uncertain update timestamps, without titles, paths or message content. Disabling stops future reads; existing external histories are not automatically erased.";
 "companion.source.available" = "Connected";
 "companion.source.disabled" = "Not observing";
 "companion.source.unavailable" = "Unavailable";
@@ -622,3 +622,17 @@
 "perception.state.permission_denied" = "Access denied";
 "perception.live" = "Gentle proactive expression";
 "perception.share_schedule" = "Allow generic schedule reminders";
+
+// Experimental read-only notification adapter
+"perception.notifications" = "Other App notifications (experimental)";
+"perception.notification_apps" = "Allowed App bundle IDs, separated by commas";
+"perception.notification_content" = "Inspect selected notification content locally for sensitive patterns";
+"perception.fda_settings" = "Open Full Disk Access settings…";
+"perception.notification_help" = "This unofficial read-only adapter may require Full Disk Access and can stop working after a system update. Only the selected Apps are queried. Content inspection is off by default. Titles and bodies are never saved or sent to character models; old history is not replayed.";
+"perception.macos.notification.usernoted" = "Notifications";
+"perception.state.needs_allowlist" = "Choose allowed Apps first";
+"perception.state.not_supported" = "Not supported here";
+"perception.state.unsupported_schema" = "Unsupported database format";
+"perception.state.temporarily_unavailable" = "Temporarily unavailable";
+"perception.notification_metrics" = "Latest batch: {0} new/updated · {1} deduplicated · {2} locally classified as sensitive";
+"perception.notification_coverage" = "Coverage is bounded; some history or updates may be unavailable. Notification records do not prove delivery or read status.";

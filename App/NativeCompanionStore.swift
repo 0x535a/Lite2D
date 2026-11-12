@@ -109,6 +109,7 @@ final class NativeCompanionStore {
         ] { try execute(sql) }
         try monitorSchema()
         try dailySchema()
+        try notificationSchema()
         try transaction { try proactiveSchema() }
         do {
             try execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED,owner_character_id UNINDEXED,content)")
@@ -155,7 +156,11 @@ final class NativeCompanionStore {
         for (i, value) in args.enumerated() {
             let index = Int32(i + 1)
             if let s = value as? String { sqlite3_bind_text(result, index, s, -1, transient) }
-            else if let n = value as? NSNumber { sqlite3_bind_double(result, index, n.doubleValue) }
+            else if let n = value as? NSNumber {
+                let type = String(cString: n.objCType)
+                if type == "d" || type == "f" { sqlite3_bind_double(result, index, n.doubleValue) }
+                else { sqlite3_bind_int64(result, index, n.int64Value) }
+            }
             else { sqlite3_bind_null(result, index) }
         }
         return result

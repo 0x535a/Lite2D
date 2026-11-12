@@ -34,6 +34,7 @@ struct CompanionPerceptionPolicy: Codable, Equatable {
     var remoteInferenceAllowed = false
     var memoryAllowed = false
     var consentEpoch = 1
+    var resourceScopeRevision: String?
     func permits(_ character: String, use: CompanionPerceptionUse, remote: Bool = false) -> Bool {
         allowedCharacterIds.contains(character) && allowedUses.contains(use) && (!remote || remoteInferenceAllowed)
     }

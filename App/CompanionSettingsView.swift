@@ -175,6 +175,22 @@ struct CompanionGeneralSections: View {
                     Button(L10n.text("perception.authorize", L10n.text("perception." + source))) { companion.authorizePerception(source) }
                 }
             }
+            Toggle(L10n.text("perception.notifications"), isOn: perception(\.notifications))
+            if companion.settings.perception.notifications {
+                TextField(L10n.text("perception.notification_apps"), text: perception(\.notificationApps))
+                Toggle(L10n.text("perception.notification_content"), isOn: perception(\.notificationContent))
+                Button(L10n.text("perception.fda_settings")) {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
+                }
+                Text(L10n.text("perception.notification_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let info = companion.perceptionSources[NativeNotificationPerception.source], let count = info["observed"] as? Int {
+                    Text(L10n.text("perception.notification_metrics", String(count), String(info["duplicates"] as? Int ?? 0), String(info["restricted"] as? Int ?? 0)))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if (info["gaps"] as? [String])?.isEmpty == false {
+                        Text(L10n.text("perception.notification_coverage")).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             Toggle(L10n.text("perception.share_activity"), isOn: perception(\.shareActivity))
             Toggle(L10n.text("perception.share_schedule"), isOn: perception(\.shareSchedule))
             ForEach(CompanionPerceptionSettings.sourceNames, id: \.self) { source in
