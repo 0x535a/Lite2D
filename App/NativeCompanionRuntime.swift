@@ -59,6 +59,10 @@ actor NativeCompanionRuntime {
     private var calendarPerception: NativeCalendarPerception?
     private var notificationPerception: NativeNotificationPerception?
     private var focusPerception: NativeFocusPerception?
+    private var directoryPerception: NativeDirectoryPerception?
+    private var audioPerception: NativeAudioPerception?
+    private var audioActive = false
+    private var energyConstrained = false
     private var focusQuiet = false
     private var perceptionSettings = CompanionPerceptionSettings()
     private var perceptionStatus: [String: CompanionObject] = [:]
@@ -208,6 +212,10 @@ actor NativeCompanionRuntime {
                 policy.allowedUses.append(.expression); policy.remoteInferenceAllowed = true
             }
             if source == "macos.focus" { policy.allowedCharacterIds = [] }
+            if source == "macos.files" {
+                policy.allowedCharacterIds = []; policy.allowedUses = [.audit]
+                policy.resourceScopeRevision = NativeCompanionData.hash((try? CompanionProactiveCoding.encode(settings.directories)) ?? "")
+            }
             if source == NativeNotificationPerception.source {
                 policy.allowedCharacterIds = []; policy.allowedUses = [.audit]
                 policy.remoteInferenceAllowed = false; policy.memoryAllowed = false
@@ -224,6 +232,8 @@ actor NativeCompanionRuntime {
         if !settings.idle { perceptionIdleSeconds = 0 }
         if settings.mode == .off { perceptionSessionAvailable = false }
         if !settings.focus { focusQuiet = false }
+        if !settings.audio { audioActive = false }
+        if !settings.power { energyConstrained = false }
         guard managePerceptionSensors else { return }
         if macPerception == nil {
             macPerception = await MainActor.run { NativeMacPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } }
@@ -244,6 +254,12 @@ actor NativeCompanionRuntime {
         if focusPerception == nil { focusPerception = await MainActor.run { NativeFocusPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } } }
         guard requestID == perceptionConfiguration, !stopped else { return }
         await focusPerception?.configure(epochs: epochs)
+        if directoryPerception == nil { directoryPerception = NativeDirectoryPerception(ownDataRoot: root) { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } }
+        guard requestID == perceptionConfiguration, !stopped else { return }
+        await directoryPerception?.configure(epoch: epochs["macos.files"], directories: settings.directories, sleeping: sleeping || perceptionSleeping)
+        if audioPerception == nil { audioPerception = await MainActor.run { NativeAudioPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } } }
+        guard requestID == perceptionConfiguration, !stopped else { return }
+        await audioPerception?.configure(epoch: epochs["macos.audio"], sleeping: sleeping || perceptionSleeping)
     }
     private func syncOptionalPerceptionPause() async {
         guard managePerceptionSensors, !stopped else { return }
@@ -257,6 +273,10 @@ actor NativeCompanionRuntime {
         guard request == perceptionConfiguration, !stopped else { return }
         await notificationPerception?.configure(epoch: epochs[NativeNotificationPerception.source], apps: perceptionSettings.notificationAllowlist,
             contentAllowed: perceptionSettings.notificationContent, sleeping: paused)
+        guard request == perceptionConfiguration, !stopped else { return }
+        await directoryPerception?.configure(epoch: epochs["macos.files"], directories: perceptionSettings.directories, sleeping: paused)
+        guard request == perceptionConfiguration, !stopped else { return }
+        await audioPerception?.configure(epoch: epochs["macos.audio"], sleeping: paused)
     }
     private func receiveNotificationSignal(_ signal: CompanionNotificationSignal) {
         let source = NativeNotificationPerception.source
@@ -306,6 +326,8 @@ actor NativeCompanionRuntime {
             focusQuiet = quiet
             if quiet, topic?.isManual == false { stop(reason: "focus_quiet", cancelArchive: false) }
         }
+        if let active = signal.audioActive { audioActive = active }
+        if let constrained = signal.energyConstrained { energyConstrained = constrained }
         if let seconds = signal.idleSeconds { perceptionIdleSeconds = seconds }
         if let available = signal.sessionAvailable { perceptionSessionAvailable = available }
         if let sleeping = signal.sleeping, sleeping != perceptionSleeping {
@@ -410,6 +432,7 @@ actor NativeCompanionRuntime {
         value.outputBusy = topic != nil || dailyBusy || config["presentationBusy"] as? Bool == true
         value.idleSeconds = interruptibility?().idleSeconds ?? perceptionIdleSeconds
         value.focusQuiet = focusQuiet || (interruptibility?().focusQuiet ?? false)
+        value.audioActive = audioActive; value.energyConstrained = energyConstrained
         value.cooldown = NativeCompanionData.now() - lastTopic < (config["cooldownSeconds"] as? Double ?? 180) * 1000
         value.budgetAvailable = ((try? store.requestCount()) ?? hourly) < hourly
         return value
@@ -955,6 +978,8 @@ actor NativeCompanionRuntime {
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
         dailyTask?.cancel(); await dailyTask?.value; dailyTask = nil
         await serviceMonitor?.close(); serviceMonitor = nil
+        await audioPerception?.stop(); audioPerception = nil
+        await directoryPerception?.stop(); directoryPerception = nil
         await focusPerception?.stop(); focusPerception = nil
         await notificationPerception?.stop(); notificationPerception = nil
         await calendarPerception?.stop(); calendarPerception = nil

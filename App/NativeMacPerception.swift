@@ -13,13 +13,16 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var reminders = false
     var notifications = false
     var focus = false
+    var files = false
+    var audio = false
+    var directories: [CompanionWatchedDirectory] = []
     var explicitActivity = false
     var notificationContent = false
     var notificationApps = ""
     var shareActivity = false
     var shareSchedule = false
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, files, audio, directories, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -32,6 +35,9 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         reminders = (try? c.decode(Bool.self, forKey: .reminders)) ?? false
         notifications = (try? c.decode(Bool.self, forKey: .notifications)) ?? false
         focus = (try? c.decode(Bool.self, forKey: .focus)) ?? false
+        files = (try? c.decode(Bool.self, forKey: .files)) ?? false
+        audio = (try? c.decode(Bool.self, forKey: .audio)) ?? false
+        directories = (try? c.decode([CompanionWatchedDirectory].self, forKey: .directories)) ?? []
         explicitActivity = (try? c.decode(Bool.self, forKey: .explicitActivity)) ?? false
         notificationContent = (try? c.decode(Bool.self, forKey: .notificationContent)) ?? false
         notificationApps = (try? c.decode(String.self, forKey: .notificationApps)) ?? ""
@@ -42,7 +48,7 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var notificationAllowlist: [String] {
         Array(Set(notificationApps.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
     }
-    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted", "macos.focus", "macos.explicit_activity"]
+    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted", "macos.focus", "macos.explicit_activity", "macos.files", "macos.audio"]
     func enabled(_ source: String) -> Bool {
         if source == "macos.focus" { return focus }
         guard mode != .off else { return false }
@@ -56,6 +62,8 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         case "macos.reminders": return reminders
         case "macos.notification.usernoted": return notifications
         case "macos.explicit_activity": return explicitActivity
+        case "macos.files": return files
+        case "macos.audio": return audio
         default: return false
         }
     }
@@ -93,6 +101,8 @@ struct CompanionMacSignal {
     var sampledUptime: UInt64 = DispatchTime.now().uptimeNanoseconds
     var focusQuiet: Bool?
     var sourceAt: Date?
+    var audioActive: Bool?
+    var energyConstrained: Bool?
 }
 
 // All Cocoa callbacks/timers and teardown run on the main actor. The sink only sends bounded typed signals.
@@ -208,10 +218,8 @@ struct CompanionMacSignal {
     }
     private func samplePower(initial: Bool) {
         guard !asleep, settings.power, let epoch = epochs["macos.power"] else { return }
-        let process = ProcessInfo.processInfo
-        let severe = process.thermalState == .serious || process.thermalState == .critical
-        let state = severe ? "thermal_pressure" : (process.isLowPowerModeEnabled ? "low_power" : "normal")
-        sink(.init(source: "macos.power", type: "environment.power_changed", subject: state, initial: initial, epoch: epoch))
+        let state = CompanionPowerSnapshot.current()
+        sink(.init(source: "macos.power", type: "environment.power_changed", subject: state.subject, initial: initial, epoch: epoch, energyConstrained: state.constrained))
     }
     func stop() {
         generation += 1

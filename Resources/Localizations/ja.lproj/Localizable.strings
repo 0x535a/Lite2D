@@ -658,3 +658,16 @@
 "activity.communication" = "会話";
 "activity.idle" = "待機";
 "activity.unknown" = "不明";
+
+// Authorized directories and non-recording environment context
+"perception.files" = "選択したフォルダの変更を観察";
+"perception.directory_add" = "フォルダを許可…";
+"perception.directory_remove" = "削除";
+"perception.directory_rejected" = "システム、ホーム全体、Lite2Dデータを除く具体的なプロジェクトフォルダを選んでください。";
+"perception.directory_help" = "変更の合図だけを観察し、ファイル名や本文は読みません。最大8フォルダを許可できます。削除すると監視とアクセスを終了します。";
+"perception.macos.files" = "フォルダの変更";
+"perception.state.needs_directory" = "フォルダを選択してください";
+"perception.state.partially_available" = "一部利用可能";
+"perception.audio" = "音声出力経路と動作状態";
+"perception.macos.audio" = "音声環境";
+"perception.environment_help" = "装置の状態は弱いタイミング情報に限り、録音や会議・視聴内容の識別は行いません。低電池や高温時は不要な能動動作を抑えます。";

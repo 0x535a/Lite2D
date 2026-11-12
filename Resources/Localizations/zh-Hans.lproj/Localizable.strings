@@ -658,3 +658,16 @@
 "activity.communication" = "交流";
 "activity.idle" = "空闲";
 "activity.unknown" = "未知";
+
+// Authorized directories and non-recording environment context
+"perception.files" = "观察所选目录变化";
+"perception.directory_add" = "授权目录…";
+"perception.directory_remove" = "移除";
+"perception.directory_rejected" = "请选择具体项目目录，不能选择系统、整个个人目录或 Lite2D 数据目录。";
+"perception.directory_help" = "只观察变化信号，不读取文件名和正文。最多授权八个具体目录；移除后停止监听并释放访问。";
+"perception.macos.files" = "目录变化";
+"perception.state.needs_directory" = "请先选择目录";
+"perception.state.partially_available" = "部分可用";
+"perception.audio" = "音频输出路线与活跃状态";
+"perception.macos.audio" = "音频环境";
+"perception.environment_help" = "设备状态仅是弱时机线索，不录音，也不识别会议或收听内容。低电量或热压力会降低非必要主动性。";

@@ -167,10 +167,24 @@ struct CompanionGeneralSections: View {
             Toggle(L10n.text("perception.focus"), isOn: perception(\.focus))
             Toggle(L10n.text("perception.explicit_activity"), isOn: perception(\.explicitActivity))
             Text(L10n.text("perception.focus_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle(L10n.text("perception.files"), isOn: perception(\.files))
+            if companion.settings.perception.files {
+                ForEach(companion.settings.perception.directories) { directory in
+                    HStack {
+                        Text(URL(fileURLWithPath: directory.path).lastPathComponent).lineLimit(1).help(directory.path)
+                        Spacer()
+                        Button(L10n.text("perception.directory_remove")) { companion.removePerceptionDirectory(directory.id) }
+                    }
+                }
+                Button(L10n.text("perception.directory_add")) { companion.addPerceptionDirectory() }.disabled(companion.settings.perception.directories.count >= 8)
+                Text(L10n.text("perception.directory_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Toggle(L10n.text("perception.workspace"), isOn: perception(\.workspace))
             Toggle(L10n.text("perception.idle"), isOn: perception(\.idle))
+            Toggle(L10n.text("perception.audio"), isOn: perception(\.audio))
             Toggle(L10n.text("perception.power"), isOn: perception(\.power))
             Toggle(L10n.text("perception.network"), isOn: perception(\.network))
+            Text(L10n.text("perception.environment_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle(L10n.text("perception.calendar"), isOn: perception(\.calendar))
             Toggle(L10n.text("perception.reminders"), isOn: perception(\.reminders))
             ForEach(["macos.calendar", "macos.reminders"], id: \.self) { source in

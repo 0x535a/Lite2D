@@ -658,3 +658,16 @@
 "activity.communication" = "Communication";
 "activity.idle" = "Idle";
 "activity.unknown" = "Unknown";
+
+// Authorized directories and non-recording environment context
+"perception.files" = "Observe selected directory changes";
+"perception.directory_add" = "Authorize a directory…";
+"perception.directory_remove" = "Remove";
+"perception.directory_rejected" = "Choose a specific project directory, excluding system, home or Lite2D data roots.";
+"perception.directory_help" = "Only change signals are observed, not file names or contents. Up to eight explicit directories can be authorized. Removing a directory stops its watcher and releases its access.";
+"perception.macos.files" = "Directory changes";
+"perception.state.needs_directory" = "Choose a directory first";
+"perception.state.partially_available" = "Partially available";
+"perception.audio" = "Audio output route and activity";
+"perception.macos.audio" = "Audio environment";
+"perception.environment_help" = "Audio device state is only a weak timing clue; no audio is recorded and it does not identify a meeting or listening content. Low battery or thermal pressure reduces nonessential initiative.";

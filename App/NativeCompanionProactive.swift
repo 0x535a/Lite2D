@@ -202,6 +202,8 @@ struct CompanionInterruptContext: Codable, Equatable {
     var cooldown = false
     var budgetAvailable = true
     var idleSeconds: Double = 0
+    var audioActive = false
+    var energyConstrained = false
     var policyRevision = "v1"
     var gates: [String] {
         var result: [String] = []
@@ -233,12 +235,14 @@ enum CompanionArbiter {
         if opportunity.notBefore > now { reasons.append("not_before") }
         if [.consumed, .expired, .cancelled].contains(opportunity.state) { reasons.append("inactive_opportunity") }
         if !context.idleSeconds.isFinite || context.idleSeconds < 15 { reasons.append("user_active") }
-        let score = opportunity.priority - opportunity.intrusionCost
+        if context.energyConstrained && opportunity.kind == "intrinsic_interest" { reasons.append("resource_pressure") }
+        let cost = min(1, opportunity.intrusionCost + (context.audioActive ? 0.15 : 0))
+        let score = opportunity.priority - cost
         if score < 0.15 { reasons.append("low_value") }
         let admitted = reasons.isEmpty
         return CompanionDecisionRecord(mode: mode, subjectId: opportunity.id, characterId: opportunity.ownerCharacterId,
             action: admitted ? "admit" : (reasons.contains("expired") ? "cancel" : "defer"), reasonCodes: admitted ? ["worthwhile_opportunity"] : reasons,
-            scores: ["value": opportunity.priority, "cost": opportunity.intrusionCost, "net": score],
+            scores: ["value": opportunity.priority, "cost": cost, "net": score],
             selectedModality: admitted ? .bubble : .silent, policyRevision: context.policyRevision, decidedAt: now)
     }
 }

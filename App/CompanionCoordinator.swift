@@ -495,6 +495,15 @@ final class CompanionCoordinator: ObservableObject {
     private func loadHistory(_ event: [String: Any]) {
         entries = []; for item in event["history"] as? [[String: Any]] ?? [] { append(item) }
     }
+    func addPerceptionDirectory() {
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url, settings.perception.directories.count < 8 else { return }
+        guard CompanionWatchedDirectory.permitted(url, ownDataRoot: root) else { error = L10n.text("perception.directory_rejected"); return }
+        guard !settings.perception.directories.contains(where: { $0.path == url.standardizedFileURL.path }) else { return }
+        let bookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess], includingResourceValuesForKeys: nil, relativeTo: nil)
+        stopTopic(); settings.perception.directories.append(.init(path: url.standardizedFileURL.path, bookmark: bookmark)); changed()
+    }
+    func removePerceptionDirectory(_ id: String) { stopTopic(); settings.perception.directories.removeAll { $0.id == id }; changed() }
     func authorizePerception(_ source: String) { send(["type": "perception_authorize", "source": source]) }
     func sync(force: Bool = false) {
         guard let manager else { return }

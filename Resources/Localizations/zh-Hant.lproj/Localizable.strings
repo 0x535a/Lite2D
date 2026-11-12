@@ -658,3 +658,16 @@
 "activity.communication" = "交流";
 "activity.idle" = "閒置";
 "activity.unknown" = "未知";
+
+// Authorized directories and non-recording environment context
+"perception.files" = "觀察所選目錄變化";
+"perception.directory_add" = "授權目錄…";
+"perception.directory_remove" = "移除";
+"perception.directory_rejected" = "請選擇具體專案目錄，不能選擇系統、整個個人目錄或 Lite2D 資料目錄。";
+"perception.directory_help" = "只觀察變化訊號，不讀取檔名及正文。最多授權八個具體目錄；移除後停止監聽並釋放存取。";
+"perception.macos.files" = "目錄變化";
+"perception.state.needs_directory" = "請先選擇目錄";
+"perception.state.partially_available" = "部分可用";
+"perception.audio" = "音訊輸出路徑與活動狀態";
+"perception.macos.audio" = "音訊環境";
+"perception.environment_help" = "裝置狀態僅是微弱時機線索，不錄音，也不識別會議或聆聽內容。低電量或熱壓力會降低非必要主動性。";
