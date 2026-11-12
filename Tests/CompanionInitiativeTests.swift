@@ -33,6 +33,10 @@ enum CompanionInitiativeTests {
             roles: roles, manageOpenCodeService: false, managePerceptionSensors: false, interruptibility: { var value = CompanionInterruptContext(); value.idleSeconds = 30; return value }, emit: events.add)
         try await runtime.start(automatic: false)
         var config: CompanionObject = ["enabled": true, "intervalMinutes": 0, "hourlyRequests": 12, "perception": ["mode": "shadow"], "characters": [["id": owner, "enabled": true, "visible": true]]]
+        config["perception"] = ["mode": "shadow", "workspace": true, "shareActivity": true, "sourceCharacterIds": ["macos.workspace": []]]
+        await runtime.configure(config)
+        try check(try store.perceptionPolicy("macos.workspace")?.permits(owner, use: .activityContext, remote: true) == false, "Runtime consent enforces explicit empty recipient scopes before model projection")
+        config["perception"] = ["mode": "shadow"]
         await runtime.configure(config); await runtime.tick()
         try check(await roles.calls == 0 && (try store.proactiveReplay()).contains { $0.action == "admit" && $0.mode == .shadow }, "Shadow evaluates real pending goals without invoking the character model")
         config["perception"] = ["mode": "live"]

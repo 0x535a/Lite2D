@@ -226,7 +226,7 @@ extension NativeCompanionStore {
             try execute("DELETE FROM proactive_dependencies WHERE kind=? AND id=?", [row["kind"], target])
         }
     }
-    func pruneProactive(now: Date = Date()) throws {
+    func pruneProactive(now: Date = Date(), auditRetentionHours: Int = 168) throws {
         try transaction {
             let time = now.timeIntervalSince1970
             for row in try rows("SELECT id,owner FROM proactive_outputs WHERE status IN ('candidate','admitted','queued') AND at<?", [time - 120]) {
@@ -235,11 +235,11 @@ extension NativeCompanionStore {
             try execute("UPDATE proactive_opportunities SET state='expired' WHERE expires_at<=? AND state IN ('pending','ready','deferred')", [time])
             try execute("UPDATE proactive_intentions SET state='expired' WHERE expires_at<=? AND state IN ('pending','ready','deferred','needsReview')", [time])
             try execute("DELETE FROM perception_events WHERE purge_at<=?", [time])
-            try execute("DELETE FROM proactive_decisions WHERE at<?", [time - 7 * 86400])
-            try execute("DELETE FROM proactive_outputs WHERE at<? AND status IN ('completed','dismissed','cancelled','failed')", [time - 30 * 86400])
+            try execute("DELETE FROM proactive_decisions WHERE at<?", [time - Double(min(168, max(1, auditRetentionHours))) * 3600])
+            try execute("DELETE FROM proactive_outputs WHERE at<? AND status IN ('completed','dismissed','cancelled','failed','deliveryUnknown','presented')", [time - 30 * 86400])
             try execute("DELETE FROM proactive_opportunities WHERE expires_at<?", [time - 86400])
             try execute("DELETE FROM proactive_intentions WHERE expires_at<? AND state IN ('completed','expired','cancelled','failed')", [time - 30 * 86400])
-            try execute("DELETE FROM proactive_dependencies WHERE (kind='opportunity' AND id NOT IN (SELECT id FROM proactive_opportunities)) OR (kind='intention' AND id NOT IN (SELECT id FROM proactive_intentions))")
+            try execute("DELETE FROM proactive_dependencies WHERE (kind='opportunity' AND id NOT IN (SELECT id FROM proactive_opportunities)) OR (kind='intention' AND id NOT IN (SELECT id FROM proactive_intentions)) OR (kind='output' AND id NOT IN (SELECT id FROM proactive_outputs))")
         }
     }
 }

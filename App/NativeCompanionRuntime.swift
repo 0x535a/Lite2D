@@ -210,7 +210,7 @@ actor NativeCompanionRuntime {
         var epochs: [String: Int] = [:]
         for source in CompanionPerceptionSettings.sourceNames {
             var policy = CompanionPerceptionPolicy()
-            policy.allowedCharacterIds = characters.filter { $0["enabled"] as? Bool == true }.compactMap { $0["id"] as? String }
+            policy.allowedCharacterIds = settings.recipients(for: source, enabled: characters.filter { $0["enabled"] as? Bool == true }.compactMap { $0["id"] as? String })
             policy.allowedUses = [.attention, .audit]
             if settings.shareActivity && ["macos.workspace", "macos.idle", "macos.explicit_activity", "macos.window"].contains(source) {
                 policy.allowedUses.append(.activityContext); policy.remoteInferenceAllowed = true
@@ -311,10 +311,19 @@ actor NativeCompanionRuntime {
         let now = Date()
         var event = CompanionObservation(id: occurrence + ":" + phase, source: signal.source, type: "schedule." + phase, observedAt: now, subject: "scheduled_arrangement", expiresAt: now.addingTimeInterval(120))
         event.policy = policy
+        let revision = (store.get("perceptionRevision:" + signal.source) as? Int ?? 0) + 1
+        try? store.set("perceptionRevision:" + signal.source, revision); event.revision = revision
         do {
+            if ["updated", "completed", "no_longer_visible"].contains(phase) {
+                try store.invalidateScheduleOccurrence(occurrence, source: signal.source)
+                if topic?.opportunity?.topicKey == "schedule:" + occurrence { stop(reason: "schedule_changed", cancelArchive: false) }
+            }
             if let eventID = try store.ingestPerception(event, now: now) {
+                // Snapshot changes are audit observations; only upcoming time boundaries may suggest speech.
+                guard ["upcoming_30m", "upcoming_10m", "scheduled_time"].contains(phase) else { status(); return }
                 for character in visible.prefix(8) {
                     let owner = character["id"] as! String
+                    guard policy.permits(owner, use: .attention) else { continue }
                     let opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "schedule." + phase, sourceEventIds: [eventID], topicKey: "schedule:" + occurrence,
                         priority: 0.85, intrusionCost: 0.2, notBefore: now, expiresAt: now.addingTimeInterval(120))
                     _ = try store.saveOpportunity(opportunity, now: now)
@@ -372,6 +381,7 @@ actor NativeCompanionRuntime {
             if !signal.initial, signal.type == "activity.idle_changed", signal.subject == "active" {
                 for character in visible.prefix(8) {
                     let owner = character["id"] as! String
+                    guard granted.permits(owner, use: .attention) else { continue }
                     guard let intention = try store.intentions(owner: owner).first(where: { !$0.state.terminal && $0.state != .needsReview && $0.expiresAt > now }) else { continue }
                     let opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "return_to_activity", sourceEventIds: [eventID], relatedIntentionIds: [intention.id], topicKey: intention.topicKey,
                         priority: intention.priority, intrusionCost: 0.25, notBefore: now, expiresAt: now.addingTimeInterval(120))
@@ -391,7 +401,7 @@ actor NativeCompanionRuntime {
     func tick() async {
         guard ready, !stopped, enabled else { return }
         if Date() >= perceptionPruneAt {
-            try? store.pruneProactive(); perceptionPruneAt = Date().addingTimeInterval(60)
+            try? store.pruneProactive(auditRetentionHours: perceptionSettings.auditRetentionHours); perceptionPruneAt = Date().addingTimeInterval(60)
         }
         if dailyBusy { return }
         if topic == nil, Date() >= dailyCheckAt, config["sleeping"] as? Bool != true {
@@ -457,7 +467,7 @@ actor NativeCompanionRuntime {
         guard now >= initiativeAt else { return }; initiativeAt = now.addingTimeInterval(5)
         let owners = visible.compactMap { $0["id"] as? String }
         do {
-            try store.pruneProactive(now: now)
+            try store.pruneProactive(now: now, auditRetentionHours: perceptionSettings.auditRetentionHours)
             for owner in owners {
                 try store.syncOpenLoopIntentions(owner: owner, now: now)
                 for goal in try store.intentions(owner: owner) where [.pending, .deferred, .ready].contains(goal.state) && goal.attemptCount < goal.maxAttempts && goal.expiresAt > now && (goal.notBefore ?? .distantPast) <= now && (goal.cooldownUntil ?? .distantPast) <= now {
@@ -873,7 +883,7 @@ actor NativeCompanionRuntime {
                 emit("record.changed", ["characterId": "user", "path": name, "revision": result["revision"] ?? ""]); try store.exportNotes(); emit("records", ["records": try store.records()])
             case "clear":
                 stop(); await roles.interrupt(); let scope = command["scope"] as? String ?? ""
-                if scope == "history" { try store.execute("DELETE FROM events"); try store.execute("DELETE FROM deliveries") }
+                if scope == "history" { try store.clearConversationHistory() }
                 else if scope == "public" { try store.execute("DELETE FROM records"); try store.execute("DELETE FROM changes") }
                 else if NativeCompanionData.validID(scope) { try store.forgetCharacter(scope); try store.set("session:\(scope)", NSNull()); await roles.forget(scope) }
                 try store.exportNotes(); emit("history", ["history": try store.history()]); emit("records", ["records": try store.records()])

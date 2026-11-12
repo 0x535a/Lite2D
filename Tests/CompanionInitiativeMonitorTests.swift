@@ -46,5 +46,10 @@ enum CompanionInitiativeMonitorTests {
         try check(decisions.items.first?.id == decision.id && decisions.items.first?.status == "shadow", "The global initiative browser shows actual Shadow decisions and score reasons")
         query.owner = other
         try check(try store.monitorPage(query, requestID: "private-decisions", owners: [owner, other]).total == 0, "Per-character decision filtering cannot expose another character's private goal context")
+        let receipt = CompanionOutputReceipt(characterId: owner, topicId: UUID().uuidString, modality: .bubble, text: "Display history fixture")
+        try store.saveOutputCandidate(receipt)
+        _ = try store.event("utterance", ["characterId": owner, "text": "Display history fixture"])
+        try store.clearConversationHistory()
+        try check(try store.rows("SELECT id FROM proactive_outputs").isEmpty && store.rows("SELECT id FROM proactive_decisions").isEmpty && store.history().isEmpty && store.memoryRead(memoryID, owner: owner) != nil, "Clearing conversation history also clears initiative receipts and decisions while retaining explicit memory")
     }
 }

@@ -23,8 +23,10 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var notificationApps = ""
     var shareActivity = false
     var shareSchedule = false
+    var sourceCharacterIds: [String: [String]] = [:]
+    var auditRetentionHours = 168
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, files, audio, window, windowApps, directories, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, files, audio, window, windowApps, directories, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides, sourceCharacterIds, auditRetentionHours }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,7 +49,14 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         notificationApps = (try? c.decode(String.self, forKey: .notificationApps)) ?? ""
         shareActivity = (try? c.decode(Bool.self, forKey: .shareActivity)) ?? false
         shareSchedule = (try? c.decode(Bool.self, forKey: .shareSchedule)) ?? false
+        sourceCharacterIds = (try? c.decode([String: [String]].self, forKey: .sourceCharacterIds)) ?? (c.contains(.sourceCharacterIds) ? Dictionary(uniqueKeysWithValues: Self.sourceNames.map { ($0, []) }) : [:])
+        auditRetentionHours = min(168, max(1, (try? c.decode(Int.self, forKey: .auditRetentionHours)) ?? 168))
         appOverrides = (try? c.decode([String: CompanionActivityCategory].self, forKey: .appOverrides)) ?? [:]
+    }
+    // Missing scope inherits explicitly enabled sharing; an explicit empty scope means no recipients.
+    func recipients(for source: String, enabled: [String]) -> [String] {
+        let selected = sourceCharacterIds[source].map(Set.init)
+        return Array(Set(enabled.filter { NativeCompanionData.validID($0) && (selected?.contains($0) ?? true) })).sorted().prefix(100).map { $0 }
     }
     var notificationAllowlist: [String] {
         Array(Set(notificationApps.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
@@ -155,6 +164,15 @@ struct CompanionMacSignal {
             tokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in guard let self, self.generation == expected else { return }; self.sampleWorkspace(initial: false) }
             })
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification] {
+                tokens.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                    Task { @MainActor in
+                        guard let self, self.generation == expected, !self.asleep, let epoch = self.epochs["macos.workspace"] else { return }
+                        self.sink(.init(source: "macos.workspace", type: notification.name == NSWorkspace.activeSpaceDidChangeNotification ? "workspace.space_changed" : "application.lifecycle_changed", confidence: 0.4,
+                            subject: "workspace_boundary", epoch: epoch))
+                    }
+                })
+            }
             sampleWorkspace(initial: true)
         }
         if next.idle {

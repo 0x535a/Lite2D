@@ -30,6 +30,7 @@ final class CompanionBubble {
     private var side: CompanionBubbleSide = .left
     private let scroll: NSScrollView?
     private var resizeObserver: NSObjectProtocol?
+    private var accessibilityObserver: NSObjectProtocol?
     private var layingOut = false
     private var editing = false
     var isGroup: Bool { scroll != nil }
@@ -75,10 +76,12 @@ final class CompanionBubble {
                 self.rebuildRows()
             }
         } else { panel.contentView = content }
+        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.rebuildRows() }
     }
     deinit {
         timer?.invalidate()
         if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
+        if let accessibilityObserver { NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver) }
     }
     func configure(avatar: NSImage?, retention: TimeInterval = CompanionSpeechPlayback.defaultRetention, side: CompanionBubbleSide = .left) {
         self.avatar = avatar; self.side = side
@@ -226,6 +229,9 @@ final class CompanionBubble {
         let effect = NSVisualEffectView(frame: NSRect(x: bubbleX, y: 0, width: bodyWidth + 6, height: height))
         effect.material = .popover; effect.blendingMode = .behindWindow; effect.state = .active
         effect.wantsLayer = true
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            effect.state = .inactive; effect.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
         // A single mask gives the body and iMessage-style curved tail the same blur.
         let path = CGMutablePath()
         path.addRoundedRect(in: CGRect(x: 6, y: 4, width: bodyWidth, height: height - 4), cornerWidth: 17, cornerHeight: 17)
@@ -305,6 +311,7 @@ final class CompanionBubble {
                             offset: (first?.view.frame.minY ?? 0) - bounds.minY, oldOrigin: bounds.minY)
     }
     private func layout(animated: Bool, anchor: ScrollAnchor? = nil) {
+        let animated = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard !layingOut else { return }
         layingOut = true; defer { layingOut = false }
         let saved = anchor ?? scrollAnchor()

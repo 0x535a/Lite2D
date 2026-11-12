@@ -139,9 +139,18 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             try store.set("sessionPersona:\(id)", NativeCompanionData.hash(persona))
         } else if let modelRef { _ = try await client.post("api/session/\(session!)/model", ["model": modelRef]) }
         try store.set("sessionModel:\(id)", model)
-        let agents = try await client.get("api/agent", ["location[directory]": directory.path])
-        let agent = NativeCompanionData.array(agents["data"]).first { $0["id"] as? String == "companion" }
-        guard NativeCompanionData.array(agent?["permissions"]).contains(where: { $0["action"] as? String == "*" && $0["resource"] as? String == "*" && $0["effect"] as? String == "deny" }) else { throw NativeCompanionData.error("Role permission policy did not load") }
+        let policyDeadline = ContinuousClock.now.advanced(by: .seconds(12))
+        var policyLoaded = false, reloadRequested = false
+        while ContinuousClock.now < policyDeadline {
+            try Task.checkCancellation()
+            let agents = NativeCompanionData.object(try await client.request("GET", "api/agent", query: ["location[directory]": directory.path], timeout: 2))
+            let agent = NativeCompanionData.array(agents["data"]).first { $0["id"] as? String == "companion" }
+            if NativeCompanionData.array(agent?["permissions"]).contains(where: { $0["action"] as? String == "*" && $0["resource"] as? String == "*" && $0["effect"] as? String == "deny" }) { policyLoaded = true; break }
+            // A freshly created location may still be loading its opencode.json. Never generate until deny-all is observed.
+            if !reloadRequested { _ = try await client.request("POST", "api/location/reload", body: [:], timeout: 2); reloadRequested = true }
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        guard policyLoaded else { throw NativeCompanionData.error("Role permission policy did not load") }
         let deadline = Date().addingTimeInterval(12)
         while true {
             let mcp = try await client.get("api/mcp", ["location[directory]": directory.path])

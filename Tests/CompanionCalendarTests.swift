@@ -25,5 +25,29 @@ enum CompanionCalendarTests {
         try check(!settings.enabled("macos.calendar") && !settings.enabled("macos.reminders"), "Calendar and reminders remain separately opt-in")
         settings.calendar = true
         try check(settings.enabled("macos.calendar") && !settings.enabled("macos.reminders"), "Enabling calendar never grants reminder access")
+        var snapshot = CompanionCalendarSnapshot()
+        var reminder = CompanionCalendarOccurrence(id: "reminder-one", source: "macos.reminders", due: now.addingTimeInterval(600))
+        try check(snapshot.replace([reminder], source: reminder.source, succeeded: true).isEmpty, "A new authorized schedule snapshot establishes a silent differential baseline")
+        try check(snapshot.replace([], source: reminder.source, succeeded: false).isEmpty && snapshot.values == [reminder], "A failed reminder fetch retains evidence without manufacturing disappearance or completion")
+        reminder.completed = true
+        var staleReminder = reminder; staleReminder.completed = false
+        let completion = snapshot.replace([staleReminder, reminder], source: reminder.source, succeeded: true)
+        try check(completion.count == 1 && completion.first?.1 == "completed", "Only an observed incomplete-to-complete transition reports reminder completion")
+        try check(snapshot.values.first?.completed == true, "A reminder completed between the two fetches supersedes its earlier incomplete snapshot")
+        timeline.reset(); timeline.replace([reminder], at: now)
+        try check(timeline.nextBoundary(after: now) == nil, "Completed reminders cannot retain queued time alarms")
+        let removed = snapshot.replace([], source: reminder.source, succeeded: true)
+        try check(removed.first?.1 == "no_longer_visible", "Leaving the bounded query window is not reported as deletion or cancellation")
+        _ = snapshot.replace([item], source: item.source, succeeded: true)
+        var moved = item; moved.due = now.addingTimeInterval(3000)
+        try check(snapshot.replace([moved], source: item.source, succeeded: true).first?.1 == "updated", "A stable recurring occurrence reports rescheduling as an update")
+        var second = moved; second.id = "another-occurrence"
+        try check(snapshot.replace([moved, second], source: item.source, succeeded: true).first?.1 == "first_seen", "New occurrences are first-seen observations without claiming creation")
+        snapshot.clear(item.source)
+        try check(snapshot.replace([item], source: item.source, succeeded: true).isEmpty, "Authorization scope reset establishes a fresh baseline instead of replaying old changes")
+        timeline.reset()
+        let ending = CompanionCalendarOccurrence(id: "ending", source: item.source, due: now.addingTimeInterval(-300), end: now.addingTimeInterval(30))
+        timeline.replace([ending], at: now)
+        try check(timeline.advance(to: now.addingTimeInterval(31)).first?.1 == "scheduled_end", "Calendar end is a scheduled time boundary without asserting real-world attendance")
     }
 }

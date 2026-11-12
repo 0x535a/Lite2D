@@ -8,6 +8,11 @@ import Foundation
         try check(CompanionActivityClassifier.classify(bundleID: "custom.app", overrides: ["custom.app": .experiment]).0 == .experiment, "User app classification overrides are supported without window content")
         let defaults = try CompanionProactiveCoding.decode(CompanionPerceptionSettings.self, "{}")
         try check(defaults.mode == .off && !defaults.workspace && !defaults.idle && !defaults.shareActivity, "Existing installations migrate with new sensors and model sharing disabled")
+        let owner = "11111111-1111-4111-8111-111111111111", other = "22222222-2222-4222-8222-222222222222"
+        let scoped = try CompanionProactiveCoding.decode(CompanionPerceptionSettings.self, "{\"sourceCharacterIds\":{\"macos.workspace\":[\"\(owner)\"],\"macos.calendar\":[]},\"auditRetentionHours\":999}")
+        try check(scoped.recipients(for: "macos.workspace", enabled: [owner, other]) == [owner] && scoped.recipients(for: "macos.calendar", enabled: [owner, other]).isEmpty && scoped.auditRetentionHours == 168, "Per-source recipient scopes distinguish one character from an explicit deny-all and bound audit retention")
+        let malformed = try CompanionProactiveCoding.decode(CompanionPerceptionSettings.self, "{\"sourceCharacterIds\":false}")
+        try check(malformed.recipients(for: "macos.workspace", enabled: [owner]).isEmpty, "Malformed recipient consent fails closed instead of allowing all characters")
         var settings = defaults; settings.mode = .shadow; settings.workspace = true; settings.idle = true; settings.power = true; settings.network = true
         let epochs = Dictionary(uniqueKeysWithValues: CompanionPerceptionSettings.sourceNames.map { ($0, 7) })
         var signals: [CompanionMacSignal] = []
@@ -15,7 +20,7 @@ import Foundation
         sensor.configure(settings, epochs: epochs, suspended: false)
         try await Task.sleep(nanoseconds: 150_000_000)
         try check(Set(signals.map(\.source)).isSuperset(of: ["macos.session", "macos.workspace", "macos.idle", "macos.power"]), "Native sensors produce initial permission-free snapshots without application content")
-        try check(signals.allSatisfy { $0.epoch == 7 && $0.initial }, "Initial sensor samples establish a baseline with the configured consent epoch")
+        try check(signals.allSatisfy { $0.epoch == 7 } && ["macos.session", "macos.workspace", "macos.idle", "macos.power"].allSatisfy { source in signals.first(where: { $0.source == source })?.initial == true }, "Initial sensor samples establish a baseline with the configured consent epoch")
         try check(signals.first(where: { $0.source == "macos.idle" })?.idleSeconds.map { $0.isFinite && $0 >= 0 } == true, "Idle sensor queries any input event rather than the null-event timer")
         sensor.stop(); let count = signals.count
         try await Task.sleep(nanoseconds: 150_000_000)

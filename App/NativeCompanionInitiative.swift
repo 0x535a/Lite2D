@@ -76,3 +76,31 @@ extension NativeCompanionStore {
         }
     }
 }
+
+extension NativeCompanionStore {
+    func invalidateScheduleOccurrence(_ occurrence: String, source: String) throws {
+        try transaction {
+            for phase in ["upcoming_30m", "upcoming_10m", "scheduled_time", "scheduled_end"] {
+                let key = NativeCompanionData.hash(occurrence + ":" + phase)
+                for row in try rows("SELECT id FROM perception_events WHERE source=? AND source_key=?", [source, key]) {
+                    try invalidateProactiveDependency(kind: "event", id: row["id"] as! String, reason: "schedule_changed")
+                }
+            }
+        }
+    }
+    // Display history includes newer initiative receipts/decisions as well as the legacy event timeline.
+    func clearConversationHistory() throws {
+        try transaction {
+            for row in try rows("SELECT seq FROM events WHERE type='utterance'") {
+                try invalidateProactiveDependency(kind: "evidence", id: "dialogue:\(row["seq"]!)", reason: "history_cleared")
+            }
+            for row in try rows("SELECT id FROM deliveries") {
+                try invalidateProactiveDependency(kind: "evidence", id: "delivery:\(row["id"]!)", reason: "history_cleared")
+            }
+            for table in ["events", "deliveries", "daily_receipts", "proactive_outputs", "proactive_decisions", "proactive_opportunities", "monitor_previews"] {
+                try execute("DELETE FROM \(table)")
+            }
+            try execute("DELETE FROM proactive_dependencies WHERE kind IN ('output','opportunity')")
+        }
+    }
+}

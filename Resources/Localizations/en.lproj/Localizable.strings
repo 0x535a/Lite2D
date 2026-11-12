@@ -737,3 +737,13 @@
 "monitor.value.social_interest" = "Social interest";
 "monitor.value.expression_energy" = "Expression energy";
 "monitor.value.affect" = "Expression affect";
+
+"perception.recipients" = "Source recipients";
+
+"perception.recipients_help" = "Choose which characters may receive each source projection. Source and sharing switches still apply. This changes future context; it cannot erase prior conversations or data already sent to a model.";
+
+"perception.audit_retention" = "Decision audit retention";
+
+"perception.hours" = "{0} hours";
+
+"perception.audit_retention_help" = "Applies to local initiative decisions; cleanup runs at least once per minute while Companion is active. Conversation history, memories and future goals are managed separately.";

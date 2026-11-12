@@ -91,8 +91,22 @@ enum CompanionProactiveTests {
         try restarted.acknowledgeOutput(output.id, owner: owner, status: .presented, now: now)
         try check(try restarted.intentions(owner: owner, includeTerminal: true).first?.state == .completed, "Actual presentation completes an expression once, even with duplicate receipts")
 
+        let retainedMemory = try restarted.recordDirectMemory(owner: owner, source: "experienced", eventID: "retention-fixture", content: "An actual conversation worth remembering.")
+        try restarted.pruneProactive(now: now.addingTimeInterval(7200), auditRetentionHours: 1)
+        try check(try restarted.proactiveReplay().isEmpty && restarted.memoryRead(retainedMemory["memoryId"] as! String, owner: owner) != nil && restarted.intentions(owner: owner, includeTerminal: true).contains { $0.id == goalID }, "Short audit retention removes decisions without erasing future-goal or memory lifecycle state")
+        var schedulePolicy = CompanionPerceptionPolicy(); schedulePolicy.allowedCharacterIds = [owner]; schedulePolicy.allowedUses = [.attention, .expression]; schedulePolicy.remoteInferenceAllowed = true
+        schedulePolicy = try restarted.setPerceptionConsent(source: "macos.calendar", enabled: true, policy: schedulePolicy)
+        var scheduled = CompanionObservation(id: "occurrence:upcoming_10m", source: "macos.calendar", type: "schedule.upcoming_10m", observedAt: now, subject: "scheduled_arrangement", expiresAt: now.addingTimeInterval(120))
+        scheduled.policy = schedulePolicy
+        let scheduleEvent = try restarted.ingestPerception(scheduled, now: now)!
+        let scheduleOpportunity = CompanionOpportunity(ownerCharacterId: owner, kind: scheduled.type, sourceEventIds: [scheduleEvent], topicKey: "schedule:occurrence", priority: 0.85, intrusionCost: 0.2, notBefore: now, expiresAt: now.addingTimeInterval(120))
+        _ = try restarted.saveOpportunity(scheduleOpportunity, now: now)
+        try restarted.invalidateScheduleOccurrence("occurrence", source: scheduled.source)
+        try check(try restarted.rows("SELECT state FROM proactive_opportunities WHERE id=?", [scheduleOpportunity.id]).first?["state"] as? String == "cancelled", "Rescheduled, completed or no-longer-visible occurrences invalidate queued old schedule opportunities")
         try restarted.pruneProactive(now: now.addingTimeInterval(10 * 86400))
         try check(try restarted.proactiveReplay().isEmpty && restarted.rows("SELECT id FROM perception_events").isEmpty, "Pruning bounds short-lived event and decision retention")
+        try restarted.pruneProactive(now: now.addingTimeInterval(31 * 86400))
+        try check(try restarted.rows("SELECT id FROM proactive_outputs").isEmpty && restarted.rows("SELECT id FROM proactive_dependencies WHERE kind='output'").isEmpty, "Expired expression audits leave no orphan output dependencies")
         try check(try restarted.rows("PRAGMA integrity_check").first?["integrity_check"] as? String == "ok", "Additive proactive schema retains SQLite integrity")
     }
 }

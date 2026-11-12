@@ -737,3 +737,13 @@
 "monitor.value.social_interest" = "交流傾向";
 "monitor.value.expression_energy" = "表達能量";
 "monitor.value.affect" = "表達情緒";
+
+"perception.recipients" = "來源可見角色";
+
+"perception.recipients_help" = "選擇哪些角色可接收各來源的投影，仍受來源與分享開關約束。此設定影響後續上下文，無法撤回既有對話或已傳送給模型的資料。";
+
+"perception.audit_retention" = "決策稽核留存";
+
+"perception.hours" = "{0} 小時";
+
+"perception.audit_retention_help" = "僅控制本地主動性決策紀錄；陪伴執行時每分鐘清理。交流歷史、記憶與未來目標分別管理。";

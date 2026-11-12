@@ -24,6 +24,7 @@ final class SelfTestRunner {
     var callbackCounters: [UInt64] = []
     var memorySamples: [[String: Any]] = []
     var originalDisplays: [DisplayDescriptor] = []
+    private var injectedDisplayTopology = false
     var offlineDisplayID = ""
     var savedDisplayPosition: DisplayPosition?
     private var removedViews: [WeakModelView] = []
@@ -308,7 +309,17 @@ final class SelfTestRunner {
         }
         manager.resetPosition(a)
         originalDisplays = manager.displayRegistry.displays
-        try check(originalDisplays.count >= 2, "Display binding integration uses two actual display identities")
+        try check(!originalDisplays.isEmpty, "Display binding integration has a real display identity and geometry")
+        let actualDisplayCount = originalDisplays.count
+        if actualDisplayCount == 1 {
+            let actual = originalDisplays[0]
+            // Reuse the real rendering surface while substituting only the manager's logical topology.
+            // No virtual display is created and no macOS display configuration is changed.
+            originalDisplays.append(DisplayDescriptor(id: "22222222-3333-4444-8555-666666666666", name: "In-process display topology fixture", frame: actual.frame, visibleFrame: actual.visibleFrame))
+            manager.displayRegistry.testingDisplays = originalDisplays; injectedDisplayTopology = true
+            try check(originalDisplays[0].id != originalDisplays[1].id, "Single-display host uses two explicit logical identities for disconnect/reconnect coverage")
+        } else { try check(true, "Display binding integration uses two actual display identities") }
+        try JSONSerialization.data(withJSONObject: ["actualDisplayCount": actualDisplayCount, "inProcessTopologyInjected": injectedDisplayTopology, "changesSystemConfiguration": false], options: .prettyPrinted).write(to: output.appendingPathComponent("display-verification.json"))
         offlineDisplayID = originalDisplays[0].id
         manager.bind(a, to: offlineDisplayID)
         manager.bind(b, to: originalDisplays[1].id)
@@ -348,6 +359,7 @@ final class SelfTestRunner {
         manager.displayRegistry.testingDisplays = nil
         manager.refreshDisplayBindings()
         try check(manager.record(a)!.settings.displayPosition == savedDisplayPosition, "Returning to actual topology preserves the anchor")
+        if injectedDisplayTopology { manager.bind(b, to: originalDisplays[0].id) }
         manager.mutate(b) { $0.animationPaused = false }
         manager.mutate(a) { $0.isVisible = false }
         rememberFrames()

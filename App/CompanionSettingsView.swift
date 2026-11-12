@@ -122,6 +122,14 @@ struct CompanionGeneralSections: View {
     func perception<T>(_ key: WritableKeyPath<CompanionPerceptionSettings, T>) -> Binding<T> {
         Binding(get: { companion.settings.perception[keyPath: key] }, set: { companion.stopTopic(); companion.settings.perception[keyPath: key] = $0; companion.changed() })
     }
+    private var recipientIDs: [String] { (companion.manager?.records ?? []).map { $0.settings.id.uuidString } }
+    private func recipient(_ id: String, source: String) -> Binding<Bool> {
+        Binding(get: { companion.settings.perception.recipients(for: source, enabled: recipientIDs).contains(id) }, set: { value in
+            var selected = Set(companion.settings.perception.recipients(for: source, enabled: recipientIDs))
+            if value { selected.insert(id) } else { selected.remove(id) }
+            companion.stopTopic(); companion.settings.perception.sourceCharacterIds[source] = selected.sorted(); companion.changed()
+        })
+    }
     var body: some View {
         Section {
             LabeledContent(L10n.text("companion.bubble_retention")) {
@@ -218,6 +226,20 @@ struct CompanionGeneralSections: View {
             }
             Toggle(L10n.text("perception.share_activity"), isOn: perception(\.shareActivity))
             Toggle(L10n.text("perception.share_schedule"), isOn: perception(\.shareSchedule))
+            DisclosureGroup(L10n.text("perception.recipients")) {
+                ForEach(["macos.workspace", "macos.idle", "macos.explicit_activity", "macos.window", "macos.calendar", "macos.reminders"], id: \.self) { source in
+                    DisclosureGroup(L10n.text("perception." + source)) {
+                        ForEach(recipientIDs, id: \.self) { id in
+                            Toggle(companion.manager?.records.first(where: { $0.settings.id.uuidString == id })?.settings.displayName ?? id, isOn: recipient(id, source: source))
+                        }
+                    }
+                }
+                Text(L10n.text("perception.recipients_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Picker(L10n.text("perception.audit_retention"), selection: perception(\.auditRetentionHours)) {
+                ForEach([1, 24, 168], id: \.self) { hours in Text(L10n.text("perception.hours", String(hours))).tag(hours) }
+            }
+            Text(L10n.text("perception.audit_retention_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach(CompanionPerceptionSettings.sourceNames, id: \.self) { source in
                 if let state = companion.perceptionSources[source]?["state"] as? String {
                     LabeledContent(L10n.text("perception." + source)) { Text(L10n.text("perception.state." + state)).foregroundStyle(.secondary) }

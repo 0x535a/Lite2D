@@ -737,3 +737,13 @@
 "monitor.value.social_interest" = "交流への関心";
 "monitor.value.expression_energy" = "表現エネルギー";
 "monitor.value.affect" = "表現の感情";
+
+"perception.recipients" = "情報源を共有するキャラクター";
+
+"perception.recipients_help" = "各情報源の要約を受け取るキャラクターを選択します。情報源と共有のスイッチも適用されます。今後の入力に適用され、過去の会話やモデルへ送信済みの情報は取り消せません。";
+
+"perception.audit_retention" = "判断ログの保存期間";
+
+"perception.hours" = "{0} 時間";
+
+"perception.audit_retention_help" = "ローカルの自発的な判断ログに適用します。コンパニオンの実行中は毎分整理します。会話履歴、記憶、今後の目標は個別に管理します。";
