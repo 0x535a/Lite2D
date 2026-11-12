@@ -481,6 +481,7 @@ private actor ServiceFixture {
             await runtime.close()
             try await CompanionDailyTests.run(root: root, prompt: promptFile, helper: script, node: node, executable: executable, check: check)
             try CompanionMonitorTests.run(root: root, check: check)
+            try await CompanionInitiativeTests.run(root: root, prompt: promptFile, helper: script, node: node, executable: executable, check: check)
             try CompanionContextTests.run(root: root, check: check)
             try CompanionCalendarTests.run(check: check)
             try CompanionProactiveTests.run(root: root, check: check)

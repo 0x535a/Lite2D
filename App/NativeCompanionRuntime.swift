@@ -17,6 +17,11 @@ private final class NativeCompanionTopic {
     let id = UUID().uuidString
     let source: String?
     let started = NativeCompanionData.now()
+    let initiator: String
+    var opportunity: CompanionOpportunity?
+    var decisionId: String?
+    var outputIds: [String] = []
+    var snapshotExpires: [String: Date] = [:]
     var participants: [String]
     var speaker: String
     var queue: [CompanionObject] = []
@@ -25,7 +30,7 @@ private final class NativeCompanionTopic {
     var cancelled = false
     var task: Task<Void, Never>?
     var timeout: Task<Void, Never>?
-    init(speaker: String, source: String?) { self.speaker = speaker; self.source = source; participants = [speaker] }
+    init(speaker: String, source: String?) { self.speaker = speaker; self.initiator = speaker; self.source = source; participants = [speaker] }
 }
 
 actor NativeCompanionRuntime {
@@ -39,6 +44,8 @@ actor NativeCompanionRuntime {
     private let providers: CompanionObject?
     private let injectedRoles: NativeCompanionRoleClient?
     private let manageOpenCodeService: Bool
+    private let managePerceptionSensors: Bool
+    private let interruptibility: (() -> CompanionInterruptContext)?
     private var serviceMonitor: NativeOpenCodeServiceMonitor?
     private var openCodeService: CompanionObject = ["state": "disabled"]
     private var rootLock: NativeCompanionRootLock?
@@ -55,9 +62,12 @@ actor NativeCompanionRuntime {
     private var perceptionIdleSeconds: Double = 0
     private var perceptionSessionAvailable = false
     private var perceptionSleeping = false
+    private var lastMacSamples: [String: UInt64] = [:]
     private var perceptionSignatures: [String: (String, Date)] = [:]
     private var perceptionConfiguration = UUID()
     private var perceptionPruneAt = Date.distantPast
+    private var initiativeAt = Date.distantPast
+    private var lastDecisions: [String: String] = [:]
     private var tokens: [String: String] = [:]
     private var searches: [UUID: Task<String, Error>] = [:]
     private var sessions: [NativeObservedSession] = []
@@ -78,9 +88,11 @@ actor NativeCompanionRuntime {
     private var sourceRevision: [String: Int] = [:]
     init(root: URL, promptFile: URL, opencode: String, codex: String, node: String, helperScript: URL, executable: String,
          idleSeconds: Double = 60, claudeRoot: URL? = nil, providers: CompanionObject? = nil,
-         roles: NativeCompanionRoleClient? = nil, manageOpenCodeService: Bool = true, emit: @escaping (CompanionObject) -> Void) {
+         roles: NativeCompanionRoleClient? = nil, manageOpenCodeService: Bool = true, managePerceptionSensors: Bool = true,
+         interruptibility: (() -> CompanionInterruptContext)? = nil, emit: @escaping (CompanionObject) -> Void) {
         self.root = root; self.promptFile = promptFile; self.opencode = opencode; self.executable = executable; self.providers = providers; injectedRoles = roles; emitToHost = emit
         self.manageOpenCodeService = manageOpenCodeService
+        self.managePerceptionSensors = managePerceptionSensors; self.interruptibility = interruptibility
         var env = ProcessInfo.processInfo.environment
         if let claudeRoot { env["CLAUDE_CONFIG_DIR"] = claudeRoot.path }
         helper = NativeClaudeHelper(node: node, script: helperScript, idleSeconds: idleSeconds, environment: env)
@@ -167,6 +179,8 @@ actor NativeCompanionRuntime {
             }
             pollAt = .distantPast
         }
+        if let opportunity = topic?.opportunity, (try? store.opportunityAuthorized(opportunity, forExpression: true)) != true { stop(reason: "source_revoked", cancelArchive: false) }
+        if topic?.opportunity != nil && perceptionSettings.mode != .live { stop(reason: "initiative_mode_changed", cancelArchive: false) }
         if !enabled || paused || topic?.participants.contains(where: { id in !visible.contains(where: { $0["id"] as? String == id }) }) == true || topic?.source.map({ !sourceEnabled($0) }) == true { stop(cancelArchive: false) }
         status()
     }
@@ -184,6 +198,9 @@ actor NativeCompanionRuntime {
             if settings.shareActivity && (source == "macos.workspace" || source == "macos.idle") {
                 policy.allowedUses.append(.activityContext); policy.remoteInferenceAllowed = true
             }
+            if settings.shareSchedule && ["macos.calendar", "macos.reminders"].contains(source) {
+                policy.allowedUses.append(.expression); policy.remoteInferenceAllowed = true
+            }
             if let effective = try? store.setPerceptionConsent(source: source, enabled: settings.enabled(source), policy: policy) {
                 if settings.enabled(source) { epochs[source] = effective.consentEpoch }
                 if perceptionStatus[source]?["consentEpoch"] as? Int != effective.consentEpoch || !settings.enabled(source) {
@@ -192,6 +209,9 @@ actor NativeCompanionRuntime {
             }
         }
         if settings.mode == .off || !settings.shareActivity { activityContext = nil }
+        if !settings.idle { perceptionIdleSeconds = 0 }
+        if settings.mode == .off { perceptionSessionAvailable = false }
+        guard managePerceptionSensors else { return }
         if macPerception == nil {
             macPerception = await MainActor.run { NativeMacPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } }
         }
@@ -235,6 +255,8 @@ actor NativeCompanionRuntime {
     private func receiveMacSignal(_ signal: CompanionMacSignal) {
         guard !stopped, ready, enabled, perceptionSettings.enabled(signal.source),
               let granted = try? store.perceptionPolicy(signal.source), granted.consentEpoch == signal.epoch else { return }
+        guard signal.sampledUptime > (lastMacSamples[signal.source] ?? 0) else { return }
+        lastMacSamples[signal.source] = signal.sampledUptime
         let now = Date()
         perceptionStatus[signal.source] = ["state": signal.health, "checkedAt": NativeCompanionData.iso(now), "consentEpoch": signal.epoch]
         if let seconds = signal.idleSeconds { perceptionIdleSeconds = seconds }
@@ -315,6 +337,10 @@ actor NativeCompanionRuntime {
             }
             polling = false; status()
         }
+        if perceptionSettings.mode != .off {
+            candidates = [:]
+            evaluateInitiative(); return
+        }
         let now = NativeCompanionData.now()
         candidates = candidates.filter { now - ($0.value["candidateAt"] as? Double ?? 0) <= 120000 }
         guard !stopped, !paused, topic == nil, !visible.isEmpty, now - lastTopic >= (config["cooldownSeconds"] as? Double ?? 180) * 1000 else { return }
@@ -323,7 +349,63 @@ actor NativeCompanionRuntime {
             startTopic(reason: "work_activity", evidence: candidate, source: candidate["backend"] as? String)
         } else if now >= nextIdle { scheduleIdle(); startTopic(reason: "idle_opportunity") }
     }
-    private func startTopic(reason: String, evidence: CompanionObject? = nil, source: String? = nil, characterID: String? = nil) {
+    private func initiativeGates() -> CompanionInterruptContext {
+        var value = CompanionInterruptContext()
+        value.enabled = enabled; value.manualPause = paused; value.sleeping = perceptionSleeping || config["sleeping"] as? Bool == true
+        value.sessionAvailable = interruptibility?().sessionAvailable ?? perceptionSessionAvailable
+        value.outputBusy = topic != nil || dailyBusy || config["presentationBusy"] as? Bool == true
+        value.idleSeconds = interruptibility?().idleSeconds ?? perceptionIdleSeconds
+        value.focusQuiet = interruptibility?().focusQuiet ?? false
+        value.cooldown = NativeCompanionData.now() - lastTopic < (config["cooldownSeconds"] as? Double ?? 180) * 1000
+        value.budgetAvailable = ((try? store.requestCount()) ?? hourly) < hourly
+        return value
+    }
+    private func evaluateInitiative() {
+        let now = Date()
+        guard now >= initiativeAt else { return }; initiativeAt = now.addingTimeInterval(5)
+        let owners = visible.compactMap { $0["id"] as? String }
+        do {
+            try store.pruneProactive(now: now)
+            for owner in owners {
+                try store.syncOpenLoopIntentions(owner: owner, now: now)
+                for goal in try store.intentions(owner: owner) where [.pending, .deferred, .ready].contains(goal.state) && goal.attemptCount < goal.maxAttempts && goal.expiresAt > now && (goal.notBefore ?? .distantPast) <= now && (goal.cooldownUntil ?? .distantPast) <= now {
+                    let value = CompanionOpportunity(ownerCharacterId: owner, kind: "conversation_follow_up", sourceEventIds: [], relatedIntentionIds: [goal.id], topicKey: "intention:" + goal.id,
+                        priority: goal.priority, intrusionCost: 0.25, notBefore: now, expiresAt: min(goal.expiresAt, now.addingTimeInterval(300)))
+                    _ = try store.saveOpportunity(value, now: now)
+                }
+            }
+            if NativeCompanionData.now() >= nextIdle {
+                scheduleIdle()
+                for owner in owners {
+                    let value = CompanionOpportunity(ownerCharacterId: owner, kind: "intrinsic_interest", sourceEventIds: [], topicKey: "intrinsic:\(Int(now.timeIntervalSince1970 / 300))",
+                        priority: 0.5, intrusionCost: 0.3, notBefore: now, expiresAt: now.addingTimeInterval(120))
+                    _ = try store.saveOpportunity(value, now: now)
+                }
+            }
+            let options = try store.opportunities(owners: owners, now: now).sorted { lhs, rhs in
+                if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+                let l = store.get("lastInitiative:" + lhs.ownerCharacterId) as? Double ?? 0
+                let r = store.get("lastInitiative:" + rhs.ownerCharacterId) as? Double ?? 0
+                return l == r ? lhs.id < rhs.id : l < r
+            }
+            let gates = initiativeGates()
+            for opportunity in options {
+                var decision = CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now)
+                if !(try store.opportunityAuthorized(opportunity, now: now, forExpression: true)) {
+                    decision.action = "defer"; decision.reasonCodes.append("source_not_shareable"); decision.selectedModality = .silent
+                }
+                let signature = decision.action + decision.reasonCodes.joined(separator: ",") + ":" + String(Int(now.timeIntervalSince1970 / 60))
+                if lastDecisions[opportunity.id] != signature { try store.recordDecision(decision); lastDecisions[opportunity.id] = signature }
+                if decision.action == "admit", perceptionSettings.mode == .live, topic == nil, try store.claimOpportunity(opportunity, now: now) {
+                    try store.set("lastInitiative:" + opportunity.ownerCharacterId, now.timeIntervalSince1970)
+                    startTopic(reason: "initiative", characterID: opportunity.ownerCharacterId, opportunity: opportunity, decisionID: decision.id)
+                    break
+                }
+            }
+            if lastDecisions.count > 1024 { lastDecisions = [:] }
+        } catch { emit("error", ["message": "Initiative state could not be evaluated."]) }
+    }
+    private func startTopic(reason: String, evidence: CompanionObject? = nil, source: String? = nil, characterID: String? = nil, opportunity: CompanionOpportunity? = nil, decisionID: String? = nil) {
         guard !stopped, enabled, !paused, topic == nil, !dailyBusy else { return }
         var choices = visible
         if let characterID { choices = choices.filter { $0["id"] as? String == characterID } }
@@ -334,7 +416,19 @@ actor NativeCompanionRuntime {
         let index = (store.get("speakerIndex") as? Int ?? 0) % choices.count
         try? store.set("speakerIndex", index + 1)
         let character = choices[index], id = character["id"] as! String
-        let topic = NativeCompanionTopic(speaker: id, source: source); self.topic = topic
+        let topic = NativeCompanionTopic(speaker: id, source: source)
+        topic.opportunity = opportunity; topic.decisionId = decisionID
+        if let opportunity {
+            do {
+                for intentionID in opportunity.relatedIntentionIds {
+                    if let value = try store.intentions(owner: id).first(where: { $0.id == intentionID }), value.state != .ready {
+                        try store.transitionIntention(intentionID, owner: id, to: .ready, reason: "opportunity_admitted")
+                    }
+                    try store.transitionIntention(intentionID, owner: id, to: .executing, reason: "generation_started")
+                }
+            } catch { return }
+        }
+        self.topic = topic
         lastTopic = NativeCompanionData.now(); try? store.set("lastTopic", lastTopic)
         emit("topic.start", ["topicId": topic.id, "reason": reason]); status()
         topic.timeout = Task { [weak self, weak topic] in
@@ -360,8 +454,16 @@ actor NativeCompanionRuntime {
             if !topic.cancelled && !stopped { roleErrors[topic.speaker] = NativeCompanionData.clean(error.localizedDescription, limit: 240); emit("error", ["characterId": topic.speaker, "message": NativeCompanionData.clean(error.localizedDescription, limit: 240)]) }
         }
         topic.timeout?.cancel()
+        if let opportunity = topic.opportunity, topic.outputIds.isEmpty {
+            for id in opportunity.relatedIntentionIds {
+                if (try? store.intentions(owner: topic.initiator).contains(where: { $0.id == id && $0.state == .executing })) == true {
+                    try? store.transitionIntention(id, owner: topic.initiator, to: .deferred, reason: "no_expression")
+                }
+            }
+        }
         try? store.execute("UPDATE deliveries SET status='cancelled' WHERE topic=? AND status='queued'", [topic.id])
         try? store.execute("UPDATE deliveries SET status='delivery_unknown' WHERE topic=? AND status='delivering'", [topic.id])
+        try? store.settleUndeliveredSocialOutputs(topic.id)
         if !topic.cancelled { emit("topic.end", ["topicId": topic.id, "reason": "completed"]) }
         if self.topic === topic { self.topic = nil }; status(); try? store.exportNotes()
     }
@@ -404,12 +506,20 @@ actor NativeCompanionRuntime {
         context["growth"] = try store.growthState(owner: id)["traits"]
         context["relationships"] = try store.rows("SELECT target_character_id,role,trust,familiarity,closeness,impression,evidence_ids,revision FROM relations WHERE observer_character_id=? AND status='active'", [id])
         context["remainingUtterances"] = 4 - topic.utterances
+        topic.snapshotExpires[id] = snapshot.expiresAt
+        if let opportunity = topic.opportunity, id == topic.initiator {
+            guard try store.opportunityAuthorized(opportunity, forExpression: true) else { throw CancellationError() }
+            context["opportunities"] = [["id": opportunity.id, "kind": opportunity.kind, "reasonCodes": opportunity.reasonCodes]]
+        }
+        guard NativeCompanionData.string(context).utf8.count <= 48000 else { throw NativeCompanionData.error("Compiled context exceeds its limit") }
         if let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
         let output = try await roles.generate(id: id, context: context, model: model, reserve: { [weak self] in try await self?.reserveRequest() ?? false })
-        try Task.checkCancellation(); guard !topic.cancelled else { return }
+        try Task.checkCancellation(); guard !topic.cancelled, (topic.snapshotExpires[id] ?? .distantPast) > Date() else { return }
+        if let opportunity = topic.opportunity { guard try store.opportunityAuthorized(opportunity, forExpression: true) else { return } }
         roleErrors.removeValue(forKey: id)
         if let envelope {
             try store.execute("UPDATE deliveries SET status='delivered' WHERE id=?", [envelope["id"]])
+            try store.finishSocialDelivery(envelope["id"] as? String ?? "")
             try store.execute("INSERT OR IGNORE INTO daily_receipts VALUES (?,?)", [envelope["id"], NativeCompanionData.iso()])
             _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: envelope["id"] as? String ?? "", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), sourceActorID: envelope["from"] as? String)
         }
@@ -434,11 +544,37 @@ actor NativeCompanionRuntime {
     }
     private func say(id: String, text: String, topic: NativeCompanionTopic, extra: CompanionObject = [:]) {
         guard !topic.cancelled, topic.utterances < 4, visible.contains(where: { $0["id"] as? String == id }) else { return }
-        topic.utterances += 1
-        var event = extra; event["characterId"] = id; event["name"] = characters.first { $0["id"] as? String == id }?["name"]; event["text"] = NativeCompanionData.clean(text, limit: 300); event["topicId"] = topic.id; emit("utterance", event)
+        let cleaned = NativeCompanionData.clean(text, limit: 300)
+        var related: [String] = []
+        if id == topic.initiator, let opportunity = topic.opportunity {
+            related = opportunity.relatedIntentionIds.filter { target in
+                guard let value = try? store.intentions(owner: id).first(where: { $0.id == target && $0.state == .executing }) else { return false }
+                return value.targetCharacterId == (extra["to"] as? String)
+            }
+        }
+        let receipt = CompanionOutputReceipt(characterId: id, topicId: topic.id, modality: extra["deliveryId"] == nil ? .bubble : .socialMessage,
+            text: cleaned, relatedIntentionIds: related, decisionId: topic.decisionId, deliveryId: extra["deliveryId"] as? String)
+        do {
+            try store.saveOutputCandidate(receipt)
+            if let opportunity = topic.opportunity { try store.proactiveDependency(kind: "output", id: receipt.id, sourceKind: "opportunity", sourceID: opportunity.id) }
+            try store.acknowledgeOutput(receipt.id, owner: id, status: .admitted)
+            try store.acknowledgeOutput(receipt.id, owner: id, status: .queued)
+        } catch { return }
+        topic.outputIds.append(receipt.id); topic.utterances += 1
+        var event = extra; event["initiativeOutput"] = topic.opportunity != nil
+        if let opportunity = topic.opportunity {
+            event["perceptionSources"] = opportunity.sourceEventIds.compactMap { (try? store.rows("SELECT source FROM perception_events WHERE id=?", [$0]).first?["source"]) as? String }
+        }
+        event["expiresAt"] = NativeCompanionData.iso(min(topic.opportunity?.expiresAt ?? .distantFuture, Date().addingTimeInterval(120)))
+        event["outputId"] = receipt.id; event["characterId"] = id; event["name"] = characters.first { $0["id"] as? String == id }?["name"]
+        event["text"] = cleaned; event["topicId"] = topic.id; emit("utterance", event)
     }
     func tool(token: String, name: String, args: CompanionObject) async throws -> Any {
         guard let actor = tokens[token], enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character is paused or unauthenticated") }
+        if let topic {
+            guard (topic.snapshotExpires[actor] ?? Date().addingTimeInterval(1)) > Date() else { throw NativeCompanionData.error("Context snapshot expired") }
+            if let opportunity = topic.opportunity { guard try store.opportunityAuthorized(opportunity, forExpression: true) else { throw NativeCompanionData.error("Opportunity authorization changed") } }
+        }
         try await roles.reserveContinuation(actor)
         guard !stopped, enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character access revoked") }
         if ["private_memory_update", "public_record_update", "memory_write", "memory_correct", "memory_forget", "growth_propose", "intention_propose", "intention_cancel", "intention_resume"].contains(name) {
@@ -552,7 +688,7 @@ actor NativeCompanionRuntime {
             let text = NativeCompanionData.clean(raw, limit: 300), id = UUID().uuidString
             try delivery(id, topic: topic, from: actor, to: to, text: text, status: "queued")
             if !topic.participants.contains(to) { topic.participants.append(to) }; focus(topic, from: actor, to: to)
-            topic.sentBy.insert(actor); say(id: actor, text: text, topic: topic, extra: ["to": to]); topic.queue.append(["id": id, "from": actor, "to": to, "text": text]); return ["messageId": id, "status": "queued"]
+            topic.sentBy.insert(actor); say(id: actor, text: text, topic: topic, extra: ["to": to, "deliveryId": id]); topic.queue.append(["id": id, "from": actor, "to": to, "text": text]); return ["messageId": id, "status": "queued"]
         default: throw NativeCompanionData.error("Tool denied")
         }
     }
@@ -563,6 +699,7 @@ actor NativeCompanionRuntime {
         candidates = [:]; scheduleIdle()
         if let topic, !topic.cancelled {
             topic.cancelled = true; topic.task?.cancel(); topic.timeout?.cancel()
+            try? store.cancelTopicOutputs(topic.id, reason: reason)
             emit("topic.end", ["topicId": topic.id, "reason": reason]); Task { await roles?.interrupt() }
         }
     }
@@ -598,6 +735,12 @@ actor NativeCompanionRuntime {
                 let jobs = try store.reflectionPreview(owner: id)
                 try store.audit(owner: id, operation: "user.reflection_preview", target: jobs.first?["id"] as? String ?? id, actor: "user", result: jobs.isEmpty ? "insufficient_evidence" : "completed")
                 emit("monitor.outcome", try CompanionMonitorCoding.object(CompanionMonitorOutcome(requestID: command["requestID"] as? String ?? "", operation: "reflect", owner: id, target: "", result: jobs.isEmpty ? "insufficient_evidence" : "completed")))
+            case "output_receipt":
+                guard let id = command["outputId"] as? String, let owner = command["characterId"] as? String,
+                      let raw = command["status"] as? String, let state = CompanionOutputStatus(rawValue: raw),
+                      [.presented, .completed, .cancelled, .dismissed].contains(state),
+                      try store.rows("SELECT id FROM proactive_outputs WHERE id=? AND owner=?", [id, owner]).first != nil else { return }
+                try store.acknowledgeOutput(id, owner: owner, status: state, reason: command["reason"] as? String)
             case "perception_authorize":
                 let source = command["source"] as? String ?? ""
                 guard perceptionSettings.enabled(source), ["macos.calendar", "macos.reminders"].contains(source) else { throw NativeCompanionData.error("Enable the source before requesting access") }
@@ -708,7 +851,7 @@ actor NativeCompanionRuntime {
                         try memoryStore.execute("UPDATE daily_archives SET input=?,error=NULL WHERE id=?", [NativeCompanionData.string([
                             "owner": id, "from": input["from"] ?? "", "to": input["to"] ?? "", "timeZone": zone.identifier,
                             "dialogue": try memoryStore.dailyDialogue(owner: id, from: Date(timeIntervalSince1970: job["start_at"] as! Double), to: Date(timeIntervalSince1970: job["end_at"] as! Double)),
-                            "existingMemories": try memoryStore.memorySearch(owner: id, query: "", limit: 100), "openLoops": try memoryStore.dailyLoops(id), "revision": try memoryStore.dailyRevision(id), "identity": try memoryStore.publicIdentityCard(characterID: id, name: "")]), jobID])
+                            "existingMemories": try memoryStore.dailyBackground(owner: id), "openLoops": try memoryStore.dailyPendingContext(owner: id), "revision": try memoryStore.dailyRevision(id), "identity": try memoryStore.publicIdentityCard(characterID: id, name: "")]), jobID])
                         job = try memoryStore.rows("SELECT * FROM daily_archives WHERE id=?", [jobID]).first!
                     }
                     let snapshot = NativeCompanionData.object(try NativeCompanionData.decode(Data((job["input"] as! String).utf8)))

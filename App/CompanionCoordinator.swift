@@ -124,6 +124,11 @@ final class CompanionCoordinator: ObservableObject {
     @Published private(set) var bubbleEditingID: UUID?
     private var pending: [[String: Any]] = []
     private var typingSpeakers: [UUID: UUID] = [:]
+    private var activePresentations: [UUID: [String: Any]] = [:]
+    private var presentedOutputs = Set<String>()
+    private var terminalOutputs = Set<String>()
+    private var waitingCompletion: [String: [String: Any]] = [:]
+    private var receiptTask: Task<Void, Never>?
     private var bubbleTopic: String?
     private var cancelledTopics = Set<String>()
     private var expressionOverrides = Set<UUID>()
@@ -460,6 +465,7 @@ final class CompanionCoordinator: ObservableObject {
             if let text = event["text"] as? String {
                 for (index, sentence) in CompanionSpeech.sentences(text).enumerated() {
                     var part = event; part["text"] = sentence; part["firstSentence"] = index == 0
+                    part["lastSentence"] = index == CompanionSpeech.sentences(text).count - 1
                     pending.append(part)
                 }
             }
@@ -502,6 +508,7 @@ final class CompanionCoordinator: ObservableObject {
             "webSearchEnabled": settings.webSearchEnabled, "perception": (try? CompanionProactiveCoding.object(settings.perception)) ?? [:],
             "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model,
             "dailyConsolidationMinute": settings.dailyConsolidationMinute, "sleeping": manager.sleeping,
+            "presentationBusy": hasSpeech || !typingSpeakers.isEmpty || !pending.isEmpty,
             "sources": settings.sources.mapValues { ["enabled": $0.enabled] as [String: Any] }, "characters": characters]
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: .sortedKeys), let encoded = String(data: data, encoding: .utf8) else { return }
         if force || encoded != lastSync { lastSync = encoded; send(["type": "configure", "config": value]) }
@@ -514,6 +521,7 @@ final class CompanionCoordinator: ObservableObject {
         for (id, bubble) in Array(bubbles) {
             if let record = manager?.record(id), let window = record.controller?.window, visible(record) { bubble.position(near: window) }
             else {
+                cancelOwnerPresentation(id)
                 bubble.hide(); pending.removeAll { $0["characterId"] as? String == id.uuidString }
                 if typingSpeakers[id] == id { typingSpeakers.removeValue(forKey: id); restoreExpression(id) }
             }
@@ -530,6 +538,7 @@ final class CompanionCoordinator: ObservableObject {
             bubble.setGroupFrame(frame)
             for id in bubble.speakerIDs {
                 if let record = manager?.record(id), visible(record) { continue }
+                cancelOwnerPresentation(id)
                 pending.removeAll { $0["characterId"] as? String == id.uuidString }
                 bubble.removeSpeaker(id)
             }
@@ -552,8 +561,18 @@ final class CompanionCoordinator: ObservableObject {
         var index = 0
         while index < pending.count {
             let event = pending[index]
+            if let raw = event["expiresAt"] as? String, let expiry = ISO8601DateFormatter().date(from: raw), expiry <= Date() {
+                receipt(event, status: .cancelled); pending.remove(at: index); continue
+            }
+            if event["initiativeOutput"] as? Bool == true {
+                let sources = event["perceptionSources"] as? [String] ?? []
+                if settings.perception.mode != .live || sources.contains(where: { !settings.perception.enabled($0) || (["macos.calendar", "macos.reminders"].contains($0) && !settings.perception.shareSchedule) }) {
+                    receipt(event, status: .cancelled); pending.remove(at: index); continue
+                }
+            }
             guard let id = (event["characterId"] as? String).flatMap(UUID.init(uuidString:)), let text = event["text"] as? String,
                   let record = manager?.record(id), let window = record.controller?.window, visible(record) else {
+                receipt(event, status: .cancelled)
                 pending.remove(at: index); continue
             }
             let group = group(for: id), channel = group?.id ?? id
@@ -561,7 +580,7 @@ final class CompanionCoordinator: ObservableObject {
             pending.remove(at: index)
             let bubble: CompanionBubble
             if let group {
-                guard let shared = groupBubble(group) else { continue }
+                guard let shared = groupBubble(group) else { receipt(event, status: .cancelled); continue }
                 bubble = shared
             }
             else {
@@ -569,10 +588,13 @@ final class CompanionCoordinator: ObservableObject {
                 bubble.offset = bubblePoint(character(id).bubbleOffset)
                 bubble.configure(avatar: avatar(id), retention: TimeInterval(settings.bubbleRetentionSeconds), side: character(id).bubbleSide)
             }
-            typingSpeakers[channel] = id
-            bubble.type(text: text, near: window, speakerID: id, avatar: avatar(id), side: character(id).bubbleSide) { [weak self] in
+            typingSpeakers[channel] = id; activePresentations[channel] = event
+            bubble.type(text: text, near: window, speakerID: id, avatar: avatar(id), side: character(id).bubbleSide, presentationDeadline: (event["expiresAt"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }, onPresented: { [weak self] in
+                self?.receipt(event, status: .presented)
+            }, onCancelled: { [weak self] in self?.receipt(event, status: .cancelled) }) { [weak self] in
                 guard let self else { return }
-                self.typingSpeakers.removeValue(forKey: channel)
+                self.typingSpeakers.removeValue(forKey: channel); self.activePresentations.removeValue(forKey: channel)
+                if event["lastSentence"] as? Bool != false { self.receipt(event, status: .completed) }
                 self.restoreExpression(id); self.presentNext()
                 if self.pending.isEmpty && self.typingSpeakers.isEmpty && !self.busy { self.clearGaze() }
             }
@@ -614,7 +636,29 @@ final class CompanionCoordinator: ObservableObject {
         if let group = group(for: id) { return groupBubbles[group.id]?.texts(for: id) ?? [] }
         return bubbles[id]?.displayedTexts ?? []
     }
+    private func receipt(_ event: [String: Any], status requested: CompanionOutputStatus) {
+        guard let id = event["outputId"] as? String, let owner = event["characterId"] as? String, !terminalOutputs.contains(id) else { return }
+        var status = requested
+        if status == .completed && !presentedOutputs.contains(id) { waitingCompletion[id] = event; return }
+        if status == .presented {
+            guard presentedOutputs.insert(id).inserted else { return }
+        }
+        if status == .cancelled && presentedOutputs.contains(id) { status = .dismissed }
+        if [.completed, .cancelled, .dismissed].contains(status) { terminalOutputs.insert(id); waitingCompletion.removeValue(forKey: id) }
+        if let runtime {
+            let previous = receiptTask
+            receiptTask = Task { await previous?.value; await runtime.command(["type": "output_receipt", "outputId": id, "characterId": owner, "status": status.rawValue]) }
+        }
+        if status == .presented, let event = waitingCompletion.removeValue(forKey: id) { receipt(event, status: .completed) }
+        if terminalOutputs.count > 1024 { presentedOutputs = presentedOutputs.subtracting(terminalOutputs); terminalOutputs = [] }
+    }
+    private func cancelOwnerPresentation(_ owner: UUID) {
+        for event in pending + Array(activePresentations.values) where event["characterId"] as? String == owner.uuidString { receipt(event, status: .cancelled) }
+        activePresentations = activePresentations.filter { $0.value["characterId"] as? String != owner.uuidString }
+    }
     private func cancelPresentation() {
+        for event in pending + Array(activePresentations.values) { receipt(event, status: .cancelled) }
+        activePresentations = [:]
         hasSpeech = false; pending.removeAll(); allBubbles.forEach { $0.hide() }
         restoreExpressions(); typingSpeakers.removeAll(); clearGaze()
     }

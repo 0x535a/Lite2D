@@ -337,6 +337,21 @@ final class CompanionSelfTest {
                     try check(c.avatar(a.settings.id) == nil && c.character(a.settings.id).avatarFile == nil, "Avatar removal restores bubble-only presentation")
                     bubble.hide()
                     var completed = false
+                    var presentedCount = 0
+                    var cancellationCount = 0
+                    bubble.type(text: "Actual presentation", near: w, onPresented: { presentedCount += 1 }, onCancelled: { cancellationCount += 1 }) {}
+                    bubble.configure(avatar: nil)
+                    try check(presentedCount == 1 && bubble.panel.isVisible, "Presentation receipts fire once after a real bubble becomes visible")
+                    bubble.hide()
+                    try check(cancellationCount == 1, "Hiding a bubble releases its cancellation callback")
+                    let editingBubble = CompanionBubble(groupFrame: NSRect(x: w.frame.minX, y: w.frame.minY, width: 320, height: 250))
+                    editingBubble.beginGroupEditing(name: "Receipt test")
+                    var editingPresented = 0, editingCancelled = 0
+                    editingBubble.type(text: "Expired before display", near: w, presentationDeadline: .distantPast, onPresented: { editingPresented += 1 }, onCancelled: { editingCancelled += 1 }) {}
+                    try check(editingPresented == 0, "Group placement previews never acknowledge hidden real dialogue")
+                    editingBubble.finishGroupEditing()
+                    try check(editingPresented == 0 && editingCancelled == 1 && editingBubble.sentenceCount == 0, "A stale queued group message is cancelled instead of being presented after editing")
+                    editingBubble.hide()
                     let typedText = "我现在正在测试逐字显示以及消失。"
                     let start = Date()
                     bubble.type(text: typedText, near: w) { completed = true }

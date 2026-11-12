@@ -601,7 +601,7 @@
 "perception.power" = "Power and thermal state";
 "perception.network" = "Network path changes";
 "perception.share_activity" = "Share broad activity with the character model";
-"perception.help" = "Sources are optional. Observation records decisions without starting new dialogue. Sharing sends only a broad category such as browsing or writing, without window titles, project names, or content. Existing companion dialogue remains available.";
+"perception.help" = "Observation mode records decisions without starting dialogue. Live mode waits for a suitable moment; enable input activity for timing. Sharing sends only broad activity categories or a generic schedule reminder, never titles, project names or content. Manual conversation remains available.";
 "perception.macos.session" = "User session";
 "perception.macos.workspace" = "Foreground activity";
 "perception.macos.idle" = "Input activity";
@@ -620,3 +620,5 @@
 "perception.authorize" = "Allow access to {0}…";
 "perception.state.not_authorized" = "Access not requested";
 "perception.state.permission_denied" = "Access denied";
+"perception.live" = "Gentle proactive expression";
+"perception.share_schedule" = "Allow generic schedule reminders";

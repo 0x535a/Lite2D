@@ -601,7 +601,7 @@
 "perception.power" = "電源と温度の状態";
 "perception.network" = "ネットワーク経路の変化";
 "perception.share_activity" = "大まかな活動をキャラクターモデルに共有";
-"perception.help" = "各情報源は任意です。観察モードは判断を記録し、新しい会話を開始しません。共有するのは閲覧や執筆などの分類だけで、ウィンドウ名、プロジェクト名、本文は送りません。既存の会話は引き続き利用できます。";
+"perception.help" = "観察モードは判断のみを記録します。発話モードは適切な時を待ちます。タイミング判断には入力状況を有効にしてください。共有するのは大まかな活動分類または一般的な予定リマインダーだけで、タイトル、プロジェクト名、本文は送りません。手動での会話は利用できます。";
 "perception.macos.session" = "ユーザーセッション";
 "perception.macos.workspace" = "前面での活動";
 "perception.macos.idle" = "入力の活発さ";
@@ -620,3 +620,5 @@
 "perception.authorize" = "{0}へのアクセスを許可…";
 "perception.state.not_authorized" = "アクセス未要求";
 "perception.state.permission_denied" = "アクセス拒否";
+"perception.live" = "適切な時に話しかける";
+"perception.share_schedule" = "一般的な予定リマインダーを許可";

@@ -45,7 +45,7 @@ extension NativeCompanionStore {
         let cutoff = get("memoryCutoff:\(owner)") as? String ?? ""
         let start = max(NativeCompanionData.iso(from), cutoff), end = NativeCompanionData.iso(to)
         var result: [CompanionObject] = []
-        for row in try rows("SELECT seq,at,payload FROM events WHERE type='utterance' AND at>=? AND at<? ORDER BY seq", [start, end]) {
+        for row in try rows("SELECT seq,at,payload FROM (SELECT e.seq,e.payload,COALESCE(json_extract(o.payload,'$.presentedAt'),json_extract(o.payload,'$.completedAt'),e.at) AS at FROM events e LEFT JOIN proactive_outputs o ON o.id=json_extract(e.payload,'$.outputId') WHERE e.type='utterance' AND (json_extract(e.payload,'$.outputId') IS NULL OR (json_extract(o.payload,'$.presentedAt') IS NOT NULL OR (json_extract(o.payload,'$.modality')='socialMessage' AND o.status='completed')))) WHERE at>=? AND at<? ORDER BY seq", [start, end]) {
             let value = NativeCompanionData.object(try NativeCompanionData.decode(Data((row["payload"] as? String ?? "{}").utf8)))
             guard value["characterId"] as? String == owner else { continue }
             result.append(["id": "dialogue:\(row["seq"]!)", "at": row["at"]!, "speaker": owner, "text": value["text"] ?? "", "topic": value["topicId"] ?? "", "source": "said_by_self"])
@@ -83,7 +83,7 @@ extension NativeCompanionStore {
             let to = Date(timeIntervalSince1970: due)
             let dialogue = try dailyDialogue(owner: owner, from: from, to: to)
             let input: CompanionObject = ["owner": owner, "from": NativeCompanionData.iso(from), "to": NativeCompanionData.iso(to), "timeZone": zone.identifier,
-                "dialogue": dialogue, "existingMemories": try memorySearch(owner: owner, query: "", limit: 100), "openLoops": try dailyLoops(owner), "revision": try dailyRevision(owner), "identity": try publicIdentityCard(characterID: owner, name: "")]
+                "dialogue": dialogue, "existingMemories": try dailyBackground(owner: owner), "openLoops": try dailyPendingContext(owner: owner), "revision": try dailyRevision(owner), "identity": try publicIdentityCard(characterID: owner, name: "")]
             let id = NativeCompanionData.hash(owner + ":\(from.timeIntervalSince1970):\(due):" + (input["revision"] as! String))
             try execute("INSERT OR IGNORE INTO daily_archives(id,owner,start_at,end_at,zone,status,input,old_session,created_at) VALUES (?,?,?,?,?,?,?,?,?)", [id, owner, from.timeIntervalSince1970, due, zone.identifier, "pending", NativeCompanionData.string(input), get("session:\(owner)"), NativeCompanionData.iso(now)])
             return try rows("SELECT * FROM daily_archives WHERE id=?", [id]).first

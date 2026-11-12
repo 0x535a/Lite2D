@@ -16,10 +16,13 @@ final class CompanionBubble {
         let label: NSTextField
         let closeButton: NSButton
         var playback: CompanionSpeechPlayback?
+        var presentationDeadline: Date? = nil
     }
     private var rows: [Row] = []
     private var timer: Timer?
     private var typingCompleted: (() -> Void)?
+    private var presentationCallbacks: [UUID: () -> Void] = [:]
+    private var cancellationCallbacks: [UUID: () -> Void] = [:]
     private weak var anchor: NSWindow?
     private var avatar: NSImage?
     private var retention = CompanionSpeechPlayback.defaultRetention
@@ -94,6 +97,7 @@ final class CompanionBubble {
             var direction = isGroup ? row.side : side
             if let id = row.speakerID, let style { (image, direction) = style(id) }
             append(row.text, speakerID: row.speakerID, avatar: image, side: direction, id: row.id, isPreview: row.isPreview)
+            rows[rows.count - 1].presentationDeadline = row.presentationDeadline
             rows[rows.count - 1].playback = row.playback
             rows[rows.count - 1].playback?.setRetention(retention)
             rows.last?.label.stringValue = row.label.stringValue
@@ -127,6 +131,7 @@ final class CompanionBubble {
         panel.setFrame(frame, display: true)
         layout(animated: false)
         if rows.isEmpty && !editing { panel.orderOut(nil) }
+        flushPresentationCallbacks()
         return frame
     }
     func updateGroupPreview(_ speakers: [CompanionGroupPreviewSpeaker]) {
@@ -148,17 +153,35 @@ final class CompanionBubble {
         layout(animated: panel.isVisible)
         position(near: window); panel.orderFrontRegardless(); panel.display()
     }
-    func type(text: String, near window: NSWindow, speakerID: UUID? = nil, avatar: NSImage? = nil, side: CompanionBubbleSide? = nil, completion: @escaping () -> Void) {
+    func type(text: String, near window: NSWindow, speakerID: UUID? = nil, avatar: NSImage? = nil, side: CompanionBubbleSide? = nil, presentationDeadline: Date? = nil, onPresented: (() -> Void)? = nil, onCancelled: (() -> Void)? = nil, completion: @escaping () -> Void) {
         anchor = window; append(text, speakerID: speakerID, avatar: isGroup ? avatar : self.avatar, side: side ?? self.side)
+        rows[rows.count - 1].presentationDeadline = presentationDeadline
+        if let id = rows.last?.id {
+            if let onPresented { presentationCallbacks[id] = onPresented }
+            if let onCancelled { cancellationCallbacks[id] = onCancelled }
+        }
         let playback = CompanionSpeechPlayback(text: text, retention: retention)
         rows[rows.count - 1].playback = playback
         rows.last?.label.stringValue = playback.visibleText(at: playback.startedAt)
         typingCompleted = completion
         layout(animated: panel.isVisible)
         position(near: window); panel.orderFrontRegardless(); panel.display()
+        flushPresentationCallbacks()
         if timer == nil {
             let timer = Timer(timeInterval: 0.025, repeats: true) { [weak self] _ in self?.advance(to: Date()) }
             self.timer = timer; RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    private func flushPresentationCallbacks() {
+        guard !editing, panel.isVisible else { return }
+        let expired = Set(actualRows.filter { presentationCallbacks[$0.id] != nil && ($0.presentationDeadline ?? .distantFuture) <= Date() }.map(\.id))
+        for row in rows where expired.contains(row.id) {
+            presentationCallbacks.removeValue(forKey: row.id); cancellationCallbacks.removeValue(forKey: row.id)?(); row.view.removeFromSuperview()
+        }
+        rows.removeAll { expired.contains($0.id) }
+        if !expired.isEmpty { layout(animated: false) }
+        for row in actualRows {
+            if let callback = presentationCallbacks.removeValue(forKey: row.id) { callback() }
         }
     }
     func advance(to time: Date) {
@@ -171,7 +194,9 @@ final class CompanionBubble {
         let saved = scrollAnchor()
         let expired = rows.filter { $0.playback?.isExpired(at: time) == true }
         if !expired.isEmpty {
-            expired.forEach { $0.view.removeFromSuperview() }
+            expired.forEach { row in
+                presentationCallbacks.removeValue(forKey: row.id); cancellationCallbacks.removeValue(forKey: row.id)?(); row.view.removeFromSuperview()
+            }
             rows.removeAll { $0.playback?.isExpired(at: time) == true }
             if rows.isEmpty && !editing { panel.orderOut(nil) }
             layout(animated: true, anchor: saved)
@@ -255,7 +280,7 @@ final class CompanionBubble {
     func removeSpeaker(_ id: UUID) { removeRows { !$0.isPreview && $0.speakerID == id } }
     private func removeRows(where predicate: (Row) -> Bool) {
         let anchor = scrollAnchor()
-        rows.filter(predicate).forEach { $0.view.removeFromSuperview() }
+        rows.filter(predicate).forEach { row in presentationCallbacks.removeValue(forKey: row.id); cancellationCallbacks.removeValue(forKey: row.id)?(); row.view.removeFromSuperview() }
         rows.removeAll(where: predicate)
         let completion = rows.allSatisfy { $0.playback?.isTyping(at: Date()) != true } ? typingCompleted : nil
         if completion != nil { typingCompleted = nil }
@@ -323,10 +348,10 @@ final class CompanionBubble {
         return NSPoint(x: window.frame.midX - panel.frame.width / 2, y: window.frame.maxY + 8)
     }
     func hide() {
-        timer?.invalidate(); timer = nil; typingCompleted = nil
+        timer?.invalidate(); timer = nil; typingCompleted = nil; presentationCallbacks = [:]
         if !editing { panel.orderOut(nil) }
         let removed = rows.filter { !editing || !$0.isPreview }
-        removed.forEach { $0.view.removeFromSuperview() }
+        removed.forEach { row in cancellationCallbacks.removeValue(forKey: row.id)?(); row.view.removeFromSuperview() }
         rows.removeAll { !editing || !$0.isPreview }
         if editing { layout(animated: false) }
     }

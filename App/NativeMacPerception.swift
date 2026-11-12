@@ -12,8 +12,9 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var calendar = false
     var reminders = false
     var shareActivity = false
+    var shareSchedule = false
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, shareActivity, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, shareActivity, shareSchedule, appOverrides }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -25,6 +26,7 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         calendar = (try? c.decode(Bool.self, forKey: .calendar)) ?? false
         reminders = (try? c.decode(Bool.self, forKey: .reminders)) ?? false
         shareActivity = (try? c.decode(Bool.self, forKey: .shareActivity)) ?? false
+        shareSchedule = (try? c.decode(Bool.self, forKey: .shareSchedule)) ?? false
         appOverrides = (try? c.decode([String: CompanionActivityCategory].self, forKey: .appOverrides)) ?? [:]
     }
     static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders"]
@@ -72,6 +74,7 @@ struct CompanionMacSignal {
     var initial = false
     var health: String = "available"
     var epoch: Int
+    var sampledUptime: UInt64 = DispatchTime.now().uptimeNanoseconds
 }
 
 // All Cocoa callbacks/timers and teardown run on the main actor. The sink only sends bounded typed signals.
@@ -84,25 +87,35 @@ struct CompanionMacSignal {
     private var networkMonitor: NWPathMonitor?
     private var generation = 0
     private var asleep = false
+    private var externallySuspended = false
+    private var quietReasons = Set<String>()
+    private var lastLifecycleUptime: UInt64 = 0
     private let sink: (CompanionMacSignal) -> Void
     init(sink: @escaping (CompanionMacSignal) -> Void) { self.sink = sink }
 
     func configure(_ next: CompanionPerceptionSettings, epochs: [String: Int], suspended: Bool) {
-        guard settings != next || self.epochs != epochs || asleep != suspended else { return }
-        stop(); self.settings = next; self.epochs = epochs; asleep = suspended
+        if settings.mode == .off && next.mode != .off {
+            quietReasons = []
+            if CGDisplayIsAsleep(CGMainDisplayID()) != 0 { quietReasons.insert("screen") }
+        }
+        externallySuspended = suspended
+        let effectiveSuspended = suspended || !quietReasons.isEmpty
+        guard settings != next || self.epochs != epochs || asleep != effectiveSuspended else { return }
+        stop(); self.settings = next; self.epochs = epochs; asleep = effectiveSuspended
         guard next.mode != .off else { return }
         let center = NSWorkspace.shared.notificationCenter
         let expected = generation
         // These are hard-gate lifecycle signals, never exact lock-screen assertions.
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification, NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification, NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
             tokens.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
-                Task { @MainActor in guard let self, self.generation == expected else { return }; self.lifecycle(notification.name) }
+                let sampled = DispatchTime.now().uptimeNanoseconds
+                Task { @MainActor in guard let self, self.generation == expected else { return }; self.lifecycle(notification.name, sampledAt: sampled) }
             })
         }
         if let epoch = epochs["macos.session"] {
-            sink(.init(source: "macos.session", type: "session.snapshot", subject: "user_session", sessionAvailable: !suspended && sessionAvailable(), sleeping: suspended, initial: true, epoch: epoch))
+            sink(.init(source: "macos.session", type: "session.snapshot", subject: "user_session", sessionAvailable: !asleep && sessionAvailable(), sleeping: asleep, initial: true, epoch: epoch))
         }
-        if suspended { return }
+        if asleep { return }
         if next.workspace {
             tokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in guard let self, self.generation == expected else { return }; self.sampleWorkspace(initial: false) }
@@ -143,13 +156,19 @@ struct CompanionMacSignal {
             samplePower(initial: true)
         }
     }
-    private func lifecycle(_ name: Notification.Name) {
-        guard settings.mode != .off else { return }
-        let sleep = [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification].contains(name)
+    private func lifecycle(_ name: Notification.Name, sampledAt: UInt64) {
+        guard settings.mode != .off, sampledAt > lastLifecycleUptime else { return }
+        lastLifecycleUptime = sampledAt
+        let causes: [Notification.Name: (String, Bool)] = [
+            NSWorkspace.willSleepNotification: ("sleep", true), NSWorkspace.didWakeNotification: ("sleep", false),
+            NSWorkspace.screensDidSleepNotification: ("screen", true), NSWorkspace.screensDidWakeNotification: ("screen", false),
+            NSWorkspace.sessionDidResignActiveNotification: ("session", true), NSWorkspace.sessionDidBecomeActiveNotification: ("session", false)]
+        if let cause = causes[name] { if cause.1 { quietReasons.insert(cause.0) } else { quietReasons.remove(cause.0) } }
+        let suspended = externallySuspended || !quietReasons.isEmpty
         let source = "macos.session"
         guard let epoch = epochs[source] else { return }
-        sink(.init(source: source, type: sleep ? "session.suspended" : "session.resumed", subject: "user_session", sessionAvailable: !sleep && sessionAvailable(), sleeping: sleep, epoch: epoch))
-        configure(settings, epochs: epochs, suspended: sleep)
+        sink(.init(source: source, type: suspended ? "session.suspended" : "session.resumed", subject: "user_session", sessionAvailable: !suspended && sessionAvailable(), sleeping: suspended, epoch: epoch))
+        configure(settings, epochs: epochs, suspended: externallySuspended)
     }
     private func sessionAvailable() -> Bool {
         guard let values = CGSessionCopyCurrentDictionary() as? [String: Any],

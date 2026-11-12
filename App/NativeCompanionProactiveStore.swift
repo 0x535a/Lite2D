@@ -48,6 +48,7 @@ extension NativeCompanionStore {
         }
     }
     func invalidatePerceptionSource(_ source: String) throws {
+        try invalidateProactiveDependency(kind: "source", id: source, reason: "source_revoked")
         let events = try rows("SELECT id FROM perception_events WHERE source=?", [source]).compactMap { $0["id"] as? String }
         for event in events { try invalidateProactiveDependency(kind: "event", id: event, reason: "source_revoked") }
         try execute("DELETE FROM perception_events WHERE source=?", [source]); try execute("DELETE FROM perception_cursors WHERE source=?", [source])
@@ -88,7 +89,10 @@ extension NativeCompanionStore {
                 try CompanionProactiveCoding.require(policy.permits(opportunity.ownerCharacterId, use: .attention), "Opportunity source is not authorized for this character")
             }
             try execute("INSERT INTO proactive_opportunities VALUES (?,?,?,?,?,?)", [opportunity.id, opportunity.ownerCharacterId, opportunity.topicKey, opportunity.state.rawValue, opportunity.expiresAt.timeIntervalSince1970, try CompanionProactiveCoding.encode(opportunity)])
-            for id in opportunity.sourceEventIds { try proactiveDependency(kind: "opportunity", id: opportunity.id, sourceKind: "event", sourceID: id) }
+            for id in opportunity.sourceEventIds {
+                try proactiveDependency(kind: "opportunity", id: opportunity.id, sourceKind: "event", sourceID: id)
+                if let source = try rows("SELECT source FROM perception_events WHERE id=?", [id]).first?["source"] as? String { try proactiveDependency(kind: "opportunity", id: opportunity.id, sourceKind: "source", sourceID: source) }
+            }
             return opportunity.id
         }
     }
@@ -123,12 +127,15 @@ extension NativeCompanionStore {
             let transitions: [CompanionOutputStatus: [CompanionOutputStatus]] = [
                 .candidate: [.admitted, .cancelled, .failed], .admitted: [.queued, .cancelled, .failed],
                 .queued: [.presented, .cancelled, .failed, .deliveryUnknown], .presented: [.completed, .dismissed]]
-            if value.status == status { return } // duplicate host receipt is harmless
+            if value.status == status || [.completed, .cancelled, .failed, .dismissed].contains(value.status) { return } // duplicate/late host receipt is harmless
             try CompanionProactiveCoding.require(transitions[value.status]?.contains(status) == true, "Invalid output transition")
+            if value.modality == .socialMessage && status == .completed { return } // UI completion is not peer consumption.
             value.status = status; value.failureReason = reason.map { String($0.prefix(100)) }
             if status == .presented { value.presentedAt = now }
+            if status == .completed { value.completedAt = now }
             try execute("UPDATE proactive_outputs SET status=?,payload=? WHERE id=?", [status.rawValue, try CompanionProactiveCoding.encode(value), id])
             for intentionID in value.relatedIntentionIds {
+                guard try intentions(owner: owner).contains(where: { $0.id == intentionID && $0.state == .executing }) else { continue }
                 if status == .presented && value.modality == .bubble {
                     try transitionIntention(intentionID, owner: owner, to: .completed, reason: "presented", now: now)
                 } else if [.cancelled, .failed].contains(status) {
@@ -181,8 +188,9 @@ extension NativeCompanionStore {
             if state == .executing { value.attemptCount += 1 }
             if state == .deferred { value.cooldownUntil = now.addingTimeInterval(max(1, cooldown)) }
             value.state = state; value.lastDecisionReason = String(reason.prefix(100)); value.updatedAt = now
+            if state == .deferred && value.attemptCount >= value.maxAttempts { value.state = .failed; value.lastDecisionReason = "attempt_limit" }
             if state == .completed { value.completedAt = now }
-            try execute("UPDATE proactive_intentions SET state=?,revision=revision+1,payload=? WHERE id=?", [state.rawValue, try CompanionProactiveCoding.encode(value), id])
+            try execute("UPDATE proactive_intentions SET state=?,revision=revision+1,payload=? WHERE id=?", [value.state.rawValue, try CompanionProactiveCoding.encode(value), id])
         }
     }
     func recordDecision(_ decision: CompanionDecisionRecord) throws {
@@ -196,6 +204,7 @@ extension NativeCompanionStore {
         for row in try rows("SELECT kind,id FROM proactive_dependencies WHERE source_kind=? AND source_id=?", [kind, id]) {
             let target = row["id"] as! String
             if row["kind"] as? String == "opportunity" {
+                try invalidateProactiveDependency(kind: "opportunity", id: target, reason: reason)
                 try execute("UPDATE proactive_opportunities SET state='cancelled',payload='{}' WHERE id=?", [target])
             } else if row["kind"] as? String == "intention" {
                 // Erase goal text as well: forgotten evidence must not survive as a pending goal.
@@ -213,6 +222,9 @@ extension NativeCompanionStore {
     func pruneProactive(now: Date = Date()) throws {
         try transaction {
             let time = now.timeIntervalSince1970
+            for row in try rows("SELECT id,owner FROM proactive_outputs WHERE status IN ('candidate','admitted','queued') AND at<?", [time - 120]) {
+                try acknowledgeOutput(row["id"] as! String, owner: row["owner"] as! String, status: .failed, reason: "presentation_timeout", now: now)
+            }
             try execute("UPDATE proactive_opportunities SET state='expired' WHERE expires_at<=? AND state IN ('pending','ready','deferred')", [time])
             try execute("UPDATE proactive_intentions SET state='expired' WHERE expires_at<=? AND state IN ('pending','ready','deferred','needsReview')", [time])
             try execute("DELETE FROM perception_events WHERE purge_at<=?", [time])

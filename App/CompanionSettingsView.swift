@@ -118,7 +118,7 @@ struct CompanionGeneralSections: View {
         Binding(get: { companion.settings[keyPath: key] }, set: { companion.settings[keyPath: key] = $0; companion.changed() })
     }
     func perception<T>(_ key: WritableKeyPath<CompanionPerceptionSettings, T>) -> Binding<T> {
-        Binding(get: { companion.settings.perception[keyPath: key] }, set: { companion.settings.perception[keyPath: key] = $0; companion.changed() })
+        Binding(get: { companion.settings.perception[keyPath: key] }, set: { companion.stopTopic(); companion.settings.perception[keyPath: key] = $0; companion.changed() })
     }
     var body: some View {
         Section {
@@ -162,6 +162,7 @@ struct CompanionGeneralSections: View {
             Picker(L10n.text("perception.mode"), selection: perception(\.mode)) {
                 Text(L10n.text("perception.off")).tag(CompanionProactiveMode.off)
                 Text(L10n.text("perception.shadow")).tag(CompanionProactiveMode.shadow)
+                Text(L10n.text("perception.live")).tag(CompanionProactiveMode.live)
             }
             Toggle(L10n.text("perception.workspace"), isOn: perception(\.workspace))
             Toggle(L10n.text("perception.idle"), isOn: perception(\.idle))
@@ -175,6 +176,7 @@ struct CompanionGeneralSections: View {
                 }
             }
             Toggle(L10n.text("perception.share_activity"), isOn: perception(\.shareActivity))
+            Toggle(L10n.text("perception.share_schedule"), isOn: perception(\.shareSchedule))
             ForEach(CompanionPerceptionSettings.sourceNames, id: \.self) { source in
                 if let state = companion.perceptionSources[source]?["state"] as? String {
                     LabeledContent(L10n.text("perception." + source)) { Text(L10n.text("perception.state." + state)).foregroundStyle(.secondary) }

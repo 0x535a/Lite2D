@@ -105,7 +105,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         let runtimePersona = (try? store.runtimePersona(characterID: id, markdown: persona)) ?? persona
         let digest = NativeCompanionData.hash(prompt.system(persona: runtimePersona))
         if let existing = instances[id], existing.digest == digest, existing.model == model,
-           store.get("sessionPolicy:\(id)") as? String == "initiative-v1",
+           store.get("sessionPolicy:\(id)") as? String == "initiative-v2",
            store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { return existing }
         let hadInstance = instances[id] != nil
         let token = await register(id)
@@ -121,7 +121,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         var session = store.get("session:\(id)") as? String
         if let old = session {
             if let response = try? await client.get("api/session/\(old)"), NativeCompanionData.object(NativeCompanionData.object(response["data"])["location"])["directory"] as? String == directory.path,
-               store.get("sessionPolicy:\(id)") as? String == "initiative-v1",
+               store.get("sessionPolicy:\(id)") as? String == "initiative-v2",
                store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { }
             else { session = nil }
         }
@@ -133,7 +133,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             let response = try await client.post("api/session", input)
             guard let created = NativeCompanionData.object(response["data"])["id"] as? String else { throw NativeCompanionData.error("OpenCode did not create a role session") }
             session = created; try store.set("session:\(id)", created)
-            try store.set("sessionPolicy:\(id)", "initiative-v1")
+            try store.set("sessionPolicy:\(id)", "initiative-v2")
             try store.set("sessionPersona:\(id)", NativeCompanionData.hash(persona))
         } else if let modelRef { _ = try await client.post("api/session/\(session!)/model", ["model": modelRef]) }
         let agents = try await client.get("api/agent", ["location[directory]": directory.path])
@@ -165,8 +165,10 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         var context = input
         if store.get("dailyWakeSession:\(id)") as? String != instance.session {
             var recollection = try store.dailyWake(id)
+            recollection["recentRecollection"] = NativeCompanionData.array(recollection["recentRecollection"]).prefix(1).map { item -> CompanionObject in var value = item; value["content"] = String((item["content"] as? String ?? "").prefix(2500)); return value }
+            recollection["unfinished"] = NativeCompanionData.array(recollection["unfinished"]).prefix(3).map { item -> CompanionObject in var value = item; value["content"] = String((item["content"] as? String ?? "").prefix(400)); return value }
             if let since = store.get("dailyBridgeFrom:\(id)") as? Double {
-                recollection["interveningDialogue"] = try store.dailyDialogue(owner: id, from: Date(timeIntervalSince1970: since), to: Date())
+                recollection["interveningDialogue"] = Array(try store.dailyDialogue(owner: id, from: Date(timeIntervalSince1970: since), to: Date()).suffix(4))
             }
             context["recollection"] = recollection
         }
@@ -182,7 +184,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         }
         let before = NativeCompanionData.array(try await client.get("api/session/\(instance.session)/message", ["limit": "4", "order": "desc"])["data"])
         let previous = Set(before.compactMap { $0["id"] as? String })
-        let pending = try store.rows("SELECT id,sender,text,remote_id FROM deliveries WHERE recipient=? AND status='accepted_pending_context'", [id])
+        let pending = try store.rows("SELECT id,sender,text,remote_id FROM deliveries WHERE recipient=? AND status='accepted_pending_context' ORDER BY at,id LIMIT 4", [id])
         if !pending.isEmpty {
             let inbox = NativeCompanionData.array(try await client.get("api/session/\(instance.session)/inbox")["data"])
             for row in pending {
@@ -190,6 +192,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             }
             context["pendingCompanionMessages"] = pending.map { ["messageId": $0["id"] ?? "", "from": $0["sender"] ?? "", "text": $0["text"] ?? "", "quotedEvidence": true] }
         }
+        guard NativeCompanionData.string(context).utf8.count <= 65536 else { throw NativeCompanionData.error("Role context exceeds its final budget") }
         budgets[id] = Budget(reserve: reserve)
         let admitted = try await client.post("api/session/\(instance.session)/synthetic", ["text": NativeCompanionData.string(context), "delivery": "queue", "resume": true,
             "metadata": ["lite2d": true, "topicId": input["topicId"] ?? "", "synchronizedDeliveries": pending.compactMap { $0["id"] as? String }]])
@@ -215,7 +218,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
                     let text = NativeCompanionData.text(response)
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let delivered = Set(messages.compactMap { $0["id"] as? String })
-                        for row in try store.rows("SELECT id,remote_id,sender,text FROM deliveries WHERE recipient=? AND status='accepted_pending_context'", [id]) where delivered.contains(row["remote_id"] as? String ?? "") {
+                        for row in pending where delivered.contains(inputID) {
                             try store.execute("UPDATE deliveries SET status='context_consumed' WHERE id=?", [row["id"]])
                             try store.execute("INSERT OR IGNORE INTO daily_receipts VALUES (?,?)", [row["id"], NativeCompanionData.iso()])
                             _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: row["id"] as? String ?? "", content: "收到角色消息：" + (row["text"] as? String ?? ""), sourceActorID: row["sender"] as? String)
@@ -235,7 +238,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
     }
     func receive(id: String, from: String, text: String, messageID: String, model: String) async throws -> String {
         let instance = try await prepare(id: id, model: model)
-        let response = try await client!.post("api/session/\(instance.session)/synthetic", ["text": NativeCompanionData.string(["from": from, "message": text, "instruction": prompt.peerReceipt]), "resume": false, "delivery": "steer", "metadata": ["lite2d": true, "messageId": messageID]])
+        let response = try await client!.post("api/session/\(instance.session)/synthetic", ["text": NativeCompanionData.string(["from": from, "messageId": messageID, "instruction": "Receipt marker only. The Controller supplies actual message content on an admitted turn; this is not a consumed message."]), "resume": false, "delivery": "steer", "metadata": ["lite2d": true, "messageId": messageID]])
         guard let id = NativeCompanionData.object(response["data"])["id"] as? String else { throw NativeCompanionData.error("No message receipt") }; return id
     }
     func forget(_ id: String) { instances.removeValue(forKey: id) }

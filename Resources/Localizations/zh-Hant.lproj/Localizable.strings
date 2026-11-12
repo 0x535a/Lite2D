@@ -601,7 +601,7 @@
 "perception.power" = "電源與熱狀態";
 "perception.network" = "網路路徑變化";
 "perception.share_activity" = "將宏觀活動類別提供給角色模型";
-"perception.help" = "各來源獨立可選。觀察模式記錄決策，不觸發新的對話。共享時僅傳送上網、寫作等宏觀類別，不傳送視窗標題、專案名稱或正文。原有角色對話繼續可用。";
+"perception.help" = "觀察模式只記錄決策，不主動發言。表達模式等待合適時機，請開啟輸入活躍度以協助判斷。共享時只傳送宏觀活動類別或泛化行程提醒，不傳送標題、專案名稱或正文。手動觸發對話仍可使用。";
 "perception.macos.session" = "使用者工作階段";
 "perception.macos.workspace" = "前景活動";
 "perception.macos.idle" = "輸入活躍度";
@@ -620,3 +620,5 @@
 "perception.authorize" = "允許存取{0}…";
 "perception.state.not_authorized" = "尚未申請權限";
 "perception.state.permission_denied" = "存取遭拒";
+"perception.live" = "適時主動表達";
+"perception.share_schedule" = "允許泛化的行程提醒";

@@ -27,10 +27,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 def main():
     sources = ['CompanionMonitorModels.swift', 'NativeCompanionMonitor.swift', 'NativePersonaMemory.swift', 'NativeCompanionStore.swift', 'NativeCompanionTransport.swift', 'NativeClaudeHelper.swift',
-               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift', 'NativeCompanionContext.swift']
+               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift', 'NativeCompanionContext.swift', 'NativeCompanionInitiative.swift']
     unit = OUT / 'native-tests'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *[str(ROOT / 'App' / name) for name in sources],
-                    str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
+                    str(ROOT / 'Tests/CompanionInitiativeTests.swift'), str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
     state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0, 'tryIntention': False, 'intentionProposed': False}
@@ -137,20 +137,28 @@ def main():
         def launch():
             child = subprocess.Popen([str(APP), '--companion-runtime-probe'], cwd=ROOT, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             mailbox = queue.Queue()
+            input_lock = threading.Lock()
 
             def read():
                 for line in child.stdout:
                     try:
                         event = json.loads(line)
                         all_events.append(event)
+                        if event.get('type') == 'utterance' and event.get('outputId'):
+                            # Simulated host receipt for the headless protocol fixture, not a screen claim.
+                            with input_lock:
+                                for status in ['presented', 'completed']:
+                                    child.stdin.write(json.dumps({'type': 'output_receipt', 'outputId': event['outputId'], 'characterId': event['characterId'], 'status': status}) + '\n')
+                                child.stdin.flush()
                         mailbox.put(event)
-                    except ValueError:
+                    except (ValueError, BrokenPipeError):
                         pass
             threading.Thread(target=read, daemon=True).start()
 
             def send(value):
-                child.stdin.write(json.dumps(value) + '\n')
-                child.stdin.flush()
+                with input_lock:
+                    child.stdin.write(json.dumps(value) + '\n')
+                    child.stdin.flush()
 
             def until(kind, timeout=45):
                 deadline = time.monotonic() + timeout

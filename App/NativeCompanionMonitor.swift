@@ -77,6 +77,10 @@ extension NativeCompanionStore {
            let row = try rows("SELECT at,payload FROM events WHERE seq=? AND type='utterance' AND at>=?", [seq, cutoff]).first {
             let data = NativeCompanionData.object(try NativeCompanionData.decode(Data((row["payload"] as! String).utf8)))
             if data["characterId"] as? String == owner {
+                if let output = data["outputId"] as? String,
+                   try rows("SELECT id FROM proactive_outputs WHERE id=? AND owner=? AND (json_extract(payload,'$.presentedAt') IS NOT NULL OR (json_extract(payload,'$.modality')='socialMessage' AND status='completed'))", [output, owner]).isEmpty {
+                    return .init(id: id, kind: "reference", owner: owner, title: "not_presented", status: "unavailable")
+                }
                 var item = CompanionMonitorItem(id: id, kind: "event", owner: owner, title: String((data["text"] as? String ?? "").prefix(90)))
                 item.content = data["text"] as? String ?? ""; item.at = row["at"] as? String ?? ""; item.source = "experienced"
                 return item

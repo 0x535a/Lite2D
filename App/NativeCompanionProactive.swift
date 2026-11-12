@@ -252,8 +252,10 @@ struct CompanionOutputReceipt: Codable, Equatable {
     var text: String
     var relatedIntentionIds: [String] = []
     var decisionId: String?
+    var deliveryId: String?
     var createdAt: Date = Date()
     var presentedAt: Date?
+    var completedAt: Date?
     var failureReason: String?
 }
 

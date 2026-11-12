@@ -4,7 +4,7 @@ extension NativeCompanionStore {
     func recentRoleDialogue(owner: String, limit: Int = 4) throws -> [CompanionObject] {
         let cutoff = get("memoryCutoff:\(owner)") as? String ?? ""
         var result: [CompanionObject] = []
-        for row in try rows("SELECT seq,at,payload FROM events WHERE type='utterance' AND json_extract(payload,'$.characterId')=? AND at>=? ORDER BY seq DESC LIMIT ?", [owner, cutoff, min(limit, 16)]) {
+        for row in try rows("SELECT e.seq,e.at,e.payload FROM events e LEFT JOIN proactive_outputs o ON o.id=json_extract(e.payload,'$.outputId') WHERE e.type='utterance' AND json_extract(e.payload,'$.characterId')=? AND e.at>=? AND (json_extract(e.payload,'$.outputId') IS NULL OR (json_extract(o.payload,'$.presentedAt') IS NOT NULL OR (json_extract(o.payload,'$.modality')='socialMessage' AND o.status='completed'))) ORDER BY e.seq DESC LIMIT ?", [owner, cutoff, min(limit, 16)]) {
             let data = NativeCompanionData.object(try NativeCompanionData.decode(Data((row["payload"] as! String).utf8)))
             result.append(["id": "dialogue:\(row["seq"]!)", "at": row["at"]!, "from": owner, "text": data["text"] ?? "", "source": "said_by_self"])
         }
@@ -26,6 +26,17 @@ extension NativeCompanionStore {
             guard let id = row["id"] as? String, seen.insert(id).inserted else { return false }
             return !["observed", "legacy_import"].contains(row["provenance"] as? String ?? "") && row["memory_type"] as? String != "diary"
         }.prefix(8))
+    }
+    func dailyBackground(owner: String) throws -> [CompanionObject] {
+        try initiativeMemories(owner: owner, intentions: []).map { row in
+            ["id": row["id"] ?? "", "memory_type": row["memory_type"] ?? "", "provenance": row["provenance"] ?? "inferred",
+             "content": String((row["content"] as? String ?? "").prefix(400)), "occurred_at": row["occurred_at"] ?? NSNull()]
+        }
+    }
+    func dailyPendingContext(owner: String) throws -> [CompanionObject] {
+        try dailyLoops(owner).prefix(32).map { row in
+            ["id": row["id"] ?? "", "content": String((row["content"] as? String ?? "").prefix(400)), "provenance": row["provenance"] ?? "inferred"]
+        }
     }
     // Daily open loops keep their memory identity. A terminal follow-up is not recreated every day.
     func syncOpenLoopIntentions(owner: String, now: Date = Date()) throws {

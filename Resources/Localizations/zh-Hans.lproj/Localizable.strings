@@ -601,7 +601,7 @@
 "perception.power" = "电源与热状态";
 "perception.network" = "网络路径变化";
 "perception.share_activity" = "将宏观活动类别提供给角色模型";
-"perception.help" = "各来源独立可选。观察模式记录决策，不触发新的对话。共享时只发送上网、写作等宏观类别，不发送窗口标题、项目名或正文。原有角色对话继续可用。";
+"perception.help" = "观察模式只记录决策，不主动发言。表达模式等待合适时机，请开启输入活跃度用于判断。共享时只发送宏观活动类别或泛化的日程提醒，不发送标题、项目名或正文。手动触发对话继续可用。";
 "perception.macos.session" = "用户会话";
 "perception.macos.workspace" = "前台活动";
 "perception.macos.idle" = "输入活跃度";
@@ -620,3 +620,5 @@
 "perception.authorize" = "允许访问{0}…";
 "perception.state.not_authorized" = "尚未申请权限";
 "perception.state.permission_denied" = "访问被拒绝";
+"perception.live" = "适时主动表达";
+"perception.share_schedule" = "允许泛化的日程提醒";
