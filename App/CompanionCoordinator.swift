@@ -504,6 +504,7 @@ final class CompanionCoordinator: ObservableObject {
         stopTopic(); settings.perception.directories.append(.init(path: url.standardizedFileURL.path, bookmark: bookmark)); changed()
     }
     func removePerceptionDirectory(_ id: String) { stopTopic(); settings.perception.directories.removeAll { $0.id == id }; changed() }
+    func authorizeWindowPerception() { send(["type": "perception_window_authorize"]) }
     func authorizePerception(_ source: String) { send(["type": "perception_authorize", "source": source]) }
     func sync(force: Bool = false) {
         guard let manager else { return }

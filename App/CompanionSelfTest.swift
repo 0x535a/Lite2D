@@ -388,13 +388,18 @@ final class CompanionSelfTest {
                 c.receive(["type": "utterance", "sequence": 1, "createdAt": "2026-11-04T00:00:00Z", "characterId": a.settings.id.uuidString, "text": "好耶，这次通过啦！"])
                 c.receive(["type": "utterance", "sequence": 2, "createdAt": "2026-11-04T00:00:01Z", "characterId": b.settings.id.uuidString, "text": "嗯，记录里这次确实通过了。姐姐，别忘了保留测试结果。"])
                 c.stopTopic()
-                c.settings.bubbleRetentionSeconds = 1
+                c.settings.bubbleRetentionSeconds = 8
                 let original = "甲。乙！丙？丁；戊……己。"
                 c.receive(["type": "utterance", "sequence": 3, "characterId": a.settings.id.uuidString, "text": original])
                 try check(c.speechTexts(a.settings.id) == ["甲。"], "First sentence starts typing immediately")
-                try await Task.sleep(nanoseconds: 600_000_000); c.tick()
+                let expectedSentences = ["甲。", "乙！", "丙？", "丁；", "戊……", "己。"]
+                let speechDeadline = Date().addingTimeInterval(3)
+                while c.speechTexts(a.settings.id) != expectedSentences && Date() < speechDeadline {
+                    try await Task.sleep(nanoseconds: 50_000_000); c.tick()
+                }
                 try check(c.speechTexts(a.settings.id) == ["甲。", "乙！", "丙？", "丁；", "戊……", "己。"], "Next sentence types during previous retention with no count limit")
                 try check(c.entries.last?.text == original, "History retains the complete original utterance")
+                c.settings.bubbleRetentionSeconds = 1; c.changed()
                 try await Task.sleep(nanoseconds: 1_100_000_000); c.tick()
                 try check(c.speechTexts(a.settings.id).isEmpty && !c.hasSpeech, "All sentences disappear on their own deadlines")
                 c.receive(["type": "utterance", "sequence": 4, "characterId": a.settings.id.uuidString, "text": "停止时取消正在打字的句子。"])

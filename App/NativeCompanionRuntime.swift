@@ -61,6 +61,7 @@ actor NativeCompanionRuntime {
     private var focusPerception: NativeFocusPerception?
     private var directoryPerception: NativeDirectoryPerception?
     private var audioPerception: NativeAudioPerception?
+    private var windowPerception: NativeWindowPerception?
     private var audioActive = false
     private var energyConstrained = false
     private var focusQuiet = false
@@ -205,13 +206,14 @@ actor NativeCompanionRuntime {
             var policy = CompanionPerceptionPolicy()
             policy.allowedCharacterIds = characters.filter { $0["enabled"] as? Bool == true }.compactMap { $0["id"] as? String }
             policy.allowedUses = [.attention, .audit]
-            if settings.shareActivity && ["macos.workspace", "macos.idle", "macos.explicit_activity"].contains(source) {
+            if settings.shareActivity && ["macos.workspace", "macos.idle", "macos.explicit_activity", "macos.window"].contains(source) {
                 policy.allowedUses.append(.activityContext); policy.remoteInferenceAllowed = true
             }
             if settings.shareSchedule && ["macos.calendar", "macos.reminders"].contains(source) {
                 policy.allowedUses.append(.expression); policy.remoteInferenceAllowed = true
             }
             if source == "macos.focus" { policy.allowedCharacterIds = [] }
+            if source == "macos.window" { policy.resourceScopeRevision = NativeCompanionData.hash(settings.windowAllowlist.joined(separator: ",")) }
             if source == "macos.files" {
                 policy.allowedCharacterIds = []; policy.allowedUses = [.audit]
                 policy.resourceScopeRevision = NativeCompanionData.hash((try? CompanionProactiveCoding.encode(settings.directories)) ?? "")
@@ -260,6 +262,9 @@ actor NativeCompanionRuntime {
         if audioPerception == nil { audioPerception = await MainActor.run { NativeAudioPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } } }
         guard requestID == perceptionConfiguration, !stopped else { return }
         await audioPerception?.configure(epoch: epochs["macos.audio"], sleeping: sleeping || perceptionSleeping)
+        if windowPerception == nil { windowPerception = await MainActor.run { NativeWindowPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } } }
+        guard requestID == perceptionConfiguration, !stopped else { return }
+        await windowPerception?.configure(epoch: epochs["macos.window"], apps: settings.windowAllowlist, sleeping: sleeping || perceptionSleeping)
     }
     private func syncOptionalPerceptionPause() async {
         guard managePerceptionSensors, !stopped else { return }
@@ -277,6 +282,8 @@ actor NativeCompanionRuntime {
         await directoryPerception?.configure(epoch: epochs["macos.files"], directories: perceptionSettings.directories, sleeping: paused)
         guard request == perceptionConfiguration, !stopped else { return }
         await audioPerception?.configure(epoch: epochs["macos.audio"], sleeping: paused)
+        guard request == perceptionConfiguration, !stopped else { return }
+        await windowPerception?.configure(epoch: epochs["macos.window"], apps: perceptionSettings.windowAllowlist, sleeping: paused)
     }
     private func receiveNotificationSignal(_ signal: CompanionNotificationSignal) {
         let source = NativeNotificationPerception.source
@@ -335,11 +342,13 @@ actor NativeCompanionRuntime {
             Task { [weak self] in await self?.syncOptionalPerceptionPause() }
         }
         if signal.source == "macos.idle", signal.subject == "active", activityContext?.category == .idle { activityContext = nil }
-        if let category = signal.category, granted.allowedUses.contains(.activityContext) {
+        if signal.source == "macos.window", signal.category == .unknown, activityContext?.source == "macos.window" { activityContext = nil }
+        if let category = signal.category, granted.allowedUses.contains(.activityContext), !(signal.source == "macos.window" && category == .unknown) {
+            let preserveWindow = signal.source == "macos.workspace" && perceptionSettings.window && activityContext?.source == "macos.window" && (activityContext?.confidence ?? 0) >= 0.65 && activityContext?.contextScope == signal.contextScope && (activityContext?.expiresAt ?? .distantPast) > now
             let explicitActive = activityContext?.source == "macos.explicit_activity" && (activityContext?.expiresAt ?? .distantPast) > now
-            if !explicitActive || signal.source == "macos.explicit_activity" {
+            if (!explicitActive || signal.source == "macos.explicit_activity") && !preserveWindow {
                 let expiry = min(now.addingTimeInterval(300), (signal.sourceAt ?? now).addingTimeInterval(300))
-                activityContext = CompanionActivityContext(category: category, confidence: signal.confidence, observedAt: now, expiresAt: expiry, source: signal.source, consentEpoch: signal.epoch)
+                activityContext = CompanionActivityContext(category: category, confidence: signal.confidence, observedAt: now, expiresAt: expiry, source: signal.source, consentEpoch: signal.epoch, contextScope: signal.contextScope)
             }
         }
         let signature = signal.type + ":" + signal.subject + ":" + (signal.category?.rawValue ?? "")
@@ -819,6 +828,9 @@ actor NativeCompanionRuntime {
                       [.presented, .completed, .cancelled, .dismissed].contains(state),
                       try store.rows("SELECT id FROM proactive_outputs WHERE id=? AND owner=?", [id, owner]).first != nil else { return }
                 try store.acknowledgeOutput(id, owner: owner, status: state, reason: command["reason"] as? String)
+            case "perception_window_authorize":
+                guard perceptionSettings.enabled("macos.window") else { return }
+                await NativeWindowPerception.requestAccess()
             case "perception_authorize":
                 let source = command["source"] as? String ?? ""
                 guard perceptionSettings.enabled(source), ["macos.calendar", "macos.reminders"].contains(source) else { throw NativeCompanionData.error("Enable the source before requesting access") }
@@ -978,6 +990,7 @@ actor NativeCompanionRuntime {
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
         dailyTask?.cancel(); await dailyTask?.value; dailyTask = nil
         await serviceMonitor?.close(); serviceMonitor = nil
+        await windowPerception?.stop(); windowPerception = nil
         await audioPerception?.stop(); audioPerception = nil
         await directoryPerception?.stop(); directoryPerception = nil
         await focusPerception?.stop(); focusPerception = nil

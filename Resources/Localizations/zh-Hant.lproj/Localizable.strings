@@ -671,3 +671,10 @@
 "perception.audio" = "音訊輸出路徑與活動狀態";
 "perception.macos.audio" = "音訊環境";
 "perception.environment_help" = "裝置狀態僅是微弱時機線索，不錄音，也不識別會議或聆聽內容。低電量或熱壓力會降低非必要主動性。";
+
+// Optional local window title classifier
+"perception.window" = "在本機分類所選視窗標題";
+"perception.window_apps" = "允許的視窗 App Bundle ID，以逗號分隔";
+"perception.window_authorize" = "申請輔助使用權限…";
+"perception.window_help" = "只檢查白名單 App 目前的前景視窗標題，不讀取文字欄位、選取文字、密碼欄位或螢幕像素。標題僅短暫存在於本機，只能共享宏觀類別。";
+"perception.macos.window" = "視窗活動";

@@ -15,6 +15,8 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var focus = false
     var files = false
     var audio = false
+    var window = false
+    var windowApps = ""
     var directories: [CompanionWatchedDirectory] = []
     var explicitActivity = false
     var notificationContent = false
@@ -22,7 +24,7 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var shareActivity = false
     var shareSchedule = false
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, files, audio, directories, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, files, audio, window, windowApps, directories, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -37,6 +39,8 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         focus = (try? c.decode(Bool.self, forKey: .focus)) ?? false
         files = (try? c.decode(Bool.self, forKey: .files)) ?? false
         audio = (try? c.decode(Bool.self, forKey: .audio)) ?? false
+        window = (try? c.decode(Bool.self, forKey: .window)) ?? false
+        windowApps = (try? c.decode(String.self, forKey: .windowApps)) ?? ""
         directories = (try? c.decode([CompanionWatchedDirectory].self, forKey: .directories)) ?? []
         explicitActivity = (try? c.decode(Bool.self, forKey: .explicitActivity)) ?? false
         notificationContent = (try? c.decode(Bool.self, forKey: .notificationContent)) ?? false
@@ -48,7 +52,8 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var notificationAllowlist: [String] {
         Array(Set(notificationApps.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
     }
-    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted", "macos.focus", "macos.explicit_activity", "macos.files", "macos.audio"]
+    var windowAllowlist: [String] { Array(Set(windowApps.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted() }
+    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted", "macos.focus", "macos.explicit_activity", "macos.files", "macos.audio", "macos.window"]
     func enabled(_ source: String) -> Bool {
         if source == "macos.focus" { return focus }
         guard mode != .off else { return false }
@@ -64,6 +69,7 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         case "macos.explicit_activity": return explicitActivity
         case "macos.files": return files
         case "macos.audio": return audio
+        case "macos.window": return window
         default: return false
         }
     }
@@ -103,6 +109,7 @@ struct CompanionMacSignal {
     var sourceAt: Date?
     var audioActive: Bool?
     var energyConstrained: Bool?
+    var contextScope: String?
 }
 
 // All Cocoa callbacks/timers and teardown run on the main actor. The sink only sends bounded typed signals.
@@ -206,8 +213,10 @@ struct CompanionMacSignal {
     }
     private func sampleWorkspace(initial: Bool) {
         guard !asleep, settings.workspace, let epoch = epochs["macos.workspace"] else { return }
-        let category = CompanionActivityClassifier.classify(bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, overrides: settings.appOverrides)
-        sink(.init(source: "macos.workspace", type: "activity.category_changed", category: category.0, confidence: category.1, subject: "foreground_activity", sessionAvailable: sessionAvailable(), initial: initial, epoch: epoch))
+        let app = NSWorkspace.shared.frontmostApplication
+        let category = CompanionActivityClassifier.classify(bundleID: app?.bundleIdentifier, overrides: settings.appOverrides)
+        let scope = app.map { NativeCompanionData.hash(($0.bundleIdentifier ?? "") + ":" + String($0.processIdentifier)) }
+        sink(.init(source: "macos.workspace", type: "activity.category_changed", category: category.0, confidence: category.1, subject: "foreground_activity", sessionAvailable: sessionAvailable(), initial: initial, epoch: epoch, contextScope: scope))
     }
     private func sampleIdle(initial: Bool) {
         guard !asleep, settings.idle, let epoch = epochs["macos.idle"] else { return }

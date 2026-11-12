@@ -179,6 +179,12 @@ struct CompanionGeneralSections: View {
                 Button(L10n.text("perception.directory_add")) { companion.addPerceptionDirectory() }.disabled(companion.settings.perception.directories.count >= 8)
                 Text(L10n.text("perception.directory_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            Toggle(L10n.text("perception.window"), isOn: perception(\.window))
+            if companion.settings.perception.window {
+                TextField(L10n.text("perception.window_apps"), text: perception(\.windowApps))
+                Button(L10n.text("perception.window_authorize")) { companion.authorizeWindowPerception() }
+                Text(L10n.text("perception.window_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Toggle(L10n.text("perception.workspace"), isOn: perception(\.workspace))
             Toggle(L10n.text("perception.idle"), isOn: perception(\.idle))
             Toggle(L10n.text("perception.audio"), isOn: perception(\.audio))

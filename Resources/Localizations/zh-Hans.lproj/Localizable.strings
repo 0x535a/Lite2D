@@ -671,3 +671,10 @@
 "perception.audio" = "音频输出路线与活跃状态";
 "perception.macos.audio" = "音频环境";
 "perception.environment_help" = "设备状态仅是弱时机线索，不录音，也不识别会议或收听内容。低电量或热压力会降低非必要主动性。";
+
+// Optional local window title classifier
+"perception.window" = "在本地分类所选窗口标题";
+"perception.window_apps" = "允许的窗口 App Bundle ID，以逗号分隔";
+"perception.window_authorize" = "申请辅助功能权限…";
+"perception.window_help" = "只检查白名单 App 的当前前台窗口标题，不读取文本字段、选中文字、密码字段或屏幕像素。标题只在本地短暂存在，仅宏观类别可共享。";
+"perception.macos.window" = "窗口活动";

@@ -109,6 +109,7 @@ struct CompanionActivityContext: Codable, Equatable {
     var expiresAt: Date
     var source: String
     var consentEpoch: Int
+    var contextScope: String?
     // This is the sole projection allowed in role context. Never encode the entire object there.
     func roleProjection(at now: Date) -> CompanionObject? {
         guard expiresAt > now, CompanionProactiveCoding.score(confidence), confidence >= 0.65 else { return nil }

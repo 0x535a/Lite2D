@@ -671,3 +671,10 @@
 "perception.audio" = "Audio output route and activity";
 "perception.macos.audio" = "Audio environment";
 "perception.environment_help" = "Audio device state is only a weak timing clue; no audio is recorded and it does not identify a meeting or listening content. Low battery or thermal pressure reduces nonessential initiative.";
+
+// Optional local window title classifier
+"perception.window" = "Classify selected window titles locally";
+"perception.window_apps" = "Allowed window App bundle IDs, separated by commas";
+"perception.window_authorize" = "Request Accessibility access…";
+"perception.window_help" = "Only the foreground window title of explicitly allowed Apps is inspected. Text fields, selected text, password fields and screen pixels are not read. The title stays local; only a broad category may be shared.";
+"perception.macos.window" = "Window activity";

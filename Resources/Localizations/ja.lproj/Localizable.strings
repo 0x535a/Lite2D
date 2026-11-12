@@ -671,3 +671,10 @@
 "perception.audio" = "音声出力経路と動作状態";
 "perception.macos.audio" = "音声環境";
 "perception.environment_help" = "装置の状態は弱いタイミング情報に限り、録音や会議・視聴内容の識別は行いません。低電池や高温時は不要な能動動作を抑えます。";
+
+// Optional local window title classifier
+"perception.window" = "選択したウィンドウ名を端末内で分類";
+"perception.window_apps" = "許可するウィンドウの App Bundle ID（カンマ区切り）";
+"perception.window_authorize" = "アクセシビリティ権限を要求…";
+"perception.window_help" = "明示的に許可したアプリの前面ウィンドウ名だけを確認します。入力欄、選択テキスト、パスワード欄、画面画像は読みません。名前を端末外に送らず、大まかな分類のみを共有できます。";
+"perception.macos.window" = "ウィンドウの活動";
