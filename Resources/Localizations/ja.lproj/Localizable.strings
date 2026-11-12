@@ -611,3 +611,12 @@
 "perception.state.starting" = "起動中…";
 "perception.state.disabled" = "オフ";
 "perception.state.error" = "一時的に利用できません";
+
+// Schedule awareness
+"perception.calendar" = "カレンダーの予定時刻";
+"perception.reminders" = "リマインダーの期限";
+"perception.macos.calendar" = "カレンダー";
+"perception.macos.reminders" = "リマインダー";
+"perception.authorize" = "{0}へのアクセスを許可…";
+"perception.state.not_authorized" = "アクセス未要求";
+"perception.state.permission_denied" = "アクセス拒否";

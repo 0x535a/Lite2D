@@ -13,5 +13,7 @@
 <key>CFBundleVersion</key><string>17</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
+<key>NSCalendarsFullAccessUsageDescription</key><string>Read schedule times to offer optional gentle reminders. Event titles and notes are not sent to character models.</string>
+<key>NSRemindersFullAccessUsageDescription</key><string>Read reminder due times to offer optional gentle reminders. Task titles and notes are not sent to character models.</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

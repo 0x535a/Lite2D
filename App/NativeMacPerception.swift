@@ -9,9 +9,11 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var idle = false
     var power = false
     var network = false
+    var calendar = false
+    var reminders = false
     var shareActivity = false
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, shareActivity, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, shareActivity, appOverrides }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -20,10 +22,12 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         idle = (try? c.decode(Bool.self, forKey: .idle)) ?? false
         power = (try? c.decode(Bool.self, forKey: .power)) ?? false
         network = (try? c.decode(Bool.self, forKey: .network)) ?? false
+        calendar = (try? c.decode(Bool.self, forKey: .calendar)) ?? false
+        reminders = (try? c.decode(Bool.self, forKey: .reminders)) ?? false
         shareActivity = (try? c.decode(Bool.self, forKey: .shareActivity)) ?? false
         appOverrides = (try? c.decode([String: CompanionActivityCategory].self, forKey: .appOverrides)) ?? [:]
     }
-    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network"]
+    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders"]
     func enabled(_ source: String) -> Bool {
         guard mode != .off else { return false }
         switch source {
@@ -32,6 +36,8 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         case "macos.idle": return idle
         case "macos.power": return power
         case "macos.network": return network
+        case "macos.calendar": return calendar
+        case "macos.reminders": return reminders
         default: return false
         }
     }
@@ -172,6 +178,7 @@ struct CompanionMacSignal {
     }
     func stop() {
         generation += 1
+        epochs = [:]
         let workspace = NSWorkspace.shared.notificationCenter
         for token in tokens { workspace.removeObserver(token); NotificationCenter.default.removeObserver(token) }
         tokens.removeAll(); idleTimer?.invalidate(); idleTimer = nil

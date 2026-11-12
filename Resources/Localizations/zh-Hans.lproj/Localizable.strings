@@ -611,3 +611,12 @@
 "perception.state.starting" = "正在启动…";
 "perception.state.disabled" = "已关闭";
 "perception.state.error" = "暂时不可用";
+
+// Schedule awareness
+"perception.calendar" = "日历时间";
+"perception.reminders" = "提醒事项截止时间";
+"perception.macos.calendar" = "日历";
+"perception.macos.reminders" = "提醒事项";
+"perception.authorize" = "允许访问{0}…";
+"perception.state.not_authorized" = "尚未申请权限";
+"perception.state.permission_denied" = "访问被拒绝";

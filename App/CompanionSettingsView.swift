@@ -167,6 +167,13 @@ struct CompanionGeneralSections: View {
             Toggle(L10n.text("perception.idle"), isOn: perception(\.idle))
             Toggle(L10n.text("perception.power"), isOn: perception(\.power))
             Toggle(L10n.text("perception.network"), isOn: perception(\.network))
+            Toggle(L10n.text("perception.calendar"), isOn: perception(\.calendar))
+            Toggle(L10n.text("perception.reminders"), isOn: perception(\.reminders))
+            ForEach(["macos.calendar", "macos.reminders"], id: \.self) { source in
+                if companion.settings.perception.enabled(source) {
+                    Button(L10n.text("perception.authorize", L10n.text("perception." + source))) { companion.authorizePerception(source) }
+                }
+            }
             Toggle(L10n.text("perception.share_activity"), isOn: perception(\.shareActivity))
             ForEach(CompanionPerceptionSettings.sourceNames, id: \.self) { source in
                 if let state = companion.perceptionSources[source]?["state"] as? String {

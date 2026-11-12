@@ -1,0 +1,2 @@
+"NSCalendarsFullAccessUsageDescription" = "读取日程时间，提供可选的轻量提醒。事件标题和备注不会发送给角色模型。";
+"NSRemindersFullAccessUsageDescription" = "读取提醒事项的截止时间，提供可选的轻量提醒。任务标题和备注不会发送给角色模型。";

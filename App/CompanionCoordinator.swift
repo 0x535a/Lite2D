@@ -489,6 +489,7 @@ final class CompanionCoordinator: ObservableObject {
     private func loadHistory(_ event: [String: Any]) {
         entries = []; for item in event["history"] as? [[String: Any]] ?? [] { append(item) }
     }
+    func authorizePerception(_ source: String) { send(["type": "perception_authorize", "source": source]) }
     func sync(force: Bool = false) {
         guard let manager else { return }
         let characters: [[String: Any]] = manager.records.map { record in

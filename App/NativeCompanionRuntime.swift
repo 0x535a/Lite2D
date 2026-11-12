@@ -48,6 +48,7 @@ actor NativeCompanionRuntime {
     private var broker: NativeCompanionBroker?
     private var config: CompanionObject = [:]
     private var macPerception: NativeMacPerception?
+    private var calendarPerception: NativeCalendarPerception?
     private var perceptionSettings = CompanionPerceptionSettings()
     private var perceptionStatus: [String: CompanionObject] = [:]
     private var activityContext: CompanionActivityContext?
@@ -197,6 +198,39 @@ actor NativeCompanionRuntime {
         guard requestID == perceptionConfiguration, !stopped, let sensor = macPerception else { return }
         let sleeping = config["sleeping"] as? Bool == true
         await sensor.configure(settings, epochs: epochs, suspended: sleeping)
+        if calendarPerception == nil {
+            calendarPerception = await MainActor.run { NativeCalendarPerception { [weak self] signal in Task { await self?.receiveCalendarSignal(signal) } } }
+        }
+        guard requestID == perceptionConfiguration, !stopped else { return }
+        await calendarPerception?.configure(epochs: epochs, sleeping: sleeping)
+    }
+    private func receiveCalendarSignal(_ signal: CompanionCalendarSignal) {
+        guard !stopped, ready, enabled, perceptionSettings.enabled(signal.source),
+              let policy = try? store.perceptionPolicy(signal.source), policy.consentEpoch == signal.epoch else { return }
+        perceptionStatus[signal.source] = ["state": signal.health, "consentEpoch": signal.epoch, "checkedAt": NativeCompanionData.iso()]
+        guard signal.health == "available", let occurrence = signal.occurrenceId, let phase = signal.phase else {
+            if signal.health != "available" { try? store.invalidatePerceptionSource(signal.source) }
+            status(); return
+        }
+        let now = Date()
+        var event = CompanionObservation(id: occurrence + ":" + phase, source: signal.source, type: "schedule." + phase, observedAt: now, subject: "scheduled_arrangement", expiresAt: now.addingTimeInterval(120))
+        event.policy = policy
+        do {
+            if let eventID = try store.ingestPerception(event, now: now) {
+                for character in visible.prefix(8) {
+                    let owner = character["id"] as! String
+                    let opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "schedule." + phase, sourceEventIds: [eventID], topicKey: "schedule:" + occurrence,
+                        priority: 0.85, intrusionCost: 0.2, notBefore: now, expiresAt: now.addingTimeInterval(120))
+                    _ = try store.saveOpportunity(opportunity, now: now)
+                    var gates = CompanionInterruptContext()
+                    gates.manualPause = paused; gates.sleeping = perceptionSleeping; gates.sessionAvailable = perceptionSessionAvailable
+                    gates.outputBusy = topic != nil || dailyBusy; gates.idleSeconds = perceptionIdleSeconds
+                    gates.cooldown = NativeCompanionData.now() - lastTopic < 180000; gates.budgetAvailable = (try store.requestCount()) < hourly
+                    try store.recordDecision(CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now))
+                }
+            }
+        } catch { perceptionStatus[signal.source] = ["state": "error", "reason": "event_rejected"] }
+        status()
     }
     private func receiveMacSignal(_ signal: CompanionMacSignal) {
         guard !stopped, ready, enabled, perceptionSettings.enabled(signal.source),
@@ -536,6 +570,10 @@ actor NativeCompanionRuntime {
                 let jobs = try store.reflectionPreview(owner: id)
                 try store.audit(owner: id, operation: "user.reflection_preview", target: jobs.first?["id"] as? String ?? id, actor: "user", result: jobs.isEmpty ? "insufficient_evidence" : "completed")
                 emit("monitor.outcome", try CompanionMonitorCoding.object(CompanionMonitorOutcome(requestID: command["requestID"] as? String ?? "", operation: "reflect", owner: id, target: "", result: jobs.isEmpty ? "insufficient_evidence" : "completed")))
+            case "perception_authorize":
+                let source = command["source"] as? String ?? ""
+                guard perceptionSettings.enabled(source), ["macos.calendar", "macos.reminders"].contains(source) else { throw NativeCompanionData.error("Enable the source before requesting access") }
+                await calendarPerception?.requestAccess(source: source)
             case "perception_history":
                 emit("perception.history", ["decisions": try store.proactiveReplay().map { try CompanionProactiveCoding.object($0) }, "sources": perceptionStatus])
             case "configure": await configure(NativeCompanionData.object(command["config"]))
@@ -691,6 +729,7 @@ actor NativeCompanionRuntime {
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
         dailyTask?.cancel(); await dailyTask?.value; dailyTask = nil
         await serviceMonitor?.close(); serviceMonitor = nil
+        await calendarPerception?.stop(); calendarPerception = nil
         await macPerception?.stop(); macPerception = nil
         await observers.close(); await roles?.close()
         await topic?.task?.value

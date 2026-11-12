@@ -41,7 +41,7 @@ enum CompanionProactiveTests {
         _ = try store.ingestPerception(observation, now: now)
         try check(refuses { try store.savePerceptionCursor(source: observation.source, generation: "one", cursor: "10", epoch: policy.consentEpoch) }, "Cursor commits are guarded by the current consent epoch")
         var activity = CompanionActivityContext(category: .programming, confidence: 0.9, observedAt: now, expiresAt: now.addingTimeInterval(60), source: "private-source-path", consentEpoch: 1)
-        let activityWire = NativeCompanionData.string(activity.roleProjection(at: now))
+        let activityWire = NativeCompanionData.string(activity.roleProjection(at: now) ?? [:])
         try check(!activityWire.contains("private-source-path") && activity.roleProjection(at: now.addingTimeInterval(61)) == nil, "Activity projection excludes source identifiers and expires")
         activity.confidence = 0.3
         try check(activity.roleProjection(at: now) == nil, "Weak activity evidence does not enter role context")

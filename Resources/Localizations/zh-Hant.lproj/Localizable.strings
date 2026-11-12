@@ -611,3 +611,12 @@
 "perception.state.starting" = "正在啟動…";
 "perception.state.disabled" = "已關閉";
 "perception.state.error" = "暫時無法使用";
+
+// Schedule awareness
+"perception.calendar" = "行事曆時間";
+"perception.reminders" = "提醒事項到期時間";
+"perception.macos.calendar" = "行事曆";
+"perception.macos.reminders" = "提醒事項";
+"perception.authorize" = "允許存取{0}…";
+"perception.state.not_authorized" = "尚未申請權限";
+"perception.state.permission_denied" = "存取遭拒";

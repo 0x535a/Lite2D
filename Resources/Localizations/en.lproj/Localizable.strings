@@ -611,3 +611,12 @@
 "perception.state.starting" = "Starting…";
 "perception.state.disabled" = "Off";
 "perception.state.error" = "Temporarily unavailable";
+
+// Schedule awareness
+"perception.calendar" = "Calendar times";
+"perception.reminders" = "Reminder due times";
+"perception.macos.calendar" = "Calendar";
+"perception.macos.reminders" = "Reminders";
+"perception.authorize" = "Allow access to {0}…";
+"perception.state.not_authorized" = "Access not requested";
+"perception.state.permission_denied" = "Access denied";
