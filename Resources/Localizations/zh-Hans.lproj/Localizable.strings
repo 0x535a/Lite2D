@@ -636,3 +636,25 @@
 "perception.state.temporarily_unavailable" = "暂时不可用";
 "perception.notification_metrics" = "最近一批：新增或更新 {0} · 已去重 {1} · 本地敏感分类 {2}";
 "perception.notification_coverage" = "采集范围有界，部分历史或更新可能不可用。通知记录不证明横幅送达或用户已读。";
+
+// Scoped Focus Filter and explicit Shortcuts activity
+"perception.focus" = "遵循本 App 的专注模式过滤器";
+"perception.explicit_activity" = "接收快捷指令的活动类别";
+"perception.focus_help" = "请在所选专注模式的过滤器中添加 Lite2D。它只控制本 App 的安静策略，不读取其他专注模式名称，也不改变手动勿扰。活动动作只接受宏观类别，五分钟后失效。";
+"perception.macos.focus" = "本 App 专注过滤器";
+"perception.macos.explicit_activity" = "显式活动";
+"focus.intent.title" = "专注时安静陪伴";
+"focus.intent.quiet" = "安静";
+"focus.intent.display" = "安静陪伴";
+"activity.intent.type" = "活动";
+"activity.intent.title" = "向 Lite2D 报告宏观活动";
+"activity.intent.description" = "向角色提供短期活动类别，不提供任务详情或提示词。";
+"activity.browsing" = "上网";
+"activity.programming" = "编程";
+"activity.writing" = "写作";
+"activity.research" = "研究";
+"activity.experiment" = "实验";
+"activity.media" = "媒体";
+"activity.communication" = "交流";
+"activity.idle" = "空闲";
+"activity.unknown" = "未知";

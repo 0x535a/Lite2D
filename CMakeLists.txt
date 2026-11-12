@@ -73,7 +73,13 @@ add_custom_command(TARGET Lite2D POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Localizations" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
   COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/Companion"
   COMMAND "${LITE2D_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/build.mjs" "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources/Companion"
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_app_intents.py"
+    --source "${CMAKE_CURRENT_SOURCE_DIR}/App/CompanionFocusIntents.swift"
+    --build "${CMAKE_BINARY_DIR}/app-intents"
+    --resources "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
+    --deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}"
   COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_app_intents.py")
 file(GLOB COMPANION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Companion/*.mjs" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/package-lock.json")
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS ${COMPANION_SOURCES})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LegacyRuntime/legacy-core.js")

@@ -636,3 +636,25 @@
 "perception.state.temporarily_unavailable" = "一時的に利用できません";
 "perception.notification_metrics" = "直近の処理：新規・更新 {0} · 重複除外 {1} · 端末内で機密分類 {2}";
 "perception.notification_coverage" = "取得範囲には上限があり、一部の履歴や更新を取得できないことがあります。記録は通知の表示や既読を証明しません。";
+
+// Scoped Focus Filter and explicit Shortcuts activity
+"perception.focus" = "このアプリの集中モードフィルタを使用";
+"perception.explicit_activity" = "ショートカットから活動分類を受信";
+"perception.focus_help" = "選択した集中モードのフィルタに Lite2D を追加してください。このアプリの静音方針だけを制御し、他の集中モード名や手動の一時停止は変更しません。活動入力は分類だけを受け付け、5分後に失効します。";
+"perception.macos.focus" = "アプリの集中モードフィルタ";
+"perception.macos.explicit_activity" = "明示的な活動";
+"focus.intent.title" = "集中モード中は静かにする";
+"focus.intent.quiet" = "静かにする";
+"focus.intent.display" = "静かなコンパニオン";
+"activity.intent.type" = "活動";
+"activity.intent.title" = "Lite2D に大まかな活動を伝える";
+"activity.intent.description" = "タスクの詳細やプロンプトを含めず、一時的な活動分類を伝えます。";
+"activity.browsing" = "閲覧";
+"activity.programming" = "プログラミング";
+"activity.writing" = "執筆";
+"activity.research" = "研究";
+"activity.experiment" = "実験";
+"activity.media" = "メディア";
+"activity.communication" = "会話";
+"activity.idle" = "待機";
+"activity.unknown" = "不明";

@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminating = false
     private var languageObserver: NSObjectProtocol?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CompanionActivityIntent.purgeExpiredInput()
         if CommandLine.arguments.contains("--check-login-item-registration") {
             Task { @MainActor in
                 do {

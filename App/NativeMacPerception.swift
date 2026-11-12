@@ -12,12 +12,14 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var calendar = false
     var reminders = false
     var notifications = false
+    var focus = false
+    var explicitActivity = false
     var notificationContent = false
     var notificationApps = ""
     var shareActivity = false
     var shareSchedule = false
     var appOverrides: [String: CompanionActivityCategory] = [:]
-    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
+    enum CodingKeys: String, CodingKey { case mode, workspace, idle, power, network, calendar, reminders, notifications, focus, explicitActivity, notificationContent, notificationApps, shareActivity, shareSchedule, appOverrides }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -29,6 +31,8 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         calendar = (try? c.decode(Bool.self, forKey: .calendar)) ?? false
         reminders = (try? c.decode(Bool.self, forKey: .reminders)) ?? false
         notifications = (try? c.decode(Bool.self, forKey: .notifications)) ?? false
+        focus = (try? c.decode(Bool.self, forKey: .focus)) ?? false
+        explicitActivity = (try? c.decode(Bool.self, forKey: .explicitActivity)) ?? false
         notificationContent = (try? c.decode(Bool.self, forKey: .notificationContent)) ?? false
         notificationApps = (try? c.decode(String.self, forKey: .notificationApps)) ?? ""
         shareActivity = (try? c.decode(Bool.self, forKey: .shareActivity)) ?? false
@@ -38,8 +42,9 @@ struct CompanionPerceptionSettings: Codable, Equatable {
     var notificationAllowlist: [String] {
         Array(Set(notificationApps.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
     }
-    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted"]
+    static let sourceNames = ["macos.session", "macos.workspace", "macos.idle", "macos.power", "macos.network", "macos.calendar", "macos.reminders", "macos.notification.usernoted", "macos.focus", "macos.explicit_activity"]
     func enabled(_ source: String) -> Bool {
+        if source == "macos.focus" { return focus }
         guard mode != .off else { return false }
         switch source {
         case "macos.session": return true
@@ -50,6 +55,7 @@ struct CompanionPerceptionSettings: Codable, Equatable {
         case "macos.calendar": return calendar
         case "macos.reminders": return reminders
         case "macos.notification.usernoted": return notifications
+        case "macos.explicit_activity": return explicitActivity
         default: return false
         }
     }
@@ -85,6 +91,8 @@ struct CompanionMacSignal {
     var health: String = "available"
     var epoch: Int
     var sampledUptime: UInt64 = DispatchTime.now().uptimeNanoseconds
+    var focusQuiet: Bool?
+    var sourceAt: Date?
 }
 
 // All Cocoa callbacks/timers and teardown run on the main actor. The sink only sends bounded typed signals.

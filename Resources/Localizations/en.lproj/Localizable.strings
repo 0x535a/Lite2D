@@ -636,3 +636,25 @@
 "perception.state.temporarily_unavailable" = "Temporarily unavailable";
 "perception.notification_metrics" = "Latest batch: {0} new/updated · {1} deduplicated · {2} locally classified as sensitive";
 "perception.notification_coverage" = "Coverage is bounded; some history or updates may be unavailable. Notification records do not prove delivery or read status.";
+
+// Scoped Focus Filter and explicit Shortcuts activity
+"perception.focus" = "Respect this App’s Focus Filter";
+"perception.explicit_activity" = "Accept activity from Shortcuts";
+"perception.focus_help" = "Add Lite2D as a filter in the Focus settings you choose. It only controls this App’s quiet policy, never reads other Focus names or changes manual pause. The activity action accepts only a broad category and expires after five minutes.";
+"perception.macos.focus" = "App Focus Filter";
+"perception.macos.explicit_activity" = "Explicit activity";
+"focus.intent.title" = "Quiet companion during Focus";
+"focus.intent.quiet" = "Quiet";
+"focus.intent.display" = "Quiet companion";
+"activity.intent.type" = "Activity";
+"activity.intent.title" = "Report a broad activity to Lite2D";
+"activity.intent.description" = "Give the companion a temporary activity category without task details or prompts.";
+"activity.browsing" = "Browsing";
+"activity.programming" = "Programming";
+"activity.writing" = "Writing";
+"activity.research" = "Research";
+"activity.experiment" = "Experiment";
+"activity.media" = "Media";
+"activity.communication" = "Communication";
+"activity.idle" = "Idle";
+"activity.unknown" = "Unknown";

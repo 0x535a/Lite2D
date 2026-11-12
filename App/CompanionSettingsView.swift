@@ -164,6 +164,9 @@ struct CompanionGeneralSections: View {
                 Text(L10n.text("perception.shadow")).tag(CompanionProactiveMode.shadow)
                 Text(L10n.text("perception.live")).tag(CompanionProactiveMode.live)
             }
+            Toggle(L10n.text("perception.focus"), isOn: perception(\.focus))
+            Toggle(L10n.text("perception.explicit_activity"), isOn: perception(\.explicitActivity))
+            Text(L10n.text("perception.focus_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle(L10n.text("perception.workspace"), isOn: perception(\.workspace))
             Toggle(L10n.text("perception.idle"), isOn: perception(\.idle))
             Toggle(L10n.text("perception.power"), isOn: perception(\.power))
