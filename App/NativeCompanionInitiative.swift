@@ -21,6 +21,10 @@ extension NativeCompanionStore {
         for id in opportunity.relatedIntentionIds {
             guard let value = try intentions(owner: opportunity.ownerCharacterId).first(where: { $0.id == id }), value.state != .needsReview,
                   !value.state.terminal, value.expiresAt > now, value.attemptCount < value.maxAttempts || value.state == .executing else { return false }
+            if forExpression {
+                guard (try? verifyIntentionEvidence(owner: value.ownerCharacterId, ids: value.evidenceIds)) != nil else { return false }
+                if let memory = value.sourceMemoryId, try memoryRead(memory, owner: value.ownerCharacterId) == nil { return false }
+            }
         }
         return true
     }

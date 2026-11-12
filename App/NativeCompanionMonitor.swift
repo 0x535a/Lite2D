@@ -96,6 +96,13 @@ extension NativeCompanionStore {
             item.content = monitorText(row["content"]); item.version = monitorText(row["revision"]); item.actions = ["public_edit"]; return item
         }
         if kind == "persona", let row = try rows("SELECT * FROM persona_revisions WHERE id=? AND character_id=?", [id, owner]).first { return monitorPersona(row) }
+        if kind == "intention", let row = try rows("SELECT * FROM proactive_intentions WHERE id=? AND owner=?", [id, owner]).first { return try monitorIntention(row) }
+        if kind == "output", let row = try rows("SELECT * FROM proactive_outputs WHERE id=? AND owner=?", [id, owner]).first { return try monitorOutput(row) }
+        if kind == "decision", let row = try rows("SELECT * FROM proactive_decisions WHERE id=? AND json_extract(payload,'$.characterId')=?", [id, owner]).first { return try monitorDecision(row) }
+        if kind == "opportunity", let row = try rows("SELECT * FROM proactive_opportunities WHERE id=? AND owner=?", [id, owner]).first {
+            var item = CompanionMonitorItem(id: id, kind: kind, owner: owner, title: "opportunity")
+            item.status = row["state"] as? String ?? ""; item.content = row["payload"] as? String ?? ""; return item
+        }
         if let row = try rows("SELECT * FROM reflection_jobs WHERE id=? AND owner_character_id=?", [id, owner]).first { return try monitorJob(row, kind: "reflection") }
         if let row = try rows("SELECT * FROM growth_jobs WHERE id=? AND owner=?", [id, owner]).first { return try monitorJob(row, kind: "growth") }
         if kind == "reference", let row = try rows("SELECT * FROM persona_revisions WHERE id=? AND character_id=?", [id, owner]).first { return monitorPersona(row) }
@@ -127,6 +134,9 @@ extension NativeCompanionStore {
         var q = input; q.page = min(max(0, q.page), 10_000_000); q.pageSize = min(max(q.pageSize, 1), 100)
         var result = CompanionMonitorPage(requestID: requestID, query: q, items: [], total: 0)
         if !q.detailID.isEmpty { result.detail = try monitorReference(owner: q.detailOwner.isEmpty ? q.owner : q.detailOwner, id: q.detailID, kind: q.detailKind) }
+        if ["intentions", "decisions", "outputs"].contains(q.section) {
+            var page = try initiativeMonitorPage(q, requestID: requestID); page.detail = result.detail; return page
+        }
         if ["overview", "role_overview"].contains(q.section) {
             result.metrics = try monitorMetrics(owners: q.owner.isEmpty ? owners : [q.owner]); return result
         }
@@ -263,6 +273,7 @@ extension NativeCompanionStore {
         case "reflection": return try rows("SELECT * FROM reflection_jobs WHERE id=? AND owner_character_id=?", [action.target, action.owner]).first ?? [:]
         case "growth": return try rows("SELECT * FROM growth_jobs WHERE id=? AND owner=?", [action.target, action.owner]).first ?? [:]
         case "persona": return try rows("SELECT * FROM persona_revisions WHERE id=? AND character_id=?", [action.target, action.owner]).first ?? [:]
+        case "intention": return try rows("SELECT * FROM proactive_intentions WHERE id=? AND owner=?", [action.target, action.owner]).first ?? [:]
         case "public": return try readRecord(action.target)
         default: return [:]
         }
@@ -271,7 +282,7 @@ extension NativeCompanionStore {
         let row = try monitorTarget(action)
         guard !row.isEmpty else { throw NativeCompanionData.error("Item is unavailable; refresh the page") }
         let dependencies = try rows("SELECT id,status,revision,updated_at FROM memory_items WHERE owner_character_id=? ORDER BY id", [action.owner])
-        let fileHash = action.kind == "persona" ? NativeCompanionData.hash(try monitorPersonaFile(action.owner) ?? "") : ""
+        let fileHash = ["persona", "intention"].contains(action.kind) ? NativeCompanionData.hash(try monitorPersonaFile(action.owner) ?? "") : ""
         return NativeCompanionData.hash(NativeCompanionData.string(["target": row, "dependencies": dependencies, "personaFile": fileHash, "latestPersona": try latestPersona(characterID: action.owner) ?? [:]]))
     }
     func monitorPreview(_ action: CompanionMonitorAction) throws -> CompanionMonitorPlan {
@@ -281,7 +292,7 @@ extension NativeCompanionStore {
             if ["correct", "public_edit"].contains(action.operation) {
                 guard !action.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.content.utf8.count <= 32768, !action.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeCompanionData.error("Provide content and a correction reason (maximum 32 KB)") }
             }
-            let allowed: [String: [String]] = ["memory": ["correct", "archive", "restore", "forget"], "reflection": ["approve", "cancel", "rollback"], "growth": ["approve", "cancel", "rollback"], "persona": ["persona_restore"], "public": ["public_edit"]]
+            let allowed: [String: [String]] = ["memory": ["correct", "archive", "restore", "forget"], "reflection": ["approve", "cancel", "rollback"], "growth": ["approve", "cancel", "rollback"], "persona": ["persona_restore"], "public": ["public_edit"], "intention": ["intention_cancel", "intention_resume"]]
             guard allowed[action.kind]?.contains(action.operation) == true else { throw NativeCompanionData.error("Unsupported management operation") }
             if ["correct", "archive"].contains(action.operation), status != "active" { throw NativeCompanionData.error("Only active memories support this operation") }
             if action.operation == "restore", status != "archived" { throw NativeCompanionData.error("Only archived memories can be restored") }
@@ -289,6 +300,12 @@ extension NativeCompanionStore {
             if action.operation == "rollback", status != "committed" { throw NativeCompanionData.error("Only committed proposals can be rolled back") }
             if action.operation == "persona_restore", try monitorPersonaFile(action.owner) == row["markdown"] as? String {
                 throw NativeCompanionData.error("This Persona is already current; there is no change to restore")
+            }
+            if action.kind == "intention" {
+                let value = try CompanionProactiveCoding.decode(CompanionIntention.self, row["payload"] as! String)
+                let state = CompanionIntentionState(rawValue: row["state"] as? String ?? "") ?? value.state
+                guard !state.terminal else { throw NativeCompanionData.error("Future goal has already ended") }
+                if action.operation == "intention_resume" { guard state == .needsReview && value.expiresAt > Date() && value.attemptCount < value.maxAttempts else { throw NativeCompanionData.error("Future goal cannot be resumed") } }
             }
             var ids: [String] = []
             if action.kind == "memory" { ids = try monitorAffected(owner: action.owner, id: action.target) }
@@ -304,6 +321,11 @@ extension NativeCompanionStore {
                 before = action.operation == "rollback" ? proposed : previous
                 after = action.operation == "rollback" ? previous : proposed
             }
+            if action.kind == "intention" {
+                let value = try CompanionProactiveCoding.decode(CompanionIntention.self, row["payload"] as! String)
+                before = value.goal + "\n" + (row["state"] as? String ?? "")
+                after = action.operation == "intention_cancel" ? "cancelled" : "pending"
+            }
             let plan = CompanionMonitorPlan(id: UUID().uuidString, action: action, before: before, after: after, affected: ids.map { .init(id: $0, kind: "memory") }, expiresAt: NativeCompanionData.iso(Date().addingTimeInterval(300)))
             try execute("INSERT INTO monitor_previews VALUES (?,?,?,?,?)", [plan.id, String(data: try JSONEncoder().encode(plan), encoding: .utf8)!, try monitorFingerprint(action), plan.expiresAt, "preview"])
             // Old previews may contain text; retain only current, bounded pending drafts.
@@ -312,6 +334,11 @@ extension NativeCompanionStore {
         }
     }
     private func monitorReviewDependents(owner: String, id: String) throws {
+        for source in try monitorAffected(owner: owner, id: id) {
+            for row in try rows("SELECT i.id FROM proactive_intentions i JOIN proactive_dependencies d ON d.id=i.id AND d.kind='intention' WHERE i.owner=? AND d.source_id=? AND d.source_kind IN ('memory','evidence') AND i.state NOT IN ('completed','cancelled','expired','failed','needsReview')", [owner, source]) {
+                try transitionIntention(row["id"] as! String, owner: owner, to: .needsReview, reason: "source_archived")
+            }
+        }
         for dependent in try monitorAffected(owner: owner, id: id) where dependent != id {
             try execute("UPDATE memory_items SET status='needs_review',revision=revision+1,updated_at=? WHERE id=? AND status='active'", [NativeCompanionData.iso(), dependent])
         }
@@ -336,6 +363,8 @@ extension NativeCompanionStore {
                 guard try monitorFingerprint(a) == record["fingerprint"] as? String else { throw NativeCompanionData.error("The item or its evidence changed; refresh and merge before submitting") }
                 let row = try monitorTarget(a)
                 switch a.operation {
+                case "intention_cancel": try transitionIntention(a.target, owner: a.owner, to: .cancelled, reason: "user_cancelled")
+                case "intention_resume": try resumeIntention(a.target, owner: a.owner)
                 case "correct":
                     let result = try memoryCorrect(a.target, owner: a.owner, content: a.content, expectedRevision: row["revision"] as? Int ?? 0, reason: a.reason)
                     guard result["conflict"] as? Bool != true else { throw NativeCompanionData.error("Memory version conflict") }
@@ -377,7 +406,7 @@ extension NativeCompanionStore {
                     guard result["conflict"] as? Bool != true else { throw NativeCompanionData.error("Public record version conflict") }
                 default: throw NativeCompanionData.error("Unknown management operation")
                 }
-                if !a.owner.isEmpty {
+                if !a.owner.isEmpty && a.kind != "intention" {
                     try dailyInvalidate(a.owner)
                     try set("sessionPolicy:\(a.owner)", "memory-invalidated")
                     try set("memoryCutoff:\(a.owner)", NativeCompanionData.iso())

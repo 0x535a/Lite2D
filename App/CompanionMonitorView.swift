@@ -30,7 +30,7 @@ struct CompanionHistoryView: View {
     init(companion: CompanionCoordinator, loadOnAppear: Bool = true, initialOwner: String = "", initialSection: String = "overview") {
         self.companion = companion; model = companion.monitor; self.loadOnAppear = loadOnAppear
         _navigation = State(initialValue: initialOwner.isEmpty ? initialSection : initialOwner)
-        let base = ["views": "L0", "relations": "L4", "traits": "L4", "reflections": "L5", "growth": "L5", "legacy": "role_overview"][initialSection] ?? initialSection
+        let base = ["intentions": "L1", "decisions": "L1", "outputs": "L1", "views": "L0", "relations": "L4", "traits": "L4", "reflections": "L5", "growth": "L5", "legacy": "role_overview"][initialSection] ?? initialSection
         _rolePage = State(initialValue: initialOwner.isEmpty ? "role_overview" : base)
         _subsection = State(initialValue: base == initialSection ? "" : initialSection)
     }
@@ -74,6 +74,7 @@ struct CompanionHistoryView: View {
                     Label(L10n.text("monitor.overview"), systemImage: "square.grid.2x2").tag("overview")
                     Label(L10n.text("companion.conversation"), systemImage: "bubble.left.and.bubble.right").tag("conversation")
                     Label(L10n.text("companion.public_memory"), systemImage: "doc.text").tag("public")
+                    Label(L10n.text("monitor.decisions"), systemImage: "brain").tag("decisions")
                     Label(L10n.text("monitor.audit"), systemImage: "clock.arrow.circlepath").tag("audit")
                 }
                 Section(L10n.text("role.section")) {
@@ -146,6 +147,8 @@ struct CompanionHistoryView: View {
             }.pickerStyle(.segmented).labelsHidden()
             if rolePage == "L0" {
                 subPicker([("L0", "monitor.versions"), ("views", "monitor.persona_views")])
+            } else if rolePage == "L1" {
+                subPicker([("L1", "monitor.working"), ("intentions", "monitor.intentions"), ("decisions", "monitor.decisions"), ("outputs", "monitor.outputs")])
             } else if rolePage == "L4" {
                 subPicker([("L4", "monitor.procedural"), ("relations", "monitor.relations"), ("traits", "monitor.traits"), ("growth", "monitor.growth")])
             } else if rolePage == "L5" {
@@ -240,6 +243,9 @@ struct CompanionHistoryView: View {
                     }.frame(width: 170).onChange(of: model.query.sort) { _, _ in model.filterChanged() }
                 }
             }
+            if ["intentions", "outputs"].contains(model.query.section) {
+                filterPicker("monitor.status", $model.query.status, model.query.section == "intentions" ? ["", "pending", "ready", "executing", "deferred", "needsReview", "completed", "cancelled", "expired", "failed"] : ["", "queued", "presented", "completed", "dismissed", "cancelled", "failed", "deliveryUnknown"])
+            }
             if isMemoryList || isJobList {
                 HStack {
                     filterPicker("monitor.status", $model.query.status, isJobList ? ["", "preview", "committed", "cancelled", "rolled_back", "needs_review", "invalidated"] : ["", "active", "superseded", "archived", "needs_review", "deleted"])
@@ -249,7 +255,7 @@ struct CompanionHistoryView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            if ["conversation", "audit"].contains(model.query.section) {
+            if ["conversation", "audit", "decisions"].contains(model.query.section) {
                 HStack {
                     Picker(L10n.text("role.section"), selection: $model.query.owner) {
                         Text(L10n.text("monitor.all")).tag("")
@@ -291,7 +297,7 @@ struct CompanionHistoryView: View {
                 if item.status == "deleted" || item.status == "unavailable" {
                     Text(L10n.text(item.status == "deleted" ? "monitor.deleted_help" : "monitor.unavailable_help")).foregroundStyle(.secondary)
                 } else if !item.content.isEmpty {
-                    Text(item.content).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    Text(item.kind == "decision" ? item.content.split(separator: ",").map { monitorLabel($0.trimmingCharacters(in: .whitespaces)) }.joined(separator: " · ") : item.content).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
                 }
                 if item.kind == "working" { Text(L10n.text("monitor.working_help")).foregroundStyle(.secondary) }
                 if item.kind == "audit" { Text(L10n.text("monitor.audit_help")).foregroundStyle(.secondary) }
@@ -327,10 +333,10 @@ struct CompanionHistoryView: View {
     }
     private func fieldValue(_ field: CompanionMonitorField) -> String {
         guard !field.value.isEmpty else { return L10n.text("monitor.not_provided") }
-        if ["occurred_at", "learned_at", "recorded_at", "created_at", "updated_at", "valid_from", "valid_to", "happened_at", "at"].contains(field.key) { return CompanionMonitorPresentation.date(field.value) }
+        if ["occurred_at", "learned_at", "recorded_at", "created_at", "updated_at", "valid_from", "valid_to", "happened_at", "at", "not_before", "expires_at", "cooldown_until", "presented_at", "completed_at"].contains(field.key) { return CompanionMonitorPresentation.date(field.value) }
         if field.key == "subjects" { return field.value.components(separatedBy: ", ").map(name).joined(separator: ", ") }
         if ["source_actor_id", "target_character_id", "target", "speaker", "actor", "sender", "recipient", "created_by"].contains(field.key) { return name(field.value) }
-        if ["scope", "kind", "validity", "state", "role", "result"].contains(field.key) { return monitorLabel(field.value) }
+        if ["scope", "kind", "validity", "state", "role", "result", "last_decision_reason", "reason", "modality"].contains(field.key) { return monitorLabel(field.value) }
         return field.value
     }
     private func fieldGrid(_ item: CompanionMonitorItem) -> some View {

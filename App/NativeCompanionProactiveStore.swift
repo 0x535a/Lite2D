@@ -159,6 +159,12 @@ extension NativeCompanionStore {
             if let memory = value.sourceMemoryId {
                 try CompanionProactiveCoding.require(try memoryRead(memory, owner: value.ownerCharacterId) != nil, "Missing source memory")
             }
+            for row in try rows("SELECT payload FROM proactive_intentions WHERE owner=? AND state='cancelled' AND expires_at>?", [value.ownerCharacterId, now.timeIntervalSince1970]) {
+                let old = try CompanionProactiveCoding.decode(CompanionIntention.self, row["payload"] as! String)
+                if old.lastDecisionReason == "user_cancelled" && (old.topicKey == value.topicKey || Set(value.evidenceIds).isSubset(of: Set(old.evidenceIds))) {
+                    throw NativeCompanionData.error("The user cancelled this future goal; do not recreate it from old evidence")
+                }
+            }
             let existing = try rows("SELECT id FROM proactive_intentions WHERE owner=? AND topic_key=? AND state IN ('proposed','pending','ready','executing','deferred','needsReview')", [value.ownerCharacterId, value.topicKey]).first?["id"] as? String
             if let existing { return existing }
             try CompanionProactiveCoding.require(try rows("SELECT id FROM proactive_intentions WHERE owner=? AND state IN ('pending','ready','executing','deferred','needsReview')", [value.ownerCharacterId]).count < 32, "Intention queue full")

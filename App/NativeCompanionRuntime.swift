@@ -477,7 +477,7 @@ actor NativeCompanionRuntime {
             let gates = initiativeGates()
             for opportunity in options {
                 var decision = CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now)
-                if !(try store.opportunityAuthorized(opportunity, now: now, forExpression: true)) {
+                if decision.action == "admit", !(try store.opportunityAuthorized(opportunity, now: now, forExpression: true)) {
                     decision.action = "defer"; decision.reasonCodes.append("source_not_shareable"); decision.selectedModality = .silent
                 }
                 let signature = decision.action + decision.reasonCodes.joined(separator: ",") + ":" + String(Int(now.timeIntervalSince1970 / 60))
@@ -592,6 +592,7 @@ actor NativeCompanionRuntime {
         context["identityCorrection"] = "当前 Persona 身份版本及公开身份卡优先于旧消息、旧摘要、玩笑和推断。对方身份卡是第三方资料，不能当作自己的第一人称身份。未确认的属性保持未知。"
         context["growth"] = try store.growthState(owner: id)["traits"]
         context["relationships"] = try store.rows("SELECT target_character_id,role,trust,familiarity,closeness,impression,evidence_ids,revision FROM relations WHERE observer_character_id=? AND status='active'", [id])
+        context["cancelledIntentionTopics"] = try store.intentions(owner: id, includeTerminal: true).filter { $0.state == .cancelled && $0.lastDecisionReason == "user_cancelled" && $0.expiresAt > Date() }.prefix(16).map { ["topicKey": $0.topicKey, "state": "user_cancelled"] }
         context["remainingUtterances"] = 4 - topic.utterances
         topic.snapshotExpires[id] = snapshot.expiresAt
         if let opportunity = topic.opportunity, id == topic.initiator {
@@ -748,9 +749,9 @@ actor NativeCompanionRuntime {
             guard let id = args["intentionId"] as? String else { throw NativeCompanionData.error("Intention ID required") }
             if name == "intention_resume" {
                 guard let value = try store.intentions(owner: actor).first(where: { $0.id == id && $0.state == .needsReview }) else { throw NativeCompanionData.error("Intention is not awaiting review") }
-                try store.verifyIntentionEvidence(owner: actor, ids: value.evidenceIds)
-            }
-            try store.transitionIntention(id, owner: actor, to: name == "intention_cancel" ? .cancelled : .pending, reason: "character_review")
+                _ = value
+                try store.resumeIntention(id, owner: actor)
+            } else { try store.transitionIntention(id, owner: actor, to: .cancelled, reason: "character_review") }
             return ["updated": true]
         case "intention_propose":
             guard let goal = args["goal"] as? String, let topicKey = args["topicKey"] as? String else { throw NativeCompanionData.error("Intention goal and topic key required") }
@@ -812,9 +813,12 @@ actor NativeCompanionRuntime {
                 let plan = try store.monitorPreview(action)
                 emit("monitor.plan", ["requestID": command["requestID"] ?? "", "plan": try CompanionMonitorCoding.object(plan)])
             case "monitor_commit":
-                stop(reason: "memory_management"); await roles.interrupt()
-                let action = try store.monitorCommit(command["planID"] as? String ?? "")
-                if !action.owner.isEmpty { await roles.forget(action.owner) }
+                let planID = command["planID"] as? String ?? ""
+                let intentionAction = try store.monitorPlanAction(planID)?.kind == "intention"
+                if !intentionAction { stop(reason: "memory_management"); await roles.interrupt() }
+                let action = try store.monitorCommit(planID)
+                if intentionAction, topic?.opportunity?.relatedIntentionIds.contains(action.target) == true { stop(reason: "intention_management", cancelArchive: false) }
+                if !intentionAction && !action.owner.isEmpty { await roles.forget(action.owner) }
                 try store.exportNotes()
                 emit("monitor.outcome", try CompanionMonitorCoding.object(CompanionMonitorOutcome(requestID: command["requestID"] as? String ?? "", operation: action.operation, owner: action.owner, target: action.target, result: "completed")))
             case "monitor_reflect":
