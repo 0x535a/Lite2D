@@ -481,6 +481,7 @@ private actor ServiceFixture {
             await runtime.close()
             try await CompanionDailyTests.run(root: root, prompt: promptFile, helper: script, node: node, executable: executable, check: check)
             try CompanionMonitorTests.run(root: root, check: check)
+            try CompanionProactiveTests.run(root: root, check: check)
             print("PASS: \(checks.count) native Companion checks")
             try FileManager.default.removeItem(at: root)
         } catch { fputs("FAIL: \(error.localizedDescription)\n", stderr); exit(1) }

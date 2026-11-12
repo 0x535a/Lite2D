@@ -109,6 +109,7 @@ final class NativeCompanionStore {
         ] { try execute(sql) }
         try monitorSchema()
         try dailySchema()
+        try transaction { try proactiveSchema() }
         do {
             try execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED,owner_character_id UNINDEXED,content)")
             ftsAvailable = true
@@ -339,11 +340,17 @@ final class NativeCompanionStore {
     // Invalidation traverses explicit dependencies; derived text must never outlive its evidence.
     func invalidateDependents(of ids: [String], owner: String) throws {
         try dailyInvalidate(owner)
+        for id in ids {
+            try invalidateProactiveDependency(kind: "memory", id: id, reason: "memory_changed")
+            try invalidateProactiveDependency(kind: "evidence", id: id, reason: "memory_changed")
+        }
         var pending = ids, seen = Set(ids)
         while !pending.isEmpty {
             let source = pending.removeFirst()
             for row in try rows("SELECT m.id FROM memory_items m JOIN memory_dependencies d ON d.memory_id=m.id WHERE d.evidence_id=? AND m.owner_character_id=? AND m.status='active' AND m.supersedes_id IS NULL", [source, owner]) {
                 if let id = row["id"] as? String, seen.insert(id).inserted {
+                    try invalidateProactiveDependency(kind: "memory", id: id, reason: "evidence_invalidated")
+                    try invalidateProactiveDependency(kind: "evidence", id: id, reason: "evidence_invalidated")
                     try execute("UPDATE memory_items SET status='needs_review',content='',updated_at=? WHERE id=?", [NativeCompanionData.iso(), id])
                     if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [id]) }
                     pending.append(id)
@@ -395,6 +402,10 @@ final class NativeCompanionStore {
 
     func forgetCharacter(_ owner: String) throws {
         try transaction {
+            try execute("DELETE FROM proactive_dependencies WHERE id IN (SELECT id FROM proactive_intentions WHERE owner=?)", [owner])
+            try execute("DELETE FROM proactive_intentions WHERE owner=?", [owner])
+            try execute("DELETE FROM proactive_outputs WHERE owner=?", [owner])
+            try execute("DELETE FROM proactive_opportunities WHERE owner=?", [owner])
             try dailyInvalidate(owner)
             try execute("DELETE FROM monitor_previews")
             try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE owner_character_id=?", [NativeCompanionData.iso(), owner])
