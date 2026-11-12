@@ -120,6 +120,7 @@ extension NativeCompanionStore {
                 _ = try citations(item["evidenceIds"])
                 try execute("UPDATE daily_open_loops SET status='resolved' WHERE memory_id=? AND owner=?", [memoryID, owner])
             }
+            try syncOpenLoopIntentions(owner: owner)
             var summaryID: String?
             if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 summaryID = try memoryWrite(owner: owner, type: "reflection", provenance: "controller_generated", content: summary,

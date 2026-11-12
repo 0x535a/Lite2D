@@ -298,7 +298,7 @@ private actor ServiceFixture {
             try check(NativeCompanionData.text(["type": "thinking", "text": "secret"]).isEmpty && NativeCompanionData.text(["type": "tool_result", "content": "secret output"]) == "[tool completed]", "Observer normalization excludes reasoning and raw tool output")
             try check(NativeCompanionData.output("{\"command\":\"execute\"}")["skip"] as? Bool == true, "Malformed model JSON never becomes a command")
             let prompt = try NativeCompanionPrompt.load(promptFile)
-            try check(NativeCompanionMCP.tools(prompt).count == 21 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 21 tool schemas and unchanged Persona composition load natively")
+            try check(NativeCompanionMCP.tools(prompt).count == 25 && prompt.system(persona: "raw ${persona}").hasSuffix("PERSONA:\nraw ${persona}"), "All 25 tool schemas and unchanged Persona composition load natively")
             let searchResult: CompanionObject = ["jsonrpc": "2.0", "id": 1, "result": ["content": [["type": "text", "text": "Title: Example\nURL: https://example.com"]]]]
             let searchJSON = try NativeCompanionData.json(searchResult)
             let searchSSE = Data(("event: message\r\ndata: " + String(decoding: searchJSON, as: UTF8.self) + "\r\n\r\n").utf8)
@@ -317,7 +317,7 @@ private actor ServiceFixture {
             do { _ = try await NativeCompanionSearch.search(query: "public topic", objective: "find facts", session: searchSession) } catch { rateLimited = true }
             try check(rateLimited, "Search HTTP failures return errors instead of invented results")
             let allowed = NativeCompanionRoles.rules.filter { $0["effect"] as? String == "allow" }.compactMap { $0["action"] as? String }
-            try check(allowed.count == 63 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
+            try check(allowed.count == 75 && !allowed.contains(where: { $0.contains("*") || $0.contains("shell") || $0.contains("sonarqube") }), "Role permissions allow exact internal tool names and deny arbitrary third-party MCP tools")
             for invalid: CompanionObject in [["id": 1, "error": ["code": -1]], ["id": 1, "result": ["isError": true, "content": [["type": "text", "text": "failed"]]]], ["id": 2, "result": [:]]] {
                 var rejected = false
                 do { _ = try NativeCompanionSearch.result(NativeCompanionData.json(invalid)) } catch { rejected = true }
@@ -481,6 +481,7 @@ private actor ServiceFixture {
             await runtime.close()
             try await CompanionDailyTests.run(root: root, prompt: promptFile, helper: script, node: node, executable: executable, check: check)
             try CompanionMonitorTests.run(root: root, check: check)
+            try CompanionContextTests.run(root: root, check: check)
             try CompanionCalendarTests.run(check: check)
             try CompanionProactiveTests.run(root: root, check: check)
             try await CompanionMacPerceptionTests.run(check: check)

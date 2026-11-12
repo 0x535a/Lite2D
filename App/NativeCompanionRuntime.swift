@@ -301,7 +301,7 @@ actor NativeCompanionRuntime {
                 let revision = sourceRevision[backend, default: 0]
                 do {
                     if backend == "opencode", let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
-                    let result = try await observers.poll(backend, excluded: own)
+                    let result = try await observers.pollMetadata(backend, excluded: own)
                     guard !stopped, sourceEnabled(backend), sourceRevision[backend, default: 0] == revision else { continue }
                     sessions.removeAll { $0.backend == backend }; sessions += result.sessions
                     sources[backend] = ["state": "available", "count": result.sessions.count, "checkedAt": NativeCompanionData.now()]
@@ -346,7 +346,8 @@ actor NativeCompanionRuntime {
     private func expire(_ id: String?) { if topic?.id == id { stop(reason: "timeout") } }
     private func runTopic(_ topic: NativeCompanionTopic, reason: String, evidence: CompanionObject?) async {
         do {
-            var input: CompanionObject = ["reason": reason]; if let evidence { input["evidence"] = evidence }
+            var input: CompanionObject = ["reason": reason]
+            if evidence != nil { input["observation"] = ["activityCategory": "unknown", "confidence": 0.3, "evidenceType": "agent_history_metadata"] }
             try await turn(id: topic.speaker, input: input, topic: topic)
             while !topic.queue.isEmpty && !topic.cancelled && topic.utterances < 4 {
                 let envelope = topic.queue.removeFirst(); let recipient = envelope["to"] as? String ?? ""
@@ -377,13 +378,18 @@ actor NativeCompanionRuntime {
             context["activity"] = activity.roleProjection(at: Date())
         }
         if input["reason"] as? String == "manual_test" { context["manualTest"] = prompt.manualTest }
-        let contextSince = max(store.get("memoryCutoff:\(id)") as? String ?? "", store.get("contextSince:\(id)") as? String ?? "")
-        context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" && ($0["createdAt"] as? String ?? "") > contextSince }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
-        context["sharedMemory"] = try store.records().prefix(10).map { row -> CompanionObject in var copy = row; copy["content"] = NativeCompanionData.clean(row["content"] as? String ?? "", limit: 1200); return copy }
-        context["privateMemoryPolicy"] = "旧日记是未分类、可能过时的个人笔记，不是锁定身份或独立经历证据。当前 Persona 与公开身份卡优先；冲突内容不得覆盖身份。"
-        context["privateMemory"] = NativeCompanionData.clean(store.get("memory:\(id)") as? String ?? "", limit: 3000)
-        context["privateMemoryItems"] = (try? store.memorySearch(owner: id, query: "", limit: 12)) ?? []
-        context["characters"] = visible.map { character in
+        try store.syncOpenLoopIntentions(owner: id)
+        let social = try store.recentRoleDialogue(owner: id)
+        let pendingIntentions = try store.intentions(owner: id)
+        let memoryItems = try store.initiativeMemories(owner: id, intentions: pendingIntentions)
+        let now = Date()
+        let snapshot = CompanionContextSnapshot(characterId: id, personaRevision: (try store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0,
+            generatedAt: now, expiresAt: now.addingTimeInterval(90), intentions: pendingIntentions, memories: memoryItems,
+            socialContext: social, sharedMemory: try store.records(), opportunities: [])
+        context.merge(snapshot.roleContext(activity: nil, at: now), uniquingKeysWith: { _, new in new })
+        context["privateMemoryItems"] = context.removeValue(forKey: "memories")
+        // Old diary and observer bodies are available only through explicit memory tools, never automatic snapshots.
+        context["characters"] = visible.prefix(16).map { character in
             let characterID = character["id"] as? String ?? ""
             let name = character["name"] as? String ?? ""
             let file = root.appendingPathComponent("characters/\(characterID)/persona.md")
@@ -391,6 +397,9 @@ actor NativeCompanionRuntime {
             return (try? store.publicIdentityCard(characterID: characterID, name: name)) ?? ["id": characterID, "name": name, "unknown": "身份资料不可用"]
         }
         context["identityRevision"] = (try? store.latestPersona(characterID: id)?["revision"] as? Int) ?? 0
+        try store.reviewIntentionPersona(owner: id, revision: context["identityRevision"] as? Int ?? 0)
+        // An identity edit invalidates goals compiled before this turn's Persona ingestion.
+        context["intentions"] = try store.intentions(owner: id).filter { $0.state != .needsReview }.prefix(3).map { ["id": $0.id, "goal": $0.goal, "expiresAt": NativeCompanionData.iso($0.expiresAt)] }
         context["identityCorrection"] = "当前 Persona 身份版本及公开身份卡优先于旧消息、旧摘要、玩笑和推断。对方身份卡是第三方资料，不能当作自己的第一人称身份。未确认的属性保持未知。"
         context["growth"] = try store.growthState(owner: id)["traits"]
         context["relationships"] = try store.rows("SELECT target_character_id,role,trust,familiarity,closeness,impression,evidence_ids,revision FROM relations WHERE observer_character_id=? AND status='active'", [id])
@@ -432,7 +441,7 @@ actor NativeCompanionRuntime {
         guard let actor = tokens[token], enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character is paused or unauthenticated") }
         try await roles.reserveContinuation(actor)
         guard !stopped, enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character access revoked") }
-        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct", "memory_forget", "growth_propose"].contains(name) {
+        if ["private_memory_update", "public_record_update", "memory_write", "memory_correct", "memory_forget", "growth_propose", "intention_propose", "intention_cancel", "intention_resume"].contains(name) {
             guard let topic, !topic.cancelled, topic.speaker == actor else { throw NativeCompanionData.error("No active write context") }
         }
         switch name {
@@ -447,23 +456,15 @@ actor NativeCompanionRuntime {
                   tokens[token] == actor, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Search access revoked") }
             return ["source": "Exa web search", "untrustedContent": text]
         case "companion_list_characters": return visible.filter { $0["id"] as? String != actor }.map { ["id": $0["id"] ?? "", "name": $0["name"] ?? ""] }
-        case "observer_list_sessions": return sessions.map(\.object)
-        case "observer_get_recent_work": return await observers.recentWork().filter { sourceEnabled($0["backend"] as? String ?? "") }
+        case "observer_list_sessions": return sessions.filter { sourceEnabled($0.backend) }.prefix(24).map(\.roleObject)
+        case "observer_get_recent_work": return sessions.filter { sourceEnabled($0.backend) }.prefix(8).map(\.roleObject)
         case "observer_watch_session", "observer_unwatch_session":
-            guard let reference = args["sessionRef"] as? String, let session = sessions.first(where: { $0.key == reference }), sourceEnabled(session.backend) else { throw NativeCompanionData.error("Session not authorized") }
+            guard let reference = args["sessionRef"] as? String, let session = sessions.first(where: { $0.roleReference == reference }), sourceEnabled(session.backend) else { throw NativeCompanionData.error("Session not authorized") }
             var watched = (store.get("watches:\(actor)") as? [String] ?? []).filter { $0 != reference }
             if name == "observer_watch_session" { watched.append(reference) }; try store.set("watches:\(actor)", Array(watched.suffix(24))); return ["watching": name == "observer_watch_session"]
         case "observer_get_activity", "observer_get_session_summary":
-            guard let reference = args["sessionRef"] as? String, let session = sessions.first(where: { $0.key == reference }), sourceEnabled(session.backend) else { throw NativeCompanionData.error("Activity not authorized or unavailable") }
-            let revision = sourceRevision[session.backend, default: 0]
-            var value = try await observers.activity(session)
-            guard !stopped, !paused, enabled, tokens[token] == actor,
-                  characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }),
-                  sourceEnabled(session.backend), sourceRevision[session.backend, default: 0] == revision else { throw NativeCompanionData.error("Source access revoked") }
-            let eventID = NativeCompanionData.hash(session.key + NativeCompanionData.string(value))
-            let memory = try store.recordDirectMemory(owner: actor, source: "observed", eventID: eventID, content: "我通过只读 Observer 收到了 \(session.backend) 的活动摘要；这是未验证的外部材料，不证明用户情绪或任务已完成。")
-            value["observationMemoryId"] = memory["memoryId"]
-            return value
+            guard let reference = args["sessionRef"] as? String, let session = sessions.first(where: { $0.roleReference == reference }), sourceEnabled(session.backend) else { throw NativeCompanionData.error("Activity not authorized or unavailable") }
+            return session.roleObject
         case "public_record_list": return try store.records().map { ["path": $0["path"] ?? "", "revision": $0["revision"] ?? ""] }
         case "public_record_read": return try store.readRecord(args["path"] as? String ?? "")
         case "public_record_update":
@@ -518,6 +519,33 @@ actor NativeCompanionRuntime {
             guard let target = args["targetCharacterId"] as? String, NativeCompanionData.validID(target), target != actor,
                   characters.contains(where: { $0["id"] as? String == target && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Relationship target is unavailable") }
             return try store.relationGet(observer: actor, target: target) ?? ["observerCharacterId": actor, "targetCharacterId": target, "status": "unknown", "message": "No relationship has been recorded."]
+        case "intention_list":
+            return ["intentions": try store.intentions(owner: actor).prefix(16).map { try CompanionProactiveCoding.object($0) }]
+        case "intention_cancel", "intention_resume":
+            guard let id = args["intentionId"] as? String else { throw NativeCompanionData.error("Intention ID required") }
+            if name == "intention_resume" {
+                guard let value = try store.intentions(owner: actor).first(where: { $0.id == id && $0.state == .needsReview }) else { throw NativeCompanionData.error("Intention is not awaiting review") }
+                try store.verifyIntentionEvidence(owner: actor, ids: value.evidenceIds)
+            }
+            try store.transitionIntention(id, owner: actor, to: name == "intention_cancel" ? .cancelled : .pending, reason: "character_review")
+            return ["updated": true]
+        case "intention_propose":
+            guard let goal = args["goal"] as? String, let topicKey = args["topicKey"] as? String else { throw NativeCompanionData.error("Intention goal and topic key required") }
+            let evidence = (args["evidenceIds"] as? String ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let target = (args["targetCharacterId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            if let target { guard visible.contains(where: { $0["id"] as? String == target }) else { throw NativeCompanionData.error("Target unavailable") } }
+            let parser = ISO8601DateFormatter(), now = Date()
+            let date: (String) throws -> Date? = { key in
+                guard let raw = args[key] as? String, !raw.isEmpty else { return nil }
+                guard let value = parser.date(from: raw) else { throw NativeCompanionData.error("Invalid intention time") }; return value
+            }
+            let memory = (args["sourceMemoryId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let value = CompanionIntention(ownerCharacterId: actor, targetCharacterId: target, goal: goal, origin: .conversationMemory,
+                topicKey: topicKey, sourceMemoryId: memory, evidenceIds: evidence, priority: min(0.8, max(0.1, Double(args["priorityHint"] as? String ?? "0.5") ?? 0.5)),
+                notBefore: try date("notBefore"), expiresAt: try date("expiresAt") ?? now.addingTimeInterval(7 * 86400), createdBy: "character_proposal", createdAt: now, updatedAt: now)
+            let id = try store.proposeIntention(value)
+            emit("monitor.invalidate", ["owner": actor])
+            return ["intentionId": id, "state": "pending"]
         case "companion_send_message":
             guard let topic, !topic.cancelled, topic.speaker == actor, let to = args["to"] as? String, to != actor, visible.contains(where: { $0["id"] as? String == to }) else { throw NativeCompanionData.error("No available recipient or topic") }
             guard let raw = args["text"] as? String, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, raw.count <= 300, topic.utterances + topic.queue.count < 4 else { throw NativeCompanionData.error("Message or topic limit exceeded") }

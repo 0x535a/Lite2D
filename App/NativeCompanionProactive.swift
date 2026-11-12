@@ -266,6 +266,9 @@ struct CompanionContextSnapshot: Codable {
     var expiresAt: Date
     var intentions: [CompanionIntention]
     var memories: [CompanionObject] = []
+    var socialContext: [CompanionObject] = []
+    var sharedMemory: [CompanionObject] = []
+    var opportunities: [CompanionObject] = []
     // Compiled separately: Any is deliberately not Codable and never accepted from a role.
     enum CodingKeys: String, CodingKey { case id, contextVersion, characterId, personaRevision, generatedAt, expiresAt, intentions }
     func roleContext(activity: CompanionActivityContext?, at now: Date) -> CompanionObject {
@@ -277,6 +280,9 @@ struct CompanionContextSnapshot: Codable {
             "memories": Array(memories.prefix(8)).map { memory -> CompanionObject in
                 ["id": memory["id"] ?? "", "content": String((memory["content"] as? String ?? "").prefix(400)), "provenance": memory["provenance"] ?? "inferred"]
             },
+            "socialContext": Array(socialContext.suffix(4)),
+            "sharedMemory": Array(sharedMemory.prefix(4)).map { ["path": $0["path"] ?? "", "content": String(($0["content"] as? String ?? "").prefix(400))] },
+            "opportunities": Array(opportunities.prefix(3)),
             "allowedModalities": ["silent", "bubble", "socialMessage"],
             "policy": ["mayMentionActivityCategory": true, "mayDiscussSpecificWork": false]]
         if let projection = activity?.roleProjection(at: now) { value["activity"] = projection }

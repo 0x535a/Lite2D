@@ -12,6 +12,13 @@ struct NativeObservedSession {
         var value: CompanionObject = ["backend": backend, "id": id, "title": title, "updated": updated]
         if let project { value["project"] = project }; if let created { value["created"] = created }; return value
     }
+    var roleReference: String { "activity_" + NativeCompanionData.hash(key) }
+    var roleObject: CompanionObject {
+        // A history update proves neither active typing nor a particular task.
+        ["sessionRef": roleReference, "activityCategory": "unknown", "confidence": 0.3,
+         "state": "unknown", "evidenceType": "agent_history_metadata", "updatedAt": updated,
+         "instruction": "A history timestamp changed; activity, mood and task outcome are unknown."]
+    }
     var key: String { "\(backend):\(id)" }
 }
 
@@ -148,12 +155,32 @@ actor NativeCompanionObservers {
         for key in activities.keys where key.hasPrefix(backend + ":") && !available.contains(key) { activities.removeValue(forKey: key) }
         initialized.insert(backend); return (sessions, changes)
     }
+    // Default perception path never requests message history/turn bodies.
+    func pollMetadata(_ backend: String, excluded: Set<String>) async throws -> (sessions: [NativeObservedSession], changes: [CompanionObject]) {
+        let listed = try await list(backend).filter { !excluded.contains($0.id) }
+        let wasReady = initialized.contains("metadata:" + backend)
+        var changes: [CompanionObject] = []
+        let prefix = "metadata:"
+        for session in listed {
+            let key = prefix + session.key
+            if wasReady, baselines[key] != session.updated {
+                var change = session.roleObject
+                change["backend"] = backend // Controller routing only; stripped before role generation.
+                changes.append(change)
+            }
+            baselines[key] = session.updated
+        }
+        let available = Set(listed.map { prefix + $0.key })
+        baselines = baselines.filter { !$0.key.hasPrefix(prefix + backend + ":") || available.contains($0.key) }
+        initialized.insert("metadata:" + backend)
+        return (listed, changes)
+    }
     func activity(_ session: NativeObservedSession) async throws -> CompanionObject {
         if let existing = activities[session.key], existing["updated"] as? Double == session.updated { return existing }
         var value = session.object; value["messages"] = try await recent(session); value["sessionRef"] = session.key; activities[session.key] = value; return value
     }
     func recentWork() -> [CompanionObject] { Array(activities.values.sorted { ($0["updated"] as? Double ?? 0) > ($1["updated"] as? Double ?? 0) }.prefix(8)) }
-    func reset(_ backend: String) { initialized.remove(backend); baselines = baselines.filter { !$0.key.hasPrefix(backend + ":") }; activities = activities.filter { !$0.key.hasPrefix(backend + ":") } }
+    func reset(_ backend: String) { initialized.remove(backend); initialized.remove("metadata:" + backend); baselines = baselines.filter { !$0.key.hasPrefix(backend + ":") && !$0.key.hasPrefix("metadata:" + backend + ":") }; activities = activities.filter { !$0.key.hasPrefix(backend + ":") } }
     func close() async { watcher.stop(); claudeEnabled = false; claudeEpoch += 1; await helper.stop(); codex?.close(); codex = nil }
     func disable(_ backend: String) async {
         reset(backend)

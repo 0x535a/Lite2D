@@ -15,6 +15,7 @@ extension NativeCompanionStore {
             "CREATE INDEX IF NOT EXISTS proactive_decisions_at ON proactive_decisions(at)",
             "CREATE TABLE IF NOT EXISTS proactive_outputs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,status TEXT NOT NULL,at REAL NOT NULL,payload TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS perception_cursors(source TEXT PRIMARY KEY,generation TEXT NOT NULL,cursor TEXT NOT NULL,epoch INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS proactive_loop_intentions(memory_id TEXT PRIMARY KEY,owner TEXT NOT NULL,intention_id TEXT NOT NULL UNIQUE)",
             "CREATE TABLE IF NOT EXISTS proactive_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
             "INSERT OR IGNORE INTO proactive_metadata VALUES ('schema','1')"
         ] { try execute(sql) }

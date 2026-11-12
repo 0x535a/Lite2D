@@ -105,7 +105,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         let runtimePersona = (try? store.runtimePersona(characterID: id, markdown: persona)) ?? persona
         let digest = NativeCompanionData.hash(prompt.system(persona: runtimePersona))
         if let existing = instances[id], existing.digest == digest, existing.model == model,
-           store.get("sessionPolicy:\(id)") as? String == "search-v1",
+           store.get("sessionPolicy:\(id)") as? String == "initiative-v1",
            store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { return existing }
         let hadInstance = instances[id] != nil
         let token = await register(id)
@@ -121,7 +121,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         var session = store.get("session:\(id)") as? String
         if let old = session {
             if let response = try? await client.get("api/session/\(old)"), NativeCompanionData.object(NativeCompanionData.object(response["data"])["location"])["directory"] as? String == directory.path,
-               store.get("sessionPolicy:\(id)") as? String == "search-v1",
+               store.get("sessionPolicy:\(id)") as? String == "initiative-v1",
                store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { }
             else { session = nil }
         }
@@ -133,7 +133,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             let response = try await client.post("api/session", input)
             guard let created = NativeCompanionData.object(response["data"])["id"] as? String else { throw NativeCompanionData.error("OpenCode did not create a role session") }
             session = created; try store.set("session:\(id)", created)
-            try store.set("sessionPolicy:\(id)", "search-v1")
+            try store.set("sessionPolicy:\(id)", "initiative-v1")
             try store.set("sessionPersona:\(id)", NativeCompanionData.hash(persona))
         } else if let modelRef { _ = try await client.post("api/session/\(session!)/model", ["model": modelRef]) }
         let agents = try await client.get("api/agent", ["location[directory]": directory.path])
@@ -174,10 +174,10 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         if let attributes = try? exampleFile.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey]), attributes.isSymbolicLink != true, (attributes.fileSize ?? Int.max) < 262144,
            let text = try? String(contentsOf: exampleFile, encoding: .utf8) {
             let reason = input["reason"] as? String
-            let scenes = reason == "character_message" ? ["sister_conversation", "sister_support"] : reason == "work_activity" ? ["agent_observe", "compilation", "success"] : ["spontaneous_chat", "anime", "gaming"]
+            let scenes = reason == "character_message" ? ["sister_conversation", "sister_support"] : ["spontaneous_chat", "anime", "gaming"]
             let examples = text.components(separatedBy: "\n").compactMap { $0.data(using: .utf8).flatMap { try? NativeCompanionData.decode($0) as? CompanionObject } }
                 .filter { scenes.contains($0["scene"] as? String ?? "") && $0["source_type"] as? String == "original_style_example" && $0["is_official_quote"] as? Bool == false }
-            let selected = reason == "work_activity" ? Array(examples.dropFirst().prefix(3)) : Array(examples.prefix(3))
+            let selected = Array(examples.prefix(3))
             context["styleExamples"] = selected.map { ["scene": $0["scene"] ?? "", "response": NativeCompanionData.clean($0["response"] as? String ?? "", limit: 250), "provenance": prompt.styleExample] }
         }
         let before = NativeCompanionData.array(try await client.get("api/session/\(instance.session)/message", ["limit": "4", "order": "desc"])["data"])

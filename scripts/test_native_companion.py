@@ -27,13 +27,13 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 def main():
     sources = ['CompanionMonitorModels.swift', 'NativeCompanionMonitor.swift', 'NativePersonaMemory.swift', 'NativeCompanionStore.swift', 'NativeCompanionTransport.swift', 'NativeClaudeHelper.swift',
-               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift']
+               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift', 'NativeCompanionContext.swift']
     unit = OUT / 'native-tests'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *[str(ROOT / 'App' / name) for name in sources],
-                    str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
+                    str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
-    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0}
+    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0, 'tryIntention': False, 'intentionProposed': False}
 
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -55,7 +55,26 @@ def main():
             read_name = next((n for n in names if n.endswith('private_memory_read')), None)
             save_name = next((n for n in names if n.endswith('public_record_update')), None)
             search_name = next((n for n in names if n.endswith('_web_search')), None)
-            if state['trySearch'] and search_name:
+            intention_name = next((n for n in names if n.endswith('intention_propose')), None)
+            if state['tryIntention'] and intention_name and 'TEST_CHARACTER_A' in system:
+                state['tryIntention'] = False
+                contexts = []
+                for message in request.get('messages', []):
+                    content = message.get('content', '')
+                    if isinstance(content, list):
+                        content = '\n'.join(part.get('text', '') for part in content)
+                    try:
+                        parsed = json.loads(content)
+                        if isinstance(parsed, dict) and parsed.get('characterId') == A:
+                            contexts.append(parsed)
+                    except (TypeError, ValueError):
+                        pass
+                assert contexts, 'Missing compiled role context'
+                evidence = [row['id'] for row in contexts[-1]['socialContext'] if row.get('from') == A]
+                assert evidence, 'Own dialogue evidence was not supplied'
+                call = {'name': intention_name, 'arguments': json.dumps({'goal': 'Share a movie thought later.', 'topicKey': 'movie-follow-up', 'evidenceIds': evidence[0]})}
+                state['intentionProposed'] = True
+            elif state['trySearch'] and search_name:
                 state['trySearch'] = False
                 call = {'name': search_name, 'arguments': json.dumps({'query': 'public fun trivia', 'objective': 'Find a public fact'})}
             elif 'TEST_CHARACTER_A' in system and not state['sent'] and send_name:
@@ -190,6 +209,7 @@ def main():
             send({'type': 'configure', 'config': config})
             until('status')
             state['trySearch'] = True
+            state['tryIntention'] = True
             send({'type': 'trigger', 'characterId': A})
             until('topic.end', timeout=75)
             assert state['searchDenied'], 'Search revocation did not reach the tool result'
@@ -201,7 +221,9 @@ def main():
         assert json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'session:{A}',)).fetchone()[0]) == session_a
         assert json.loads(db.execute('SELECT value FROM state WHERE key=?', (f'memory:{A}',)).fetchone()[0]) == 'Only A remembers this.'
         assert db.execute("SELECT COUNT(*) FROM deliveries WHERE status='context_consumed'").fetchone()[0] == 1
-        assert state['calls'] == 8, state['calls']
+        assert state['calls'] == 9, state['calls']
+        assert state['intentionProposed']
+        assert db.execute("SELECT COUNT(*) FROM proactive_intentions WHERE owner=? AND topic_key='movie-follow-up' AND state='pending'", (A,)).fetchone()[0] == 1
         db.close()
         # The actual private pack is a release gate locally; no redistribution is required.
         pack = ROOT / 'doc/companion/persona_pack'
