@@ -40,6 +40,12 @@ target_link_libraries(Lite2DEngine PUBLIC Framework "-framework Foundation" "-fr
 
 file(GLOB APP_SOURCES CONFIGURE_DEPENDS "App/*.swift")
 add_executable(Lite2D MACOSX_BUNDLE ${APP_SOURCES})
+# CMake's deployment target flag reaches clang but not the Swift Ninja driver.
+# Pass the same target explicitly at compile AND link time; plist alone cannot
+# lower LC_BUILD_VERSION.minos. This app currently ships Apple Silicon only.
+set(LITE2D_SWIFT_TARGET "arm64-apple-macosx${CMAKE_OSX_DEPLOYMENT_TARGET}")
+target_compile_options(Lite2D PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:-target>" "$<$<COMPILE_LANGUAGE:Swift>:${LITE2D_SWIFT_TARGET}>")
+target_link_options(Lite2D PRIVATE -target "${LITE2D_SWIFT_TARGET}")
 target_compile_options(Lite2D PRIVATE -import-objc-header "${CMAKE_CURRENT_SOURCE_DIR}/Bridge/Live2DBridge.h")
 target_link_libraries(Lite2D PRIVATE Lite2DEngine "-framework AppKit" "-framework SwiftUI" "-framework QuartzCore" "-framework OpenGL" "-framework ServiceManagement" "-framework Network" "-framework CoreServices" "-lsqlite3" "-lc++")
 set_target_properties(Lite2D PROPERTIES
