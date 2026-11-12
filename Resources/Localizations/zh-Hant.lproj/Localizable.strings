@@ -726,3 +726,14 @@
 "monitor.value.modality" = "表達形式";
 "monitor.value.presented_at" = "展示時間";
 "monitor.value.completed_at" = "完成時間";
+
+// Vendor-independent cognition and per-task model routing
+"companion.role_model" = "角色模型覆寫";
+"companion.role_model_help" = "留空使用共享模型，或填寫 provider/model。更換模型保留身分、記憶、關係與未來目標。";
+"companion.memory_model" = "記憶整理模型";
+"companion.memory_model_help" = "可選 provider/model，只用於靜默整理記憶，與各角色的表達模型分開。";
+"monitor.cognition" = "認知狀態";
+"monitor.value.cognition" = "認知狀態";
+"monitor.value.social_interest" = "交流傾向";
+"monitor.value.expression_energy" = "表達能量";
+"monitor.value.affect" = "表達情緒";

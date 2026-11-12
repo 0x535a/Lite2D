@@ -132,7 +132,7 @@ extension NativeCompanionStore {
             try CompanionProactiveCoding.require(transitions[value.status]?.contains(status) == true, "Invalid output transition")
             if value.modality == .socialMessage && status == .completed { return } // UI completion is not peer consumption.
             value.status = status; value.failureReason = reason.map { String($0.prefix(100)) }
-            if status == .presented { value.presentedAt = now }
+            if status == .presented { value.presentedAt = now; try recordCognitiveExpression(value, now: now) }
             if status == .completed { value.completedAt = now }
             try execute("UPDATE proactive_outputs SET status=?,payload=? WHERE id=?", [status.rawValue, try CompanionProactiveCoding.encode(value), id])
             for intentionID in value.relatedIntentionIds {

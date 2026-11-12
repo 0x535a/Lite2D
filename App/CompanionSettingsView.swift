@@ -10,6 +10,8 @@ struct CompanionRoleSections: View {
     var body: some View {
         Section {
             Toggle(L10n.text("companion.character_enabled"), isOn: enabled).disabled(!companion.hasPersona(id))
+            TextField(L10n.text("companion.role_model"), text: Binding(get: { companion.character(id).model }, set: { value in companion.updateCharacter(id) { $0.model = value } }))
+            Text(L10n.text("companion.role_model_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             LabeledContent {
                 HStack {
                     Button(companion.hasPersona(id) ? L10n.text("companion.replace_persona") : L10n.text("companion.import_persona")) { companion.importPersona(id) }
@@ -231,6 +233,8 @@ struct CompanionGeneralSections: View {
                     Stepper(L10n.text("companion.interval"), value: binding(\.intervalMinutes), in: 0...1440, step: 1).labelsHidden()
                 }
             }
+            TextField(L10n.text("companion.memory_model"), text: binding(\.memoryModel))
+            Text(L10n.text("companion.memory_model_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             DatePicker(L10n.text("companion.daily_time"), selection: Binding(get: {
                 Calendar.current.date(bySettingHour: companion.settings.dailyConsolidationMinute / 60, minute: companion.settings.dailyConsolidationMinute % 60, second: 0, of: Date()) ?? Date()
             }, set: { date in

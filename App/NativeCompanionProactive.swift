@@ -263,6 +263,7 @@ struct CompanionOutputReceipt: Codable, Equatable {
     var presentedAt: Date?
     var completedAt: Date?
     var failureReason: String?
+    var emotion: CompanionAffect?
 }
 
 struct CompanionContextSnapshot: Codable {

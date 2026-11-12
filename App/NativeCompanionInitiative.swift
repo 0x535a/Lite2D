@@ -43,6 +43,7 @@ extension NativeCompanionStore {
             for row in try rows("SELECT id,owner,payload FROM proactive_outputs WHERE json_extract(payload,'$.deliveryId')=? AND status IN ('queued','presented')", [delivery]) {
                 var value = try CompanionProactiveCoding.decode(CompanionOutputReceipt.self, row["payload"] as! String)
                 value.status = .completed; value.completedAt = now
+                try recordCognitiveSocial(value, now: now)
                 for id in value.relatedIntentionIds {
                     if try intentions(owner: value.characterId).contains(where: { $0.id == id && $0.state == .executing }) {
                         try transitionIntention(id, owner: value.characterId, to: .completed, reason: "delivered", now: now)

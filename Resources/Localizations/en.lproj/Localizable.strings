@@ -726,3 +726,14 @@
 "monitor.value.modality" = "Expression form";
 "monitor.value.presented_at" = "Presented at";
 "monitor.value.completed_at" = "Completed at";
+
+// Vendor-independent cognition and per-task model routing
+"companion.role_model" = "Character model override";
+"companion.role_model_help" = "Leave empty to use the shared model. Use provider/model; changing a model preserves identity, memories, relationships and future goals.";
+"companion.memory_model" = "Memory organization model";
+"companion.memory_model_help" = "Optional provider/model for silent memory organization. It is separate from each character’s expression model.";
+"monitor.cognition" = "Cognitive state";
+"monitor.value.cognition" = "Cognitive state";
+"monitor.value.social_interest" = "Social interest";
+"monitor.value.expression_energy" = "Expression energy";
+"monitor.value.affect" = "Expression affect";

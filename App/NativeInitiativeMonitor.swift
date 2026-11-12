@@ -23,6 +23,14 @@ extension NativeCompanionStore {
         var result = CompanionMonitorPage(requestID: requestID, query: query, items: [], total: 0)
         var args: [Any?] = [], sql: String, order: String
         switch query.section {
+        case "cognition":
+            if let state = try cognitiveState(owner: query.owner) {
+                var item = CompanionMonitorItem(id: "cognition", kind: "cognition", owner: query.owner, title: "cognition")
+                item.at = NativeCompanionData.iso(state.updatedAt)
+                item.fields = [.init(key: "curiosity", value: String(state.curiosity)), .init(key: "social_interest", value: String(state.socialInterest)), .init(key: "expression_energy", value: String(state.expressionEnergy)), .init(key: "affect", value: state.affect.rawValue)]
+                result.items = [item]; result.total = 1
+            }
+            return result
         case "intentions":
             sql = "SELECT * FROM proactive_intentions WHERE owner=?"; args = [query.owner]; order = "rowid"
             if !query.status.isEmpty { sql += " AND state=?"; args.append(query.status) }

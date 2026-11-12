@@ -134,7 +134,7 @@ extension NativeCompanionStore {
         var q = input; q.page = min(max(0, q.page), 10_000_000); q.pageSize = min(max(q.pageSize, 1), 100)
         var result = CompanionMonitorPage(requestID: requestID, query: q, items: [], total: 0)
         if !q.detailID.isEmpty { result.detail = try monitorReference(owner: q.detailOwner.isEmpty ? q.owner : q.detailOwner, id: q.detailID, kind: q.detailKind) }
-        if ["intentions", "decisions", "outputs"].contains(q.section) {
+        if ["intentions", "decisions", "outputs", "cognition"].contains(q.section) {
             var page = try initiativeMonitorPage(q, requestID: requestID); page.detail = result.detail; return page
         }
         if ["overview", "role_overview"].contains(q.section) {

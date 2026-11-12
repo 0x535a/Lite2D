@@ -726,3 +726,14 @@
 "monitor.value.modality" = "表現形式";
 "monitor.value.presented_at" = "表示時刻";
 "monitor.value.completed_at" = "完了時刻";
+
+// Vendor-independent cognition and per-task model routing
+"companion.role_model" = "キャラクターモデルの上書き";
+"companion.role_model_help" = "空欄では共有モデルを使用します。provider/model形式で指定できます。変更しても身元、記憶、関係、今後の目標は維持されます。";
+"companion.memory_model" = "記憶整理用モデル";
+"companion.memory_model_help" = "任意のprovider/modelを指定できます。静かな記憶整理専用で、各キャラクターの発話モデルとは独立です。";
+"monitor.cognition" = "認知状態";
+"monitor.value.cognition" = "認知状態";
+"monitor.value.social_interest" = "交流への関心";
+"monitor.value.expression_energy" = "表現エネルギー";
+"monitor.value.affect" = "表現の感情";

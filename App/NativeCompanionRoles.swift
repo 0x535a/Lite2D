@@ -93,6 +93,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
     func reapStale() async { await reapStaleRoleService() }
     func prepare(id: String, model: String) async throws -> Instance {
         guard NativeCompanionData.validID(id) else { throw NativeCompanionData.error("Invalid character") }
+        try CompanionModelRouting.validate(model)
         let client = try await server(), directory = root.appendingPathComponent("characters/\(id)")
         guard try directory.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
               try root.appendingPathComponent("characters").resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { throw NativeCompanionData.error("Invalid Persona directory") }
@@ -125,6 +126,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
                store.get("sessionPersona:\(id)") as? String == NativeCompanionData.hash(persona) { }
             else { session = nil }
         }
+        if session != nil && CompanionModelRouting.resetToServiceDefault(requested: model, previous: store.get("sessionModel:\(id)") as? String) { session = nil }
         var modelRef: CompanionObject?
         if let slash = model.firstIndex(of: "/") { modelRef = ["providerID": String(model[..<slash]), "id": String(model[model.index(after: slash)...])] }
         if session == nil {
@@ -136,6 +138,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             try store.set("sessionPolicy:\(id)", "initiative-v2")
             try store.set("sessionPersona:\(id)", NativeCompanionData.hash(persona))
         } else if let modelRef { _ = try await client.post("api/session/\(session!)/model", ["model": modelRef]) }
+        try store.set("sessionModel:\(id)", model)
         let agents = try await client.get("api/agent", ["location[directory]": directory.path])
         let agent = NativeCompanionData.array(agents["data"]).first { $0["id"] as? String == "companion" }
         guard NativeCompanionData.array(agent?["permissions"]).contains(where: { $0["action"] as? String == "*" && $0["resource"] as? String == "*" && $0["effect"] as? String == "deny" }) else { throw NativeCompanionData.error("Role permission policy did not load") }
@@ -274,6 +277,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         try? store.execute("UPDATE daily_archives SET usage=? WHERE id=?", [NativeCompanionData.string(attempts), jobID])
     }
     func consolidate(id: String, job: CompanionObject, model: String, hourlyLimit: Int) async throws -> CompanionObject {
+        try CompanionModelRouting.validate(model)
         let client = try await server(), jobID = job["id"] as! String
         // Independent location: no Companion MCP, inherited plugins or permitted tools.
         let directory = root.appendingPathComponent("daily/\(id)")

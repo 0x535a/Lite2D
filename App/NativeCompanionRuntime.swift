@@ -150,6 +150,8 @@ actor NativeCompanionRuntime {
     private var interval: Double { max(0, min(1440, config["intervalMinutes"] as? Double ?? 30)) }
     private var hourly: Int { max(1, min(120, config["hourlyRequests"] as? Int ?? 12)) }
     private var model: String { config["model"] as? String ?? "" }
+    private func roleModel(_ id: String) -> String { CompanionModelRouting.role(id, config: config) }
+    private var archiveModel: String { CompanionModelRouting.archive(config: config) }
     private var characters: [CompanionObject] { NativeCompanionData.array(config["characters"]).filter { NativeCompanionData.validID($0["id"] as? String ?? "") } }
     private var visible: [CompanionObject] { characters.filter { $0["enabled"] as? Bool == true && $0["visible"] as? Bool == true } }
     private func sourceEnabled(_ backend: String) -> Bool { enabled && NativeCompanionData.object(NativeCompanionData.object(config["sources"])[backend])["enabled"] as? Bool == true }
@@ -167,8 +169,12 @@ actor NativeCompanionRuntime {
     }
     func configure(_ next: CompanionObject) async {
         let previousInterval = interval, previousEnabled = enabled, previousPaused = paused
+        let previousArchiveModel = archiveModel
+        let previousRoleModels = Dictionary(characters.map { ($0["id"] as! String, roleModel($0["id"] as! String)) }, uniquingKeysWith: { _, value in value })
         let old = Dictionary(uniqueKeysWithValues: NativeCompanionData.backends.map { ($0, sourceEnabled($0)) })
         config = next
+        if archiveModel != previousArchiveModel { dailyTask?.cancel() }
+        if topic?.participants.contains(where: { previousRoleModels[$0] != roleModel($0) }) == true { stop(reason: "model_changed", cancelArchive: false) }
         await configurePerception()
         dailyCheckAt = .distantPast
         if !enabled || next["sleeping"] as? Bool == true { dailyTask?.cancel() }
@@ -463,8 +469,9 @@ actor NativeCompanionRuntime {
             if NativeCompanionData.now() >= nextIdle {
                 scheduleIdle()
                 for owner in owners {
+                    let cognitive = try store.maintainCognition(owner: owner, now: now)
                     let value = CompanionOpportunity(ownerCharacterId: owner, kind: "intrinsic_interest", sourceEventIds: [], topicKey: "intrinsic:\(Int(now.timeIntervalSince1970 / 300))",
-                        priority: 0.5, intrusionCost: 0.3, notBefore: now, expiresAt: now.addingTimeInterval(120))
+                        priority: cognitive.interestPriority, intrusionCost: 0.3, notBefore: now, expiresAt: now.addingTimeInterval(120))
                     _ = try store.saveOpportunity(value, now: now)
                 }
             }
@@ -593,6 +600,7 @@ actor NativeCompanionRuntime {
         context["growth"] = try store.growthState(owner: id)["traits"]
         context["relationships"] = try store.rows("SELECT target_character_id,role,trust,familiarity,closeness,impression,evidence_ids,revision FROM relations WHERE observer_character_id=? AND status='active'", [id])
         context["cancelledIntentionTopics"] = try store.intentions(owner: id, includeTerminal: true).filter { $0.state == .cancelled && $0.lastDecisionReason == "user_cancelled" && $0.expiresAt > Date() }.prefix(16).map { ["topicKey": $0.topicKey, "state": "user_cancelled"] }
+        context["cognition"] = try CompanionProactiveCoding.object(store.maintainCognition(owner: id))
         context["remainingUtterances"] = 4 - topic.utterances
         topic.snapshotExpires[id] = snapshot.expiresAt
         if let opportunity = topic.opportunity, id == topic.initiator {
@@ -601,7 +609,7 @@ actor NativeCompanionRuntime {
         }
         guard NativeCompanionData.string(context).utf8.count <= 48000 else { throw NativeCompanionData.error("Compiled context exceeds its limit") }
         if let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
-        let output = try await roles.generate(id: id, context: context, model: model, reserve: { [weak self] in try await self?.reserveRequest() ?? false })
+        let output = try await roles.generate(id: id, context: context, model: roleModel(id), reserve: { [weak self] in try await self?.reserveRequest() ?? false })
         try Task.checkCancellation(); guard !topic.cancelled, (topic.snapshotExpires[id] ?? .distantPast) > Date() else { return }
         if let opportunity = topic.opportunity { guard try store.opportunityAuthorized(opportunity, forExpression: true) else { return } }
         roleErrors.removeValue(forKey: id)
@@ -621,7 +629,7 @@ actor NativeCompanionRuntime {
         if let sender = envelope?["from"] as? String, visible.contains(where: { $0["id"] as? String == sender }) {
             let message = UUID().uuidString; try delivery(message, topic: topic, from: id, to: sender, text: text, status: "delivering")
             do {
-                let remote = try await roles.receive(id: sender, from: id, text: text, messageID: message, model: model)
+                let remote = try await roles.receive(id: sender, from: id, text: text, messageID: message, model: roleModel(sender))
                 try store.execute("UPDATE deliveries SET status='accepted_pending_context',remote_id=? WHERE id=?", [remote, message])
             } catch { try store.execute("UPDATE deliveries SET status='delivery_unknown' WHERE id=?", [message]) }
         }
@@ -641,7 +649,7 @@ actor NativeCompanionRuntime {
             }
         }
         let receipt = CompanionOutputReceipt(characterId: id, topicId: topic.id, modality: extra["deliveryId"] == nil ? .bubble : .socialMessage,
-            text: cleaned, relatedIntentionIds: related, decisionId: topic.decisionId, deliveryId: extra["deliveryId"] as? String)
+            text: cleaned, relatedIntentionIds: related, decisionId: topic.decisionId, deliveryId: extra["deliveryId"] as? String, emotion: CompanionAffect(rawValue: extra["emotion"] as? String ?? "neutral"))
         do {
             try store.saveOutputCandidate(receipt)
             if let opportunity = topic.opportunity { try store.proactiveDependency(kind: "output", id: receipt.id, sourceKind: "opportunity", sourceID: opportunity.id) }
@@ -954,7 +962,7 @@ actor NativeCompanionRuntime {
                     else {
                         guard try memoryStore.spend(hourly) else { throw NativeCompanionData.error("Hourly model budget reached; daily consolidation will retry") }
                         try memoryStore.execute("UPDATE daily_archives SET attempts=attempts+1 WHERE id=?", [jobID])
-                        result = try await roles.consolidate(id: id, job: job, model: model, hourlyLimit: hourly)
+                        result = try await roles.consolidate(id: id, job: job, model: archiveModel, hourlyLimit: hourly)
                     }
                     try Task.checkCancellation()
                     guard enabled, !stopped else { return }
@@ -969,7 +977,7 @@ actor NativeCompanionRuntime {
                 // Empty days with no role Session need no remote work.
                 var session: String?
                 if caughtUp, memoryStore.get("session:\(id)") is String, memoryStore.get("dailyNeedsRotation:\(id)") as? Bool == true {
-                    session = try await roles.rotate(id: id, jobID: jobID, model: model)
+                    session = try await roles.rotate(id: id, jobID: jobID, model: roleModel(id))
                     try memoryStore.set("dailyBridgeFrom:\(id)", end)
                 }
                 try memoryStore.dailyFinish(jobID, newSession: session, minute: minute, zone: zone, now: now)

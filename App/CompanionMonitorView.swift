@@ -30,7 +30,7 @@ struct CompanionHistoryView: View {
     init(companion: CompanionCoordinator, loadOnAppear: Bool = true, initialOwner: String = "", initialSection: String = "overview") {
         self.companion = companion; model = companion.monitor; self.loadOnAppear = loadOnAppear
         _navigation = State(initialValue: initialOwner.isEmpty ? initialSection : initialOwner)
-        let base = ["intentions": "L1", "decisions": "L1", "outputs": "L1", "views": "L0", "relations": "L4", "traits": "L4", "reflections": "L5", "growth": "L5", "legacy": "role_overview"][initialSection] ?? initialSection
+        let base = ["cognition": "L1", "intentions": "L1", "decisions": "L1", "outputs": "L1", "views": "L0", "relations": "L4", "traits": "L4", "reflections": "L5", "growth": "L5", "legacy": "role_overview"][initialSection] ?? initialSection
         _rolePage = State(initialValue: initialOwner.isEmpty ? "role_overview" : base)
         _subsection = State(initialValue: base == initialSection ? "" : initialSection)
     }
@@ -148,7 +148,7 @@ struct CompanionHistoryView: View {
             if rolePage == "L0" {
                 subPicker([("L0", "monitor.versions"), ("views", "monitor.persona_views")])
             } else if rolePage == "L1" {
-                subPicker([("L1", "monitor.working"), ("intentions", "monitor.intentions"), ("decisions", "monitor.decisions"), ("outputs", "monitor.outputs")])
+                subPicker([("L1", "monitor.working"), ("cognition", "monitor.cognition"), ("intentions", "monitor.intentions"), ("decisions", "monitor.decisions"), ("outputs", "monitor.outputs")])
             } else if rolePage == "L4" {
                 subPicker([("L4", "monitor.procedural"), ("relations", "monitor.relations"), ("traits", "monitor.traits"), ("growth", "monitor.growth")])
             } else if rolePage == "L5" {
@@ -336,7 +336,7 @@ struct CompanionHistoryView: View {
         if ["occurred_at", "learned_at", "recorded_at", "created_at", "updated_at", "valid_from", "valid_to", "happened_at", "at", "not_before", "expires_at", "cooldown_until", "presented_at", "completed_at"].contains(field.key) { return CompanionMonitorPresentation.date(field.value) }
         if field.key == "subjects" { return field.value.components(separatedBy: ", ").map(name).joined(separator: ", ") }
         if ["source_actor_id", "target_character_id", "target", "speaker", "actor", "sender", "recipient", "created_by"].contains(field.key) { return name(field.value) }
-        if ["scope", "kind", "validity", "state", "role", "result", "last_decision_reason", "reason", "modality"].contains(field.key) { return monitorLabel(field.value) }
+        if ["scope", "kind", "validity", "state", "role", "result", "last_decision_reason", "reason", "modality", "affect"].contains(field.key) { return monitorLabel(field.value) }
         return field.value
     }
     private func fieldGrid(_ item: CompanionMonitorItem) -> some View {

@@ -27,13 +27,13 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 def main():
     sources = ['CompanionMonitorModels.swift', 'NativeCompanionMonitor.swift', 'NativePersonaMemory.swift', 'NativeCompanionStore.swift', 'NativeCompanionTransport.swift', 'NativeClaudeHelper.swift',
-               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift', 'NativeCompanionContext.swift', 'NativeCompanionInitiative.swift', 'NativeNotificationDatabase.swift', 'NativeNotificationPerception.swift', 'CompanionPathWatch.swift', 'CompanionFocusIntents.swift', 'NativeFocusPerception.swift', 'NativeDirectoryPerception.swift', 'NativeEnvironmentPerception.swift', 'NativeWindowPerception.swift', 'NativeInitiativeMonitor.swift']
+               'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift', 'NativeCompanionContext.swift', 'NativeCompanionInitiative.swift', 'NativeNotificationDatabase.swift', 'NativeNotificationPerception.swift', 'CompanionPathWatch.swift', 'CompanionFocusIntents.swift', 'NativeFocusPerception.swift', 'NativeDirectoryPerception.swift', 'NativeEnvironmentPerception.swift', 'NativeWindowPerception.swift', 'NativeInitiativeMonitor.swift', 'CompanionModelRouting.swift', 'NativeCompanionCognition.swift']
     unit = OUT / 'native-tests'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *[str(ROOT / 'App' / name) for name in sources],
-                    str(ROOT / 'Tests/CompanionInitiativeMonitorTests.swift'), str(ROOT / 'Tests/CompanionWindowTests.swift'), str(ROOT / 'Tests/CompanionEnvironmentTests.swift'), str(ROOT / 'Tests/CompanionFocusTests.swift'), str(ROOT / 'Tests/CompanionNotificationTests.swift'), str(ROOT / 'Tests/CompanionInitiativeTests.swift'), str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
+                    str(ROOT / 'Tests/CompanionCognitionTests.swift'), str(ROOT / 'Tests/CompanionInitiativeMonitorTests.swift'), str(ROOT / 'Tests/CompanionWindowTests.swift'), str(ROOT / 'Tests/CompanionEnvironmentTests.swift'), str(ROOT / 'Tests/CompanionFocusTests.swift'), str(ROOT / 'Tests/CompanionNotificationTests.swift'), str(ROOT / 'Tests/CompanionInitiativeTests.swift'), str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
-    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0, 'tryIntention': False, 'intentionProposed': False}
+    state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0, 'tryIntention': False, 'intentionProposed': False, 'roleModels': set(), 'archiveModels': set()}
 
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -43,6 +43,10 @@ def main():
             request = json.loads(self.rfile.read(int(self.headers['content-length'])))
             state['calls'] += 1
             system = '\n'.join(m.get('content', '') for m in request.get('messages', []) if m.get('role') == 'system')
+            if 'You consolidate one character' in system:
+                state['archiveModels'].add(request.get('model'))
+            elif 'TEST_CHARACTER_A' in system:
+                state['roleModels'].add(request.get('model'))
             names = [t.get('function', {}).get('name', t.get('name', '')) for t in request.get('tools', [])]
             state['tools'].update(names)
             state['prompts'].append(system)
@@ -123,6 +127,8 @@ def main():
         providers = {'fixture': {'name': 'Native protocol fixture', 'package': '@opencode/ai/providers/openai-compatible',
                                 'settings': {'baseURL': f'http://127.0.0.1:{server.server_port}/v1', 'apiKey': 'local-fixture'},
                                 'models': {'companion': {'name': 'Companion fixture', 'limit': {'context': 16000, 'output': 1000}, 'capabilities': {'tools': True, 'input': ['text'], 'output': ['text']}}}}}
+        providers['fixture']['models']['role-a'] = dict(providers['fixture']['models']['companion'], name='Role A fixture')
+        providers['fixture']['models']['archive'] = dict(providers['fixture']['models']['companion'], name='Archive fixture')
         (root / 'providers.json').write_text(json.dumps(providers))
         for role, text in [(A, 'TEST_CHARACTER_A. Warm Persona.'), (B, 'TEST_CHARACTER_B. Calm Persona.')]:
             path = root / 'characters' / role
@@ -130,8 +136,8 @@ def main():
             (path / 'persona.md').write_text(text)
         env = dict(os.environ, LITE2D_NATIVE_PROBE_ROOT=str(root), LITE2D_PROBE_PROVIDERS=str(root / 'providers.json'),
                    LITE2D_NODE=shutil.which('node') or '/missing/node')
-        config = {'enabled': True, 'intervalMinutes': 0, 'hourlyRequests': 12, 'model': 'fixture/companion',
-                  'characters': [{'id': role, 'name': role, 'enabled': True, 'visible': True} for role in [A, B]]}
+        config = {'enabled': True, 'intervalMinutes': 0, 'hourlyRequests': 12, 'model': 'fixture/companion', 'memoryModel': 'fixture/archive',
+                  'characters': [{'id': role, 'name': role, 'enabled': True, 'visible': True, 'model': 'fixture/role-a' if role == A else ''} for role in [A, B]]}
         all_events = []
 
         def launch():
@@ -188,6 +194,7 @@ def main():
             assert state['read'] and state['sent']
             assert state['tools'] and all(t.startswith('companion_') for t in state['tools']), state['tools']
             assert state['calls'] == 5, state['calls']
+            assert state['roleModels'] == {'role-a'}, state['roleModels']
             assert 'companion_web_search' in state['tools'], state['tools']
             send({'type': 'diagnostics'})
             diagnostics = until('diagnostics')['data']
@@ -290,6 +297,7 @@ def main():
             send({'type': 'daily-run', 'now': due + 1})
             done = until('daily.done', timeout=120)
             assert state['dailyCalls'] == 2, done
+            assert state['archiveModels'] == {'archive'}, state['archiveModels']
             assert all(job['status'] == 'completed' for job in done['data']['dailyArchives']), done
             send({'type': 'trigger', 'characterId': A})
             until('topic.end', timeout=75)
@@ -300,6 +308,12 @@ def main():
             send({'type': 'daily-run', 'now': due + 1})
             until('daily.done')
             assert state['dailyCalls'] == 2, 'A completed daily batch was generated twice'
+            config['characters'][0]['model'] = ''
+            send({'type': 'configure', 'config': config})
+            until('status')
+            send({'type': 'trigger', 'characterId': A})
+            until('topic.end', timeout=75)
+            assert state['roleModels'] == {'role-a', 'companion'}, state['roleModels']
         finally:
             child.stdin.close()
             child.wait(timeout=15)
@@ -313,7 +327,7 @@ def main():
         report = {'passed': True, 'upstreamCalls': state['calls'], 'toolCount': len(state['tools']), 'utterances': [e['text'] for e in all_events if e['type'] == 'utterance'],
                   'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True,
                   'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved'], 'actual2233IdentityRotation': identity_rotation,
-                  'dailyArchiveCalls': state['dailyCalls'], 'dailyRotationAndRecall': True}
+                  'dailyArchiveCalls': state['dailyCalls'], 'dailyRotationAndRecall': True, 'independentModelRouting': True}
         (OUT / 'native-protocol.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
     server.shutdown()

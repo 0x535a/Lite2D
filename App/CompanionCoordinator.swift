@@ -14,12 +14,13 @@ struct CompanionSourceSettings: Codable, Equatable {
 struct CompanionCharacterSettings: Codable, Equatable {
     var enabled = false
     var gaze = true
+    var model = ""
     var reactionMotionGroup: String?
     var avatarFile: String?
     var bubbleSide: CompanionBubbleSide = .left
     var groupID: UUID?
     var bubbleOffset: BubbleOffset?
-    enum CodingKeys: String, CodingKey { case enabled, gaze, reactionMotionGroup, bubbleOffset, avatarFile, bubbleSide, groupID }
+    enum CodingKeys: String, CodingKey { case enabled, gaze, model, reactionMotionGroup, bubbleOffset, avatarFile, bubbleSide, groupID }
     init(enabled: Bool = false, gaze: Bool = true, reactionMotionGroup: String? = nil, bubbleOffset: BubbleOffset? = nil) {
         self.enabled = enabled; self.gaze = gaze; self.reactionMotionGroup = reactionMotionGroup; self.bubbleOffset = bubbleOffset
     }
@@ -27,6 +28,7 @@ struct CompanionCharacterSettings: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         gaze = (try? c.decodeIfPresent(Bool.self, forKey: .gaze)) ?? true
+        model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
         reactionMotionGroup = try? c.decodeIfPresent(String.self, forKey: .reactionMotionGroup)
         bubbleSide = (try? c.decodeIfPresent(CompanionBubbleSide.self, forKey: .bubbleSide)) ?? .left
         groupID = try? c.decodeIfPresent(UUID.self, forKey: .groupID)
@@ -48,6 +50,7 @@ struct CompanionSettings: Codable {
     var hourlyRequests = 12
     var dailyConsolidationMinute = 240
     var model = ""
+    var memoryModel = ""
     var nodePath = ""
     var opencodePath = ""
     var codexPath = ""
@@ -55,7 +58,7 @@ struct CompanionSettings: Codable {
     var characters: [String: CompanionCharacterSettings] = [:]
     var groups: [CompanionGroupSettings] = []
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, perception, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, dailyConsolidationMinute, model, nodePath, opencodePath, codexPath, sources, characters, groups
+        case enabled, paused, perception, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, dailyConsolidationMinute, model, memoryModel, nodePath, opencodePath, codexPath, sources, characters, groups
     }
     init() {}
     init(from decoder: Decoder) throws {
@@ -69,6 +72,7 @@ struct CompanionSettings: Codable {
         hourlyRequests = (try? c.decodeIfPresent(Int.self, forKey: .hourlyRequests)) ?? 12
         dailyConsolidationMinute = min(1439, max(0, (try? c.decodeIfPresent(Int.self, forKey: .dailyConsolidationMinute)) ?? 240))
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
+        memoryModel = (try? c.decodeIfPresent(String.self, forKey: .memoryModel)) ?? ""
         nodePath = (try? c.decodeIfPresent(String.self, forKey: .nodePath)) ?? ""
         opencodePath = (try? c.decodeIfPresent(String.self, forKey: .opencodePath)) ?? ""
         codexPath = (try? c.decodeIfPresent(String.self, forKey: .codexPath)) ?? ""
@@ -511,12 +515,12 @@ final class CompanionCoordinator: ObservableObject {
         let characters: [[String: Any]] = manager.records.map { record in
             let config = character(record.settings.id)
             return ["id": record.settings.id.uuidString, "name": record.settings.localizedDisplayName,
-                    "enabled": config.enabled && hasPersona(record.settings.id), "gaze": config.gaze,
+                    "enabled": config.enabled && hasPersona(record.settings.id), "gaze": config.gaze, "model": config.model,
                     "visible": record.settings.isVisible && !manager.allHidden && !manager.sleeping && manager.isDisplayConnected(record) && record.error == nil]
         }
         let value: [String: Any] = ["enabled": settings.enabled, "paused": settings.paused || manager.sleeping,
             "webSearchEnabled": settings.webSearchEnabled, "perception": (try? CompanionProactiveCoding.object(settings.perception)) ?? [:],
-            "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model,
+            "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model, "memoryModel": settings.memoryModel,
             "dailyConsolidationMinute": settings.dailyConsolidationMinute, "sleeping": manager.sleeping,
             "presentationBusy": hasSpeech || !typingSpeakers.isEmpty || !pending.isEmpty,
             "sources": settings.sources.mapValues { ["enabled": $0.enabled] as [String: Any] }, "characters": characters]

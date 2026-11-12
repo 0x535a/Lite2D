@@ -93,6 +93,7 @@ final class CompanionSelfTest {
         let owner = a.uuidString
         _ = try store.ingestPersona(characterID: owner, markdown: String(contentsOf: c.personaURL(a), encoding: .utf8))
         for index in 0..<35 { _ = try store.memoryWrite(owner: owner, type: "fact", provenance: "inferred", content: "监控测试 / Monitor fixture \(index): separate evidence, time and source.") }
+        try store.saveCognition(CompanionCognitiveState(owner: owner, updatedAt: Date()))
         let seed = try store.recordDirectMemory(owner: owner, source: "experienced", eventID: "initiative-panel-fixture", content: "Synthetic future conversation agreement")
         let future = CompanionIntention(ownerCharacterId: owner, goal: "A future conversation", origin: .conversationMemory, topicKey: "panel-fixture", sourceMemoryId: seed["memoryId"] as? String, evidenceIds: [seed["memoryId"] as! String], expiresAt: Date().addingTimeInterval(600))
         _ = try store.proposeIntention(future)
@@ -145,7 +146,7 @@ final class CompanionSelfTest {
                 try capture(window, "memory-monitor-\(lang.rawValue)-\(dark ? "dark" : "light")")
             }
         }
-        for section in ["role_overview", "L0", "L1", "intentions", "outputs", "decisions", "L2", "L3", "L4", "L5", "views", "relations", "traits", "reflections", "growth", "legacy"] {
+        for section in ["role_overview", "L0", "L1", "cognition", "intentions", "outputs", "decisions", "L2", "L3", "L4", "L5", "views", "relations", "traits", "reflections", "growth", "legacy"] {
             model.navigate(owner: owner, section: section); try await waitForRead()
             model.layoutFrames = [:]
             let host = NSHostingController(rootView: CompanionHistoryView(companion: c, loadOnAppear: false, initialOwner: owner, initialSection: section)); host.sizingOptions = []

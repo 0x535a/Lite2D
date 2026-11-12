@@ -110,6 +110,7 @@ final class NativeCompanionStore {
         try monitorSchema()
         try dailySchema()
         try notificationSchema()
+        try cognitionSchema()
         try transaction { try proactiveSchema() }
         do {
             try execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED,owner_character_id UNINDEXED,content)")
@@ -410,6 +411,7 @@ final class NativeCompanionStore {
             try execute("DELETE FROM proactive_dependencies WHERE id IN (SELECT id FROM proactive_intentions WHERE owner=?)", [owner])
             try execute("DELETE FROM proactive_intentions WHERE owner=?", [owner])
             try execute("DELETE FROM proactive_outputs WHERE owner=?", [owner])
+            try execute("DELETE FROM cognitive_states WHERE owner=?", [owner])
             try execute("DELETE FROM proactive_opportunities WHERE owner=?", [owner])
             try dailyInvalidate(owner)
             try execute("DELETE FROM monitor_previews")
