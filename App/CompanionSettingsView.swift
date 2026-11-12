@@ -117,6 +117,9 @@ struct CompanionGeneralSections: View {
     func binding<T>(_ key: WritableKeyPath<CompanionSettings, T>) -> Binding<T> {
         Binding(get: { companion.settings[keyPath: key] }, set: { companion.settings[keyPath: key] = $0; companion.changed() })
     }
+    func perception<T>(_ key: WritableKeyPath<CompanionPerceptionSettings, T>) -> Binding<T> {
+        Binding(get: { companion.settings.perception[keyPath: key] }, set: { companion.settings.perception[keyPath: key] = $0; companion.changed() })
+    }
     var body: some View {
         Section {
             LabeledContent(L10n.text("companion.bubble_retention")) {
@@ -155,6 +158,24 @@ struct CompanionGeneralSections: View {
             }
             if let error = companion.error { Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
         } header: { Text(L10n.text("companion.section")) } footer: { Text(L10n.text("companion.scope_help")).fixedSize(horizontal: false, vertical: true) }
+        Section {
+            Picker(L10n.text("perception.mode"), selection: perception(\.mode)) {
+                Text(L10n.text("perception.off")).tag(CompanionProactiveMode.off)
+                Text(L10n.text("perception.shadow")).tag(CompanionProactiveMode.shadow)
+            }
+            Toggle(L10n.text("perception.workspace"), isOn: perception(\.workspace))
+            Toggle(L10n.text("perception.idle"), isOn: perception(\.idle))
+            Toggle(L10n.text("perception.power"), isOn: perception(\.power))
+            Toggle(L10n.text("perception.network"), isOn: perception(\.network))
+            Toggle(L10n.text("perception.share_activity"), isOn: perception(\.shareActivity))
+            ForEach(CompanionPerceptionSettings.sourceNames, id: \.self) { source in
+                if let state = companion.perceptionSources[source]?["state"] as? String {
+                    LabeledContent(L10n.text("perception." + source)) { Text(L10n.text("perception.state." + state)).foregroundStyle(.secondary) }
+                }
+            }
+        } header: { Text(L10n.text("perception.section")) } footer: {
+            Text(L10n.text("perception.help")).fixedSize(horizontal: false, vertical: true)
+        }
         Section {
             LabeledContent(L10n.text("companion.interval")) {
                 HStack {

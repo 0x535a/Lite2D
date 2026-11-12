@@ -42,6 +42,7 @@ struct CompanionSettings: Codable {
     var enabled = false
     var paused = false
     var webSearchEnabled = true
+    var perception = CompanionPerceptionSettings()
     var bubbleRetentionSeconds = 8
     var intervalMinutes = 30
     var hourlyRequests = 12
@@ -54,13 +55,14 @@ struct CompanionSettings: Codable {
     var characters: [String: CompanionCharacterSettings] = [:]
     var groups: [CompanionGroupSettings] = []
     enum CodingKeys: String, CodingKey {
-        case enabled, paused, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, dailyConsolidationMinute, model, nodePath, opencodePath, codexPath, sources, characters, groups
+        case enabled, paused, perception, webSearchEnabled, bubbleRetentionSeconds, intervalMinutes, hourlyRequests, dailyConsolidationMinute, model, nodePath, opencodePath, codexPath, sources, characters, groups
     }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)) ?? false
+        perception = (try? c.decodeIfPresent(CompanionPerceptionSettings.self, forKey: .perception)) ?? .init()
         webSearchEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .webSearchEnabled)) ?? true
         bubbleRetentionSeconds = min(max((try? c.decodeIfPresent(Int.self, forKey: .bubbleRetentionSeconds)) ?? 8, 1), 300)
         intervalMinutes = (try? c.decodeIfPresent(Int.self, forKey: .intervalMinutes)) ?? 30
@@ -92,6 +94,7 @@ final class CompanionCoordinator: ObservableObject {
     @Published var settings = CompanionSettings()
     @Published var runtimeState = "stopped"
     @Published var error: String?
+    @Published var perceptionSources: [String: [String: Any]] = [:]
     @Published var sources: [String: [String: Any]] = [:]
     @Published var openCodeService: [String: Any] = ["state": "disabled"]
     @Published var entries: [CompanionEntry] = []
@@ -428,6 +431,7 @@ final class CompanionCoordinator: ObservableObject {
             sources = event["sources"] as? [String: [String: Any]] ?? [:]; busy = event["busy"] as? Bool ?? false
             openCodeService = event["openCodeService"] as? [String: Any] ?? ["state": "disabled"]
             roleErrors = event["roleErrors"] as? [String: String] ?? [:]
+            perceptionSources = event["perception"] as? [String: [String: Any]] ?? [:]
             dailyArchives = event["dailyArchives"] as? [[String: Any]] ?? []
         }
         if type == "topic.start" { busy = true }
@@ -494,7 +498,7 @@ final class CompanionCoordinator: ObservableObject {
                     "visible": record.settings.isVisible && !manager.allHidden && !manager.sleeping && manager.isDisplayConnected(record) && record.error == nil]
         }
         let value: [String: Any] = ["enabled": settings.enabled, "paused": settings.paused || manager.sleeping,
-            "webSearchEnabled": settings.webSearchEnabled,
+            "webSearchEnabled": settings.webSearchEnabled, "perception": (try? CompanionProactiveCoding.object(settings.perception)) ?? [:],
             "intervalMinutes": settings.intervalMinutes, "hourlyRequests": settings.hourlyRequests, "model": settings.model,
             "dailyConsolidationMinute": settings.dailyConsolidationMinute, "sleeping": manager.sleeping,
             "sources": settings.sources.mapValues { ["enabled": $0.enabled] as [String: Any] }, "characters": characters]

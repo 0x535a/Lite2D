@@ -590,3 +590,24 @@
 "companion.daily.committed" = "記憶を保存済み・会話を準備中";
 "companion.daily.completed" = "完了";
 "companion.daily.invalidated" = "記憶の変更により無効";
+
+// Activity awareness
+"perception.section" = "アクティビティ認識";
+"perception.mode" = "モード";
+"perception.off" = "オフ";
+"perception.shadow" = "観察と記録";
+"perception.workspace" = "前面アプリの活動分類";
+"perception.idle" = "最後の入力からの時間";
+"perception.power" = "電源と温度の状態";
+"perception.network" = "ネットワーク経路の変化";
+"perception.share_activity" = "大まかな活動をキャラクターモデルに共有";
+"perception.help" = "各情報源は任意です。観察モードは判断を記録し、新しい会話を開始しません。共有するのは閲覧や執筆などの分類だけで、ウィンドウ名、プロジェクト名、本文は送りません。既存の会話は引き続き利用できます。";
+"perception.macos.session" = "ユーザーセッション";
+"perception.macos.workspace" = "前面での活動";
+"perception.macos.idle" = "入力の活発さ";
+"perception.macos.power" = "電源";
+"perception.macos.network" = "ネットワーク";
+"perception.state.available" = "利用可能";
+"perception.state.starting" = "起動中…";
+"perception.state.disabled" = "オフ";
+"perception.state.error" = "一時的に利用できません";

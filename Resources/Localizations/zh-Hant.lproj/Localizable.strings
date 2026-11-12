@@ -590,3 +590,24 @@
 "companion.daily.committed" = "記憶已儲存，準備新對話";
 "companion.daily.completed" = "已完成";
 "companion.daily.invalidated" = "記憶變更後已失效";
+
+// Activity awareness
+"perception.section" = "活動感知";
+"perception.mode" = "模式";
+"perception.off" = "關閉";
+"perception.shadow" = "觀察與記錄";
+"perception.workspace" = "前景活動類別";
+"perception.idle" = "距上次輸入時間";
+"perception.power" = "電源與熱狀態";
+"perception.network" = "網路路徑變化";
+"perception.share_activity" = "將宏觀活動類別提供給角色模型";
+"perception.help" = "各來源獨立可選。觀察模式記錄決策，不觸發新的對話。共享時僅傳送上網、寫作等宏觀類別，不傳送視窗標題、專案名稱或正文。原有角色對話繼續可用。";
+"perception.macos.session" = "使用者工作階段";
+"perception.macos.workspace" = "前景活動";
+"perception.macos.idle" = "輸入活躍度";
+"perception.macos.power" = "電源";
+"perception.macos.network" = "網路";
+"perception.state.available" = "可用";
+"perception.state.starting" = "正在啟動…";
+"perception.state.disabled" = "已關閉";
+"perception.state.error" = "暫時無法使用";

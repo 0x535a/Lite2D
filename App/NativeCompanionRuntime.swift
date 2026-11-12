@@ -47,6 +47,16 @@ actor NativeCompanionRuntime {
     private var roles: NativeCompanionRoleClient!
     private var broker: NativeCompanionBroker?
     private var config: CompanionObject = [:]
+    private var macPerception: NativeMacPerception?
+    private var perceptionSettings = CompanionPerceptionSettings()
+    private var perceptionStatus: [String: CompanionObject] = [:]
+    private var activityContext: CompanionActivityContext?
+    private var perceptionIdleSeconds: Double = 0
+    private var perceptionSessionAvailable = false
+    private var perceptionSleeping = false
+    private var perceptionSignatures: [String: (String, Date)] = [:]
+    private var perceptionConfiguration = UUID()
+    private var perceptionPruneAt = Date.distantPast
     private var tokens: [String: String] = [:]
     private var searches: [UUID: Task<String, Error>] = [:]
     private var sessions: [NativeObservedSession] = []
@@ -122,7 +132,7 @@ actor NativeCompanionRuntime {
     private var visible: [CompanionObject] { characters.filter { $0["enabled"] as? Bool == true && $0["visible"] as? Bool == true } }
     private func sourceEnabled(_ backend: String) -> Bool { enabled && NativeCompanionData.object(NativeCompanionData.object(config["sources"])[backend])["enabled"] as? Bool == true }
     private func status() {
-        emit("status", ["sources": sources, "openCodeService": openCodeService, "busy": topic != nil || dailyBusy, "roleErrors": roleErrors,
+        emit("status", ["perception": perceptionStatus, "sources": sources, "openCodeService": openCodeService, "busy": topic != nil || dailyBusy, "roleErrors": roleErrors,
             "dailyArchives": (try? store.rows("SELECT owner,status,end_at,error FROM daily_archives ORDER BY end_at DESC LIMIT 20")) ?? [],
             "nextIdle": nextIdle.isFinite ? nextIdle : NSNull()])
     }
@@ -137,6 +147,7 @@ actor NativeCompanionRuntime {
         let previousInterval = interval, previousEnabled = enabled, previousPaused = paused
         let old = Dictionary(uniqueKeysWithValues: NativeCompanionData.backends.map { ($0, sourceEnabled($0)) })
         config = next
+        await configurePerception()
         dailyCheckAt = .distantPast
         if !enabled || next["sleeping"] as? Bool == true { dailyTask?.cancel() }
         if next["webSearchEnabled"] as? Bool == false {
@@ -158,9 +169,83 @@ actor NativeCompanionRuntime {
         if !enabled || paused || topic?.participants.contains(where: { id in !visible.contains(where: { $0["id"] as? String == id }) }) == true || topic?.source.map({ !sourceEnabled($0) }) == true { stop(cancelArchive: false) }
         status()
     }
+    private func configurePerception() async {
+        let requestID = UUID(); perceptionConfiguration = requestID
+        let object = NativeCompanionData.object(config["perception"])
+        var settings = (try? CompanionProactiveCoding.decode(CompanionPerceptionSettings.self, NativeCompanionData.string(object))) ?? .init()
+        if !enabled { settings.mode = .off }
+        perceptionSettings = settings
+        var epochs: [String: Int] = [:]
+        for source in CompanionPerceptionSettings.sourceNames {
+            var policy = CompanionPerceptionPolicy()
+            policy.allowedCharacterIds = characters.filter { $0["enabled"] as? Bool == true }.compactMap { $0["id"] as? String }
+            policy.allowedUses = [.attention, .audit]
+            if settings.shareActivity && (source == "macos.workspace" || source == "macos.idle") {
+                policy.allowedUses.append(.activityContext); policy.remoteInferenceAllowed = true
+            }
+            if let effective = try? store.setPerceptionConsent(source: source, enabled: settings.enabled(source), policy: policy) {
+                if settings.enabled(source) { epochs[source] = effective.consentEpoch }
+                if perceptionStatus[source]?["consentEpoch"] as? Int != effective.consentEpoch || !settings.enabled(source) {
+                    perceptionStatus[source] = ["state": settings.enabled(source) ? "starting" : "disabled", "consentEpoch": effective.consentEpoch]
+                }
+            }
+        }
+        if settings.mode == .off || !settings.shareActivity { activityContext = nil }
+        if macPerception == nil {
+            macPerception = await MainActor.run { NativeMacPerception { [weak self] signal in Task { await self?.receiveMacSignal(signal) } } }
+        }
+        guard requestID == perceptionConfiguration, !stopped, let sensor = macPerception else { return }
+        let sleeping = config["sleeping"] as? Bool == true
+        await sensor.configure(settings, epochs: epochs, suspended: sleeping)
+    }
+    private func receiveMacSignal(_ signal: CompanionMacSignal) {
+        guard !stopped, ready, enabled, perceptionSettings.enabled(signal.source),
+              let granted = try? store.perceptionPolicy(signal.source), granted.consentEpoch == signal.epoch else { return }
+        let now = Date()
+        perceptionStatus[signal.source] = ["state": signal.health, "checkedAt": NativeCompanionData.iso(now), "consentEpoch": signal.epoch]
+        if let seconds = signal.idleSeconds { perceptionIdleSeconds = seconds }
+        if let available = signal.sessionAvailable { perceptionSessionAvailable = available }
+        if let sleeping = signal.sleeping { perceptionSleeping = sleeping }
+        if signal.source == "macos.idle", signal.subject == "active", activityContext?.category == .idle { activityContext = nil }
+        if let category = signal.category, granted.allowedUses.contains(.activityContext) {
+            activityContext = CompanionActivityContext(category: category, confidence: signal.confidence, observedAt: now, expiresAt: now.addingTimeInterval(300), source: signal.source, consentEpoch: signal.epoch)
+        }
+        let signature = signal.type + ":" + signal.subject + ":" + (signal.category?.rawValue ?? "")
+        if let previous = perceptionSignatures[signal.source], previous.0 == signature && now.timeIntervalSince(previous.1) < 240 {
+            status(); return
+        }
+        perceptionSignatures[signal.source] = (signature, now)
+        let revision = (store.get("perceptionRevision:" + signal.source) as? Int ?? 0) + 1
+        try? store.set("perceptionRevision:" + signal.source, revision)
+        var event = CompanionObservation(id: signal.source + ":current", source: signal.source, type: signal.type, observedAt: now, subject: signal.subject, expiresAt: now.addingTimeInterval(300))
+        event.revision = revision; event.policy = granted; event.confidence = signal.confidence; event.activityCategory = signal.category
+        do {
+            guard let eventID = try store.ingestPerception(event, now: now) else { return }
+            // Initial snapshots establish context; they never count as a fresh expression opportunity.
+            if !signal.initial, signal.type == "activity.idle_changed", signal.subject == "active" {
+                for character in visible.prefix(8) {
+                    let owner = character["id"] as! String
+                    guard let intention = try store.intentions(owner: owner).first(where: { !$0.state.terminal && $0.state != .needsReview && $0.expiresAt > now }) else { continue }
+                    let opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "return_to_activity", sourceEventIds: [eventID], relatedIntentionIds: [intention.id], topicKey: intention.topicKey,
+                        priority: intention.priority, intrusionCost: 0.25, notBefore: now, expiresAt: now.addingTimeInterval(120))
+                    _ = try store.saveOpportunity(opportunity, now: now)
+                    var gates = CompanionInterruptContext()
+                    gates.enabled = enabled; gates.manualPause = paused; gates.sleeping = perceptionSleeping; gates.sessionAvailable = perceptionSessionAvailable
+                    gates.outputBusy = topic != nil || dailyBusy; gates.idleSeconds = perceptionIdleSeconds
+                    gates.cooldown = NativeCompanionData.now() - lastTopic < 180000
+                    gates.budgetAvailable = (try store.requestCount()) < hourly
+                    try store.recordDecision(CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now))
+                }
+            }
+        } catch { perceptionStatus[signal.source] = ["state": "error", "reason": "event_rejected"] }
+        status()
+    }
     private func scheduleIdle() { nextIdle = interval > 0 ? NativeCompanionData.now() + interval * 60000 : .infinity }
     func tick() async {
         guard ready, !stopped, enabled else { return }
+        if Date() >= perceptionPruneAt {
+            try? store.pruneProactive(); perceptionPruneAt = Date().addingTimeInterval(60)
+        }
         if dailyBusy { return }
         if topic == nil, Date() >= dailyCheckAt, config["sleeping"] as? Bool != true {
             dailyCheckAt = Date().addingTimeInterval(15)
@@ -253,6 +338,10 @@ actor NativeCompanionRuntime {
         if let envelope { try store.execute("UPDATE deliveries SET status='delivering' WHERE id=?", [envelope["id"]]) }
         var context = input; context["topicId"] = topic.id; context["quotedEvidence"] = true; context["intent"] = prompt.turnIntent
         context["currentTime"] = NativeCompanionData.currentTime()
+        if let activity = activityContext, let policy = try? store.perceptionPolicy(activity.source),
+           policy.consentEpoch == activity.consentEpoch, policy.permits(id, use: .activityContext, remote: true) {
+            context["activity"] = activity.roleProjection(at: Date())
+        }
         if input["reason"] as? String == "manual_test" { context["manualTest"] = prompt.manualTest }
         let contextSince = max(store.get("memoryCutoff:\(id)") as? String ?? "", store.get("contextSince:\(id)") as? String ?? "")
         context["recentConversation"] = try store.history(16).filter { $0["type"] as? String == "utterance" && ($0["createdAt"] as? String ?? "") > contextSince }.map { ["from": $0["characterId"] ?? "", "text": $0["text"] ?? ""] }
@@ -447,6 +536,8 @@ actor NativeCompanionRuntime {
                 let jobs = try store.reflectionPreview(owner: id)
                 try store.audit(owner: id, operation: "user.reflection_preview", target: jobs.first?["id"] as? String ?? id, actor: "user", result: jobs.isEmpty ? "insufficient_evidence" : "completed")
                 emit("monitor.outcome", try CompanionMonitorCoding.object(CompanionMonitorOutcome(requestID: command["requestID"] as? String ?? "", operation: "reflect", owner: id, target: "", result: jobs.isEmpty ? "insufficient_evidence" : "completed")))
+            case "perception_history":
+                emit("perception.history", ["decisions": try store.proactiveReplay().map { try CompanionProactiveCoding.object($0) }, "sources": perceptionStatus])
             case "configure": await configure(NativeCompanionData.object(command["config"]))
             case "stop": stop()
             case "trigger":
@@ -600,6 +691,7 @@ actor NativeCompanionRuntime {
         timer?.cancel(); timer = nil; stop(); stopped = true; ready = false
         dailyTask?.cancel(); await dailyTask?.value; dailyTask = nil
         await serviceMonitor?.close(); serviceMonitor = nil
+        await macPerception?.stop(); macPerception = nil
         await observers.close(); await roles?.close()
         await topic?.task?.value
         broker?.close(); broker = nil; try? store?.exportNotes(); store = nil; rootLock = nil

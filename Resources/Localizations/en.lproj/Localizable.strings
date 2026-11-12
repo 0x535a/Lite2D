@@ -590,3 +590,24 @@
 "companion.daily.committed" = "Memories saved; preparing conversation";
 "companion.daily.completed" = "Completed";
 "companion.daily.invalidated" = "Invalidated after a memory change";
+
+// Activity awareness
+"perception.section" = "Activity awareness";
+"perception.mode" = "Mode";
+"perception.off" = "Off";
+"perception.shadow" = "Observe and record";
+"perception.workspace" = "Foreground activity category";
+"perception.idle" = "Time since last input";
+"perception.power" = "Power and thermal state";
+"perception.network" = "Network path changes";
+"perception.share_activity" = "Share broad activity with the character model";
+"perception.help" = "Sources are optional. Observation records decisions without starting new dialogue. Sharing sends only a broad category such as browsing or writing, without window titles, project names, or content. Existing companion dialogue remains available.";
+"perception.macos.session" = "User session";
+"perception.macos.workspace" = "Foreground activity";
+"perception.macos.idle" = "Input activity";
+"perception.macos.power" = "Power";
+"perception.macos.network" = "Network";
+"perception.state.available" = "Available";
+"perception.state.starting" = "Starting…";
+"perception.state.disabled" = "Off";
+"perception.state.error" = "Temporarily unavailable";

@@ -590,3 +590,24 @@
 "companion.daily.committed" = "记忆已保存，准备新会话";
 "companion.daily.completed" = "已完成";
 "companion.daily.invalidated" = "记忆变更后已失效";
+
+// Activity awareness
+"perception.section" = "活动感知";
+"perception.mode" = "模式";
+"perception.off" = "关闭";
+"perception.shadow" = "观察与记录";
+"perception.workspace" = "前台活动类别";
+"perception.idle" = "距上次输入时间";
+"perception.power" = "电源与热状态";
+"perception.network" = "网络路径变化";
+"perception.share_activity" = "将宏观活动类别提供给角色模型";
+"perception.help" = "各来源独立可选。观察模式记录决策，不触发新的对话。共享时只发送上网、写作等宏观类别，不发送窗口标题、项目名或正文。原有角色对话继续可用。";
+"perception.macos.session" = "用户会话";
+"perception.macos.workspace" = "前台活动";
+"perception.macos.idle" = "输入活跃度";
+"perception.macos.power" = "电源";
+"perception.macos.network" = "网络";
+"perception.state.available" = "可用";
+"perception.state.starting" = "正在启动…";
+"perception.state.disabled" = "已关闭";
+"perception.state.error" = "暂时不可用";
