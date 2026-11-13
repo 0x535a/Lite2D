@@ -124,6 +124,7 @@ struct CompanionHistoryView: View {
         case "conversation": return L10n.text("companion.conversation")
         case "public": return L10n.text("companion.public_memory")
         case "audit": return L10n.text("monitor.audit")
+        case "decisions": return L10n.text("monitor.decisions")
         default: return L10n.text("monitor.overview")
         }
     }
@@ -243,6 +244,15 @@ struct CompanionHistoryView: View {
                     }.frame(width: 170).onChange(of: model.query.sort) { _, _ in model.filterChanged() }
                 }
             }
+            if model.query.section == "decisions" {
+                Picker(L10n.text("monitor.category"), selection: $model.query.status) {
+                    Text(L10n.text("monitor.key_decisions")).tag("")
+                    Text(monitorLabel("admit")).tag("admit")
+                    Text(monitorLabel("cancel")).tag("cancel")
+                    Text(monitorLabel("defer_summary")).tag("defer_summary")
+                    Text(L10n.text("monitor.recent_defers")).tag("defer")
+                }.onChange(of: model.query.status) { _, _ in model.filterChanged() }
+            }
             if ["intentions", "outputs"].contains(model.query.section) {
                 filterPicker("monitor.status", $model.query.status, model.query.section == "intentions" ? ["", "pending", "ready", "executing", "deferred", "needsReview", "completed", "cancelled", "expired", "failed"] : ["", "queued", "presented", "completed", "dismissed", "cancelled", "failed", "deliveryUnknown"])
             }
@@ -297,7 +307,7 @@ struct CompanionHistoryView: View {
                 if item.status == "deleted" || item.status == "unavailable" {
                     Text(L10n.text(item.status == "deleted" ? "monitor.deleted_help" : "monitor.unavailable_help")).foregroundStyle(.secondary)
                 } else if !item.content.isEmpty {
-                    Text(item.kind == "decision" ? item.content.split(separator: ",").map { monitorLabel($0.trimmingCharacters(in: .whitespaces)) }.joined(separator: " · ") : item.content).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    Text(["decision", "defer_summary"].contains(item.kind) ? item.content.split(separator: ",").map { monitorLabel($0.trimmingCharacters(in: .whitespaces)) }.joined(separator: " · ") : item.content).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
                 }
                 if item.kind == "working" { Text(L10n.text("monitor.working_help")).foregroundStyle(.secondary) }
                 if item.kind == "audit" { Text(L10n.text("monitor.audit_help")).foregroundStyle(.secondary) }

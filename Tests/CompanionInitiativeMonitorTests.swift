@@ -37,7 +37,7 @@ enum CompanionInitiativeMonitorTests {
         var conflict = false
         do { _ = try store.monitorCommit(stale.id) } catch { conflict = true }
         try check(conflict, "Management rejects a goal preview after its runtime state changes")
-        let now = Date(), opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "interest", sourceEventIds: [], topicKey: "decision", priority: 0.9, intrusionCost: 0.1, notBefore: Date(), expiresAt: Date().addingTimeInterval(30))
+        let now = Date(), opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "interest", sourceEventIds: [], topicKey: "decision", priority: 0.9, intrusionCost: 0.1, notBefore: now, expiresAt: now.addingTimeInterval(30))
         var context = CompanionInterruptContext(); context.idleSeconds = 30
         let decision = CompanionArbiter.decide(opportunity, context: context, mode: .shadow, at: now)
         try store.recordDecision(decision)

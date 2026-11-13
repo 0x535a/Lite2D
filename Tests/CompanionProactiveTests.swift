@@ -38,7 +38,7 @@ enum CompanionProactiveTests {
         try auditRestarted.recordDecision(CompanionArbiter.decide(auditOpportunity, context: auditContext, mode: .live, at: now.addingTimeInterval(60)))
         let repeated = try audit.proactiveReplay()
         try check(repeated.count == 1 && repeated[0].id == first.id && repeated[0].decidedAt == now && repeated[0].lastEvaluatedAt == now.addingTimeInterval(60) && repeated[0].evaluationCount == 2, "Identical deferred evaluations coalesce across restart with first/last timestamps and a bounded count")
-        var auditQuery = CompanionMonitorQuery(); auditQuery.section = "decisions"
+        var auditQuery = CompanionMonitorQuery(); auditQuery.section = "decisions"; auditQuery.status = "defer"
         let auditPage = try audit.monitorPage(auditQuery, requestID: "coalesced", owners: [owner])
         try check(auditPage.items.first?.fields.contains { $0.key == "evaluation_count" && $0.value == "2" } == true, "Decision management exposes repeated evaluations instead of duplicating rows")
         auditContext.focusUnknown = true

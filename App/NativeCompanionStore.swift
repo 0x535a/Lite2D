@@ -413,6 +413,7 @@ final class NativeCompanionStore {
             try execute("DELETE FROM proactive_outputs WHERE owner=?", [owner])
             try execute("DELETE FROM cognitive_states WHERE owner=?", [owner])
             try execute("DELETE FROM proactive_opportunities WHERE owner=?", [owner])
+            try execute("DELETE FROM proactive_defer_summaries WHERE owner=?", [owner])
             try dailyInvalidate(owner)
             try execute("DELETE FROM monitor_previews")
             try execute("UPDATE memory_items SET status='deleted',content='',evidence_ids='[]',updated_at=? WHERE owner_character_id=?", [NativeCompanionData.iso(), owner])

@@ -746,9 +746,12 @@
 
 "perception.hours" = "{0} hours";
 
-"perception.audit_retention_help" = "Applies to local initiative decisions; cleanup runs at least once per minute while Companion is active. Conversation history, memories and future goals are managed separately.";
+"perception.audit_retention_help" = "Applies to key decisions and deferred summaries. Raw deferral diagnostics are kept for at most 1 hour; cleanup runs at least once per minute while Companion is active. Memories and future goals are managed separately.";
 
 "monitor.value.focus_unknown" = "App Focus state is not yet confirmed";
 "monitor.value.evaluation_count" = "Matching evaluations";
 "monitor.value.first_decided_at" = "First evaluated";
 "monitor.value.last_evaluated_at" = "Last evaluated";
+"monitor.key_decisions" = "Key decisions";
+"monitor.recent_defers" = "Recent deferrals (diagnostics, 1 hour)";
+"monitor.value.defer_summary" = "Deferred activity summary";

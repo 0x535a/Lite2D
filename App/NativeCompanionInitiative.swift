@@ -97,7 +97,7 @@ extension NativeCompanionStore {
             for row in try rows("SELECT id FROM deliveries") {
                 try invalidateProactiveDependency(kind: "evidence", id: "delivery:\(row["id"]!)", reason: "history_cleared")
             }
-            for table in ["events", "deliveries", "daily_receipts", "proactive_outputs", "proactive_decisions", "proactive_opportunities", "monitor_previews"] {
+            for table in ["events", "deliveries", "daily_receipts", "proactive_outputs", "proactive_decisions", "proactive_defer_summaries", "proactive_opportunities", "monitor_previews"] {
                 try execute("DELETE FROM \(table)")
             }
             try execute("DELETE FROM proactive_dependencies WHERE kind IN ('output','opportunity')")

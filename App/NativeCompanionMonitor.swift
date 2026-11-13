@@ -99,6 +99,7 @@ extension NativeCompanionStore {
         if kind == "intention", let row = try rows("SELECT * FROM proactive_intentions WHERE id=? AND owner=?", [id, owner]).first { return try monitorIntention(row) }
         if kind == "output", let row = try rows("SELECT * FROM proactive_outputs WHERE id=? AND owner=?", [id, owner]).first { return try monitorOutput(row) }
         if kind == "decision", let row = try rows("SELECT * FROM proactive_decisions WHERE id=? AND json_extract(payload,'$.characterId')=?", [id, owner]).first { return try monitorDecision(row) }
+        if kind == "defer_summary", let row = try rows("SELECT * FROM proactive_defer_summaries WHERE id=? AND owner=?", [id, owner]).first { return try monitorDeferredSummary(row) }
         if kind == "opportunity", let row = try rows("SELECT * FROM proactive_opportunities WHERE id=? AND owner=?", [id, owner]).first {
             var item = CompanionMonitorItem(id: id, kind: kind, owner: owner, title: "opportunity")
             item.status = row["state"] as? String ?? ""; item.content = row["payload"] as? String ?? ""; return item

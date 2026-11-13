@@ -40,7 +40,16 @@ extension NativeCompanionStore {
             if !query.status.isEmpty { sql += " AND status=?"; args.append(query.status) }
             if !query.search.isEmpty { sql += " AND json_extract(payload,'$.text') LIKE ?"; args.append("%" + query.search + "%") }
         case "decisions":
+            if query.status == "defer_summary" {
+                sql = "SELECT * FROM proactive_defer_summaries WHERE 1=1"; order = "last_at"
+                if !query.owner.isEmpty { sql += " AND owner=?"; args.append(query.owner) }
+                if !query.search.isEmpty { sql += " AND reasons LIKE ?"; args.append("%" + query.search + "%") }
+                break
+            }
             sql = "SELECT * FROM proactive_decisions WHERE 1=1"; order = "at"
+            if query.status.isEmpty { sql += " AND json_extract(payload,'$.action')!='defer'" }
+            else if ["admit", "cancel", "defer"].contains(query.status) { sql += " AND json_extract(payload,'$.action')=?"; args.append(query.status) }
+            else { return result }
             if !query.owner.isEmpty { sql += " AND json_extract(payload,'$.characterId')=?"; args.append(query.owner) }
             if !query.search.isEmpty { sql += " AND payload LIKE ?"; args.append("%" + query.search + "%") }
         default: return result
@@ -50,9 +59,20 @@ extension NativeCompanionStore {
         result.items = try rows(sql + " ORDER BY \(order) \(direction),id \(direction) LIMIT ? OFFSET ?", args + [query.pageSize, query.page * query.pageSize]).map { row in
             if query.section == "intentions" { return try monitorIntention(row) }
             if query.section == "outputs" { return try monitorOutput(row) }
+            if query.status == "defer_summary" { return try monitorDeferredSummary(row) }
             return try monitorDecision(row)
         }
         return result
+    }
+    func monitorDeferredSummary(_ row: CompanionObject) throws -> CompanionMonitorItem {
+        let reasons = try CompanionProactiveCoding.decode([String].self, row["reasons"] as! String)
+        var item = CompanionMonitorItem(id: row["id"] as! String, kind: "defer_summary", owner: row["owner"] as! String, title: "defer_summary")
+        item.status = row["mode"] as! String; item.content = reasons.joined(separator: ", ")
+        item.at = NativeCompanionData.iso(Date(timeIntervalSince1970: row["last_at"] as! Double))
+        item.fields = [.init(key: "evaluation_count", value: String(row["sample_count"] as! Int)),
+                       .init(key: "first_decided_at", value: NativeCompanionData.iso(Date(timeIntervalSince1970: row["first_at"] as! Double))),
+                       .init(key: "last_evaluated_at", value: item.at), .init(key: "policy_revision", value: row["policy_revision"] as! String)]
+        return item
     }
     func monitorOutput(_ row: CompanionObject) throws -> CompanionMonitorItem {
         let value = try CompanionProactiveCoding.decode(CompanionOutputReceipt.self, row["payload"] as! String)

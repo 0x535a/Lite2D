@@ -487,6 +487,7 @@ private actor ServiceFixture {
             try await CompanionEnvironmentTests.directories(root: root, check: check)
             try await CompanionEnvironmentTests.environment(check: check)
             try await CompanionFocusTests.run(check: check)
+            try CompanionDeferAuditTests.run(root: root, check: check)
             try CompanionNotificationTests.run(root: root, check: check)
             try await CompanionNotificationTests.runLifecycle(root: root, check: check)
             try await CompanionInitiativeTests.run(root: root, prompt: promptFile, helper: script, node: node, executable: executable, check: check)

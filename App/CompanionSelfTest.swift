@@ -97,7 +97,7 @@ final class CompanionSelfTest {
         let seed = try store.recordDirectMemory(owner: owner, source: "experienced", eventID: "initiative-panel-fixture", content: "Synthetic future conversation agreement")
         let future = CompanionIntention(ownerCharacterId: owner, goal: "A future conversation", origin: .conversationMemory, topicKey: "panel-fixture", sourceMemoryId: seed["memoryId"] as? String, evidenceIds: [seed["memoryId"] as! String], expiresAt: Date().addingTimeInterval(600))
         _ = try store.proposeIntention(future)
-        let now = Date(), chance = CompanionOpportunity(ownerCharacterId: owner, kind: "fixture", sourceEventIds: [], topicKey: "panel-decision", priority: 0.8, intrusionCost: 0.2, notBefore: Date(), expiresAt: Date().addingTimeInterval(30))
+        let now = Date(), chance = CompanionOpportunity(ownerCharacterId: owner, kind: "fixture", sourceEventIds: [], topicKey: "panel-decision", priority: 0.8, intrusionCost: 0.2, notBefore: now, expiresAt: now.addingTimeInterval(30))
         var timing = CompanionInterruptContext(); timing.idleSeconds = 30
         try store.recordDecision(CompanionArbiter.decide(chance, context: timing, mode: .shadow, at: now))
         let fixtureOutput = CompanionOutputReceipt(characterId: owner, topicId: UUID().uuidString, modality: .bubble, text: "Synthetic expression receipt")

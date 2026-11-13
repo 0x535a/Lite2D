@@ -746,9 +746,12 @@
 
 "perception.hours" = "{0} 小時";
 
-"perception.audit_retention_help" = "僅控制本地主動性決策紀錄；陪伴執行時每分鐘清理。交流歷史、記憶與未來目標分別管理。";
+"perception.audit_retention_help" = "適用於重要決策和延期彙總。延期原始診斷最多保留 1 小時；陪伴服務執行時至少每分鐘清理一次。記憶與未來目標分開管理。";
 
 "monitor.value.focus_unknown" = "本 App 專注狀態尚未確認";
 "monitor.value.evaluation_count" = "相同評估次數";
 "monitor.value.first_decided_at" = "首次評估時間";
 "monitor.value.last_evaluated_at" = "最近評估時間";
+"monitor.key_decisions" = "重要決策";
+"monitor.recent_defers" = "近期延期（診斷，1 小時）";
+"monitor.value.defer_summary" = "延期彙總";

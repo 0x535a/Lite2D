@@ -14,12 +14,16 @@ extension NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS proactive_decisions(id TEXT PRIMARY KEY,subject_id TEXT NOT NULL,at REAL NOT NULL,payload TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS proactive_decisions_at ON proactive_decisions(at)",
             "CREATE INDEX IF NOT EXISTS proactive_decisions_subject_at ON proactive_decisions(subject_id,at)",
+            "CREATE INDEX IF NOT EXISTS proactive_decisions_action_at ON proactive_decisions(json_extract(payload,'$.action'),at)",
+            "CREATE TABLE IF NOT EXISTS proactive_defer_summaries(id TEXT PRIMARY KEY,owner TEXT NOT NULL,mode TEXT NOT NULL,policy_revision TEXT NOT NULL,bucket REAL NOT NULL,reasons TEXT NOT NULL,sample_count INTEGER NOT NULL,first_at REAL NOT NULL,last_at REAL NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS proactive_defer_summaries_last ON proactive_defer_summaries(last_at)",
             "CREATE TABLE IF NOT EXISTS proactive_outputs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,status TEXT NOT NULL,at REAL NOT NULL,payload TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS perception_cursors(source TEXT PRIMARY KEY,generation TEXT NOT NULL,cursor TEXT NOT NULL,epoch INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS proactive_loop_intentions(memory_id TEXT PRIMARY KEY,owner TEXT NOT NULL,intention_id TEXT NOT NULL UNIQUE)",
             "CREATE TABLE IF NOT EXISTS proactive_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
             "INSERT OR IGNORE INTO proactive_metadata VALUES ('schema','1')"
         ] { try execute(sql) }
+        try migrateDeferredAudit()
         // In-flight execution cannot be called complete after an unclean shutdown.
         for row in try rows("SELECT payload FROM proactive_intentions WHERE state='executing'") {
             var intention = try CompanionProactiveCoding.decode(CompanionIntention.self, row["payload"] as! String)
@@ -203,6 +207,10 @@ extension NativeCompanionStore {
     }
     func recordDecision(_ decision: CompanionDecisionRecord) throws {
         try transaction {
+            if decision.action == "defer" {
+                try accumulateDeferredDecision(decision)
+                try trimDeferredSummaries()
+            }
             if decision.action == "defer",
                let text = try rows("SELECT payload FROM proactive_decisions WHERE subject_id=? ORDER BY at DESC,rowid DESC LIMIT 1", [decision.subjectId]).first?["payload"] as? String,
                var previous = try? CompanionProactiveCoding.decode(CompanionDecisionRecord.self, text),
@@ -217,6 +225,9 @@ extension NativeCompanionStore {
                 return
             }
             try execute("INSERT INTO proactive_decisions VALUES (?,?,?,?)", [decision.id, decision.subjectId, decision.decidedAt.timeIntervalSince1970, try CompanionProactiveCoding.encode(decision)])
+            if decision.action == "defer" {
+                try execute("DELETE FROM proactive_decisions WHERE id IN (SELECT id FROM proactive_decisions WHERE json_extract(payload,'$.action')='defer' ORDER BY at DESC,rowid DESC LIMIT -1 OFFSET ?)", [CompanionDeferAudit.rawLimit])
+            }
             try execute("DELETE FROM proactive_decisions WHERE id IN (SELECT id FROM proactive_decisions ORDER BY at DESC LIMIT -1 OFFSET 10000)")
         }
     }
@@ -252,6 +263,7 @@ extension NativeCompanionStore {
             try execute("UPDATE proactive_intentions SET state='expired' WHERE expires_at<=? AND state IN ('pending','ready','deferred','needsReview')", [time])
             try execute("DELETE FROM perception_events WHERE purge_at<=?", [time])
             try execute("DELETE FROM proactive_decisions WHERE at<?", [time - Double(min(168, max(1, auditRetentionHours))) * 3600])
+            try pruneDeferredAudit(now: now, retentionHours: auditRetentionHours)
             try execute("DELETE FROM proactive_outputs WHERE at<? AND status IN ('completed','dismissed','cancelled','failed','deliveryUnknown','presented')", [time - 30 * 86400])
             try execute("DELETE FROM proactive_opportunities WHERE expires_at<?", [time - 86400])
             try execute("DELETE FROM proactive_intentions WHERE expires_at<? AND state IN ('completed','expired','cancelled','failed')", [time - 30 * 86400])

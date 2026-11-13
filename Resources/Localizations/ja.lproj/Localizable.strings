@@ -746,9 +746,12 @@
 
 "perception.hours" = "{0} 時間";
 
-"perception.audit_retention_help" = "ローカルの自発的な判断ログに適用します。コンパニオンの実行中は毎分整理します。会話履歴、記憶、今後の目標は個別に管理します。";
+"perception.audit_retention_help" = "主要な判断と延期の集計に適用します。延期の元の診断記録は最大1時間保持し、コンパニオンの動作中は少なくとも毎分整理します。記憶と将来の目標は個別に管理します。";
 
 "monitor.value.focus_unknown" = "アプリの集中状態をまだ確認できません";
 "monitor.value.evaluation_count" = "同じ評価の回数";
 "monitor.value.first_decided_at" = "最初の評価日時";
 "monitor.value.last_evaluated_at" = "最後の評価日時";
+"monitor.key_decisions" = "主要な判断";
+"monitor.recent_defers" = "最近の延期（診断、1時間）";
+"monitor.value.defer_summary" = "延期の集計";
