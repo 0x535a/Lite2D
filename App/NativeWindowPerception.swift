@@ -60,6 +60,7 @@ enum CompanionWindowClassifier {
     private var reading = false
     private var pendingRefresh = false
     init(sink: @escaping (CompanionMacSignal) -> Void) { self.sink = sink }
+    static var hasAccess: Bool { AXIsProcessTrusted() }
     static func requestAccess() {
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
     }
@@ -104,7 +105,7 @@ enum CompanionWindowClassifier {
             clearObserver(); query?.cancel(); queryNonce = UUID()
             sink(.init(source: "macos.window", type: "activity.window_category", category: .unknown, confidence: 0, subject: "no_allowed_window", epoch: epoch)); return
         }
-        guard AXIsProcessTrusted() else {
+        guard Self.hasAccess else {
             clearObserver(); sink(.init(source: "macos.window", type: "activity.window_category", category: .unknown, confidence: 0, subject: "window_access_denied", health: "permission_denied", epoch: epoch)); return
         }
         let pid = app.processIdentifier, expected = generation, nonce = UUID()

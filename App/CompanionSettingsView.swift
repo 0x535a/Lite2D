@@ -192,7 +192,9 @@ struct CompanionGeneralSections: View {
             Toggle(L10n.text("perception.window"), isOn: perception(\.window))
             if companion.settings.perception.window {
                 TextField(L10n.text("perception.window_apps"), text: perception(\.windowApps))
-                Button(L10n.text("perception.window_authorize")) { companion.authorizeWindowPerception() }
+                if !NativeWindowPerception.hasAccess {
+                    Button(L10n.text("perception.window_authorize")) { companion.authorizeWindowPerception() }
+                }
                 Text(L10n.text("perception.window_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Toggle(L10n.text("perception.workspace"), isOn: perception(\.workspace))
@@ -212,8 +214,12 @@ struct CompanionGeneralSections: View {
             if companion.settings.perception.notifications {
                 TextField(L10n.text("perception.notification_apps"), text: perception(\.notificationApps))
                 Toggle(L10n.text("perception.notification_content"), isOn: perception(\.notificationContent))
-                Button(L10n.text("perception.fda_settings")) {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
+                // FDA has no public global status API. Only offer permission repair
+                // when the actual notification reader reports denied access.
+                if companion.perceptionSources[NativeNotificationPerception.source]?["state"] as? String == "permission_denied" {
+                    Button(L10n.text("perception.fda_settings")) {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
+                    }
                 }
                 Text(L10n.text("perception.notification_help")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let info = companion.perceptionSources[NativeNotificationPerception.source], let count = info["observed"] as? Int {
