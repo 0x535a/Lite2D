@@ -2,6 +2,25 @@ cmake_minimum_required(VERSION 3.25)
 project(Lite2D LANGUAGES C CXX OBJCXX Swift)
 find_program(LITE2D_NODE node REQUIRED)
 set(LITE2D_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Local app bundle output directory")
+set(LITE2D_CODESIGN_IDENTITY "" CACHE STRING "Pinned signing certificate SHA-1; otherwise read environment or .local/codesign-identity")
+option(LITE2D_ALLOW_ADHOC_SIGNING "Allow explicitly selected ad-hoc signing for disposable builds" OFF)
+set(LITE2D_SIGN_OPTIONS)
+if(LITE2D_CODESIGN_IDENTITY)
+  list(APPEND LITE2D_SIGN_OPTIONS --identity "${LITE2D_CODESIGN_IDENTITY}")
+endif()
+if(LITE2D_ALLOW_ADHOC_SIGNING)
+  list(APPEND LITE2D_SIGN_OPTIONS --allow-adhoc)
+endif()
+# Validate before compiling. A missing/expired key must not silently change TCC identity.
+execute_process(COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sign_app.py"
+  --check-identity ${LITE2D_SIGN_OPTIONS} OUTPUT_VARIABLE LITE2D_SIGNING_CONFIG COMMAND_ERROR_IS_FATAL ANY)
+# Bake the resolved identity into the build command, so changing an environment
+# setting or local pin causes Ninja to rebuild/re-sign instead of keeping an old signature.
+string(JSON LITE2D_EFFECTIVE_SIGNER GET "${LITE2D_SIGNING_CONFIG}" identity)
+set(LITE2D_SIGN_OPTIONS --identity "${LITE2D_EFFECTIVE_SIGNER}")
+if(LITE2D_ALLOW_ADHOC_SIGNING)
+  list(APPEND LITE2D_SIGN_OPTIONS --allow-adhoc)
+endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_OBJCXX_STANDARD 17)
 set(CMAKE_Swift_LANGUAGE_VERSION 5)
@@ -78,7 +97,13 @@ add_custom_command(TARGET Lite2D POST_BUILD
     --build "${CMAKE_BINARY_DIR}/app-intents"
     --resources "$<TARGET_BUNDLE_DIR:Lite2D>/Contents/Resources"
     --deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}"
-  COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Lite2D>")
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sign_app.py"
+    --app "$<TARGET_BUNDLE_DIR:Lite2D>" ${LITE2D_SIGN_OPTIONS}
+  VERBATIM)
+set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sign_app.py")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.local/codesign-identity")
+  set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/.local/codesign-identity")
+endif()
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_app_intents.py")
 file(GLOB COMPANION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Companion/*.mjs" "${CMAKE_CURRENT_SOURCE_DIR}/Companion/package-lock.json")
 set_property(TARGET Lite2D APPEND PROPERTY LINK_DEPENDS ${COMPANION_SOURCES})

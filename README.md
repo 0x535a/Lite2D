@@ -8,7 +8,7 @@ macOS 原生菜单栏 Live2D 播放器。Swift + AppKit + OpenGL，支持多个�
 
 ## 下载
 
-[Lite2D v1.5.1 · macOS ARM64](https://gitlab.com/stephenzeng/lite2d/-/releases/v1.5.1) · [GitHub 镜像](https://github.com/0x535a/Lite2D/releases/tag/v1.5.1) · [更新日志](docs/releases/v1.5.1.md)。应用包不附模型或个人配置，当前为 ad-hoc 签名、未公证；自有代码和第三方组件的许可说明随包提供。
+[Lite2D v1.5.1 · macOS ARM64](https://gitlab.com/stephenzeng/lite2d/-/releases/v1.5.1) · [GitHub 镜像](https://github.com/0x535a/Lite2D/releases/tag/v1.5.1) · [更新日志](docs/releases/v1.5.1.md)。应用包不附模型或个人配置，该下载版本为 ad-hoc 签名、未公证；自有代码和第三方组件的许可说明随包提供。
 
 ## 使用
 
@@ -65,6 +65,14 @@ Cubism Native R5/Core 用于 `.model3.json` + `.moc3`。旧版 `.moc` 使用进�
 - 角色未出现：检查实例显示勾选与全局隐藏状态，再看绑定显示器是否离线/未绑定；可从菜单显式换屏。
 - 模型报错：只影响对应实例，检查必要二进制/纹理路径；更换失败保留旧实例，其他实例继续运行。
 - 角色太大或位置不合适：在实例菜单缩小或重置绑定屏内位置，不需要 Dock 图标。
+
+## 本地构建与签名
+
+准备本地运行库后，使用 `sh scripts/build.sh` 构建。日常安装包需要固定证书签名：先运行 `security find-identity -v -p codesigning`，将所选有效代码签名身份的完整 SHA-1 指纹写入 `.local/codesign-identity`，或通过 `LITE2D_CODESIGN_IDENTITY` 环境变量指定；CMake 的同名缓存变量优先。配置、证书、私钥和诊断输出保留在 Git 外，仓库不预置个人身份。仅本机开发可使用 Apple Development；公开分发应另行配置 Developer ID Application 和公证。
+
+构建在证书或私钥不可用时停止，不自动换证书或回退临时签名。临时构建必须显式选择 `LITE2D_CODESIGN_IDENTITY=-` 并开启 CMake 选项 `LITE2D_ALLOW_ADHOC_SIGNING`；不要用这类构建覆盖日常安装包。手动验收脚本使用独立 Bundle ID。
+
+macOS 权限记录会校验应用代码身份。ad-hoc 的默认身份依赖代码哈希，更新后可能需要重新授权；保持固定证书和 Bundle ID 能提供跨构建稳定的身份要求。从 ad-hoc 切换到证书签名仍可能需要重新授权。`python3 scripts/test_code_signing.py` 检查不同签名内容的身份要求一致、双向校验通过，以及缺失证书与未经明确允许的临时签名被拒绝；实际 TCC 授权跨更新保留仍需系统场景验证。
 
 本项目自有代码采用 [MIT License](LICENSE)，第三方依赖及其衍生部分不因此改为 MIT。Live2D 对可扩展应用另有发布许可要求；源码公开也不能当作取得该许可的证明，公开仓库或发布 `.app` 前应核实适用要求。
 
