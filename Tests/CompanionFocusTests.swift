@@ -1,18 +1,22 @@
 import Foundation
+import AppIntents
 
 private actor FocusFixture {
     var quiet = false
     var failing = false
     var calls = 0
+    var missing = false
     func current() throws -> CompanionFocusResult {
         calls += 1
+        if missing { throw SetFocusFilterIntentError.notFound }
         if failing { throw CompanionNotificationError.temporarilyUnavailable }
         return .init(quiet: quiet, state: "available")
     }
-    func set(quiet: Bool, failing: Bool = false) { self.quiet = quiet; self.failing = failing }
+    func set(quiet: Bool, failing: Bool = false, missing: Bool = false) { self.quiet = quiet; self.failing = failing; self.missing = missing }
 }
 @MainActor enum CompanionFocusTests {
     static func run(check: (Bool, String) throws -> Void) async throws {
+        try check(!CompanionQuietFocusFilter().quiet, "A default Focus filter instance cannot silence an app with no active configuration")
         let suite = "Lite2D.FocusFixture." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -42,6 +46,11 @@ private actor FocusFixture {
         NotificationCenter.default.post(name: Notification.Name("Lite2D.CompanionFocusChanged"), object: nil)
         try await Task.sleep(nanoseconds: 900_000_000)
         try check(signals.last?.focusQuiet == true && signals.last?.health == "temporarily_unavailable", "An unavailable Focus service is unknown and quiet, never falsely reported as inactive")
+        try check(signals.last?.subject == "app_filter_unknown", "Failed Focus reads do not claim that an actual quiet filter is active")
+        await fixture.set(quiet: false, missing: true)
+        NotificationCenter.default.post(name: Notification.Name("Lite2D.CompanionFocusChanged"), object: nil)
+        try await Task.sleep(nanoseconds: 900_000_000)
+        try check(signals.last?.focusQuiet == false && signals.last?.health == "available", "No active Focus configuration clears quiet instead of retaining an old gate")
         defaults.set(["id": UUID().uuidString, "category": "media", "at": Date().addingTimeInterval(-301).timeIntervalSince1970], forKey: "CompanionExplicitActivity")
         CompanionActivityIntent.purgeExpiredInput(defaults: defaults)
         try check(defaults.dictionary(forKey: "CompanionExplicitActivity") == nil, "Expired explicit activity is physically cleared from the short-term App cache")

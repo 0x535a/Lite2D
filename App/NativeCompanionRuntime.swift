@@ -65,6 +65,7 @@ actor NativeCompanionRuntime {
     private var audioActive = false
     private var energyConstrained = false
     private var focusQuiet = false
+    private var focusKnown = true
     private var perceptionSettings = CompanionPerceptionSettings()
     private var perceptionStatus: [String: CompanionObject] = [:]
     private var activityContext: CompanionActivityContext?
@@ -206,7 +207,7 @@ actor NativeCompanionRuntime {
         if !enabled { settings.mode = .off; settings.focus = false }
         let wasFocusEnabled = perceptionSettings.focus
         perceptionSettings = settings
-        if settings.focus && !wasFocusEnabled { focusQuiet = true }
+        if settings.focus && !wasFocusEnabled { focusQuiet = true; focusKnown = false }
         var epochs: [String: Int] = [:]
         for source in CompanionPerceptionSettings.sourceNames {
             var policy = CompanionPerceptionPolicy()
@@ -239,7 +240,7 @@ actor NativeCompanionRuntime {
         if settings.mode == .off || !settings.shareActivity { activityContext = nil }
         if !settings.idle { perceptionIdleSeconds = 0 }
         if settings.mode == .off { perceptionSessionAvailable = false }
-        if !settings.focus { focusQuiet = false }
+        if !settings.focus { focusQuiet = false; focusKnown = true }
         if !settings.audio { audioActive = false }
         if !settings.power { energyConstrained = false }
         guard managePerceptionSensors else { return }
@@ -327,11 +328,7 @@ actor NativeCompanionRuntime {
                     let opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "schedule." + phase, sourceEventIds: [eventID], topicKey: "schedule:" + occurrence,
                         priority: 0.85, intrusionCost: 0.2, notBefore: now, expiresAt: now.addingTimeInterval(120))
                     _ = try store.saveOpportunity(opportunity, now: now)
-                    var gates = CompanionInterruptContext()
-                    gates.manualPause = paused; gates.sleeping = perceptionSleeping; gates.sessionAvailable = perceptionSessionAvailable
-                    gates.outputBusy = topic != nil || dailyBusy; gates.idleSeconds = perceptionIdleSeconds
-                    gates.cooldown = NativeCompanionData.now() - lastTopic < 180000; gates.budgetAvailable = (try store.requestCount()) < hourly
-                    try store.recordDecision(CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now))
+                    // Queue only. The common initiative arbiter evaluates all gates.
                 }
             }
         } catch { perceptionStatus[signal.source] = ["state": "error", "reason": "event_rejected"] }
@@ -345,8 +342,9 @@ actor NativeCompanionRuntime {
         let now = Date()
         perceptionStatus[signal.source] = ["state": signal.health, "checkedAt": NativeCompanionData.iso(now), "consentEpoch": signal.epoch]
         if let quiet = signal.focusQuiet {
+            focusKnown = signal.health == "available"
             focusQuiet = quiet
-            if quiet, topic?.isManual == false { stop(reason: "focus_quiet", cancelArchive: false) }
+            if quiet, topic?.isManual == false { stop(reason: focusKnown ? "focus_quiet" : "focus_unknown", cancelArchive: false) }
         }
         if let active = signal.audioActive { audioActive = active }
         if let constrained = signal.energyConstrained { energyConstrained = constrained }
@@ -386,12 +384,8 @@ actor NativeCompanionRuntime {
                     let opportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "return_to_activity", sourceEventIds: [eventID], relatedIntentionIds: [intention.id], topicKey: intention.topicKey,
                         priority: intention.priority, intrusionCost: 0.25, notBefore: now, expiresAt: now.addingTimeInterval(120))
                     _ = try store.saveOpportunity(opportunity, now: now)
-                    var gates = CompanionInterruptContext()
-                    gates.enabled = enabled; gates.manualPause = paused; gates.sleeping = perceptionSleeping; gates.sessionAvailable = perceptionSessionAvailable
-                    gates.outputBusy = topic != nil || dailyBusy; gates.idleSeconds = perceptionIdleSeconds
-                    gates.cooldown = NativeCompanionData.now() - lastTopic < 180000
-                    gates.budgetAvailable = (try store.requestCount()) < hourly
-                    try store.recordDecision(CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now))
+                    // Queue only. Avoid a misleading preliminary admission that
+                    // omits Focus, audio, resource or presentation gates.
                 }
             }
         } catch { perceptionStatus[signal.source] = ["state": "error", "reason": "event_rejected"] }
@@ -452,11 +446,14 @@ actor NativeCompanionRuntime {
     }
     private func initiativeGates() -> CompanionInterruptContext {
         var value = CompanionInterruptContext()
-        value.enabled = enabled; value.manualPause = paused; value.sleeping = perceptionSleeping || config["sleeping"] as? Bool == true
-        value.sessionAvailable = interruptibility?().sessionAvailable ?? perceptionSessionAvailable
+        let timing = interruptibility?()
+        value.policyRevision = "v2"
+        value.enabled = enabled; value.manualPause = paused; value.sleeping = perceptionSleeping || config["sleeping"] as? Bool == true || timing?.sleeping == true
+        value.sessionAvailable = timing?.sessionAvailable ?? perceptionSessionAvailable
         value.outputBusy = topic != nil || dailyBusy || config["presentationBusy"] as? Bool == true
-        value.idleSeconds = interruptibility?().idleSeconds ?? perceptionIdleSeconds
-        value.focusQuiet = focusQuiet || (interruptibility?().focusQuiet ?? false)
+        value.idleSeconds = timing?.idleSeconds ?? perceptionIdleSeconds
+        value.focusQuiet = focusQuiet || (timing?.focusQuiet ?? false)
+        value.focusUnknown = (perceptionSettings.focus && !focusKnown) || (timing?.focusUnknown ?? false)
         value.audioActive = audioActive; value.energyConstrained = energyConstrained
         value.cooldown = NativeCompanionData.now() - lastTopic < (config["cooldownSeconds"] as? Double ?? 180) * 1000
         value.budgetAvailable = ((try? store.requestCount()) ?? hourly) < hourly
@@ -468,7 +465,9 @@ actor NativeCompanionRuntime {
         let owners = visible.compactMap { $0["id"] as? String }
         do {
             try store.pruneProactive(now: now, auditRetentionHours: perceptionSettings.auditRetentionHours)
-            for owner in owners {
+            let gates = initiativeGates()
+            let canPlan = !gates.sleeping && gates.sessionAvailable
+            for owner in owners where canPlan {
                 try store.syncOpenLoopIntentions(owner: owner, now: now)
                 for goal in try store.intentions(owner: owner) where [.pending, .deferred, .ready].contains(goal.state) && goal.attemptCount < goal.maxAttempts && goal.expiresAt > now && (goal.notBefore ?? .distantPast) <= now && (goal.cooldownUntil ?? .distantPast) <= now {
                     let value = CompanionOpportunity(ownerCharacterId: owner, kind: "conversation_follow_up", sourceEventIds: [], relatedIntentionIds: [goal.id], topicKey: "intention:" + goal.id,
@@ -476,7 +475,7 @@ actor NativeCompanionRuntime {
                     _ = try store.saveOpportunity(value, now: now)
                 }
             }
-            if NativeCompanionData.now() >= nextIdle {
+            if canPlan && NativeCompanionData.now() >= nextIdle {
                 scheduleIdle()
                 for owner in owners {
                     let cognitive = try store.maintainCognition(owner: owner, now: now)
@@ -491,13 +490,14 @@ actor NativeCompanionRuntime {
                 let r = store.get("lastInitiative:" + rhs.ownerCharacterId) as? Double ?? 0
                 return l == r ? lhs.id < rhs.id : l < r
             }
-            let gates = initiativeGates()
             for opportunity in options {
                 var decision = CompanionArbiter.decide(opportunity, context: gates, mode: perceptionSettings.mode, at: now)
                 if decision.action == "admit", !(try store.opportunityAuthorized(opportunity, now: now, forExpression: true)) {
                     decision.action = "defer"; decision.reasonCodes.append("source_not_shareable"); decision.selectedModality = .silent
                 }
-                let signature = decision.action + decision.reasonCodes.joined(separator: ",") + ":" + String(Int(now.timeIntervalSince1970 / 60))
+                let scores = decision.scores.sorted { $0.key < $1.key }.map { $0.key + "=" + String($0.value) }.joined(separator: ",")
+                let heartbeat = canPlan ? String(Int(now.timeIntervalSince1970 / 60)) : "suspended"
+                let signature = decision.mode.rawValue + ":" + decision.action + ":" + decision.reasonCodes.joined(separator: ",") + ":" + scores + ":" + decision.policyRevision + ":" + heartbeat
                 if lastDecisions[opportunity.id] != signature { try store.recordDecision(decision); lastDecisions[opportunity.id] = signature }
                 if decision.action == "admit", perceptionSettings.mode == .live, topic == nil, try store.claimOpportunity(opportunity, now: now) {
                     try store.set("lastInitiative:" + opportunity.ownerCharacterId, now.timeIntervalSince1970)

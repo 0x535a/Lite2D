@@ -18,6 +18,12 @@ private final class InitiativeEvents {
     func add(_ value: CompanionObject) { lock.withLock { values.append(value) } }
     func utterance() -> CompanionObject? { lock.withLock { values.last { $0["type"] as? String == "utterance" } } }
 }
+private final class InitiativeTiming {
+    private let lock = NSLock()
+    private var value: CompanionInterruptContext = { var value = CompanionInterruptContext(); value.idleSeconds = 30; return value }()
+    func snapshot() -> CompanionInterruptContext { lock.withLock { value } }
+    func set(_ edit: (inout CompanionInterruptContext) -> Void) { lock.withLock { edit(&value) } }
+}
 enum CompanionInitiativeTests {
     static func run(root: URL, prompt: URL, helper: URL, node: String, executable: String, check: (Bool, String) throws -> Void) async throws {
         let owner = "11111111-1111-4111-8111-111111111111", other = "22222222-2222-4222-8222-222222222222"
@@ -28,16 +34,32 @@ enum CompanionInitiativeTests {
         let memory = try store.recordDirectMemory(owner: owner, source: "experienced", eventID: "agreement", content: "Share a movie thought later.")
         let goal = CompanionIntention(ownerCharacterId: owner, goal: "Share a movie thought later", origin: .conversationMemory, topicKey: "film", sourceMemoryId: memory["memoryId"] as? String, evidenceIds: [memory["memoryId"] as! String], priority: 0.9, expiresAt: Date().addingTimeInterval(600))
         _ = try store.proposeIntention(goal)
-        let roles = InitiativeRoles(), events = InitiativeEvents()
+        let roles = InitiativeRoles(), events = InitiativeEvents(), timing = InitiativeTiming()
         let runtime = NativeCompanionRuntime(root: directory, promptFile: prompt, opencode: "/missing", codex: "/missing", node: node, helperScript: helper, executable: executable,
-            roles: roles, manageOpenCodeService: false, managePerceptionSensors: false, interruptibility: { var value = CompanionInterruptContext(); value.idleSeconds = 30; return value }, emit: events.add)
+            roles: roles, manageOpenCodeService: false, managePerceptionSensors: false, interruptibility: timing.snapshot, emit: events.add)
         try await runtime.start(automatic: false)
         var config: CompanionObject = ["enabled": true, "intervalMinutes": 0, "hourlyRequests": 12, "perception": ["mode": "shadow"], "characters": [["id": owner, "enabled": true, "visible": true]]]
         config["perception"] = ["mode": "shadow", "workspace": true, "shareActivity": true, "sourceCharacterIds": ["macos.workspace": []]]
         await runtime.configure(config)
         try check(try store.perceptionPolicy("macos.workspace")?.permits(owner, use: .activityContext, remote: true) == false, "Runtime consent enforces explicit empty recipient scopes before model projection")
         config["perception"] = ["mode": "shadow"]
+        timing.set { $0.sleeping = true; $0.sessionAvailable = false }
         await runtime.configure(config); await runtime.tick()
+        let suspendedCalls = await roles.calls
+        try check(try store.rows("SELECT id FROM proactive_opportunities").isEmpty && suspendedCalls == 0, "Suspended sessions do not regenerate follow-up opportunities or request models")
+        timing.set { $0.sleeping = false; $0.sessionAvailable = true; $0.focusQuiet = true }
+        try await Task.sleep(nanoseconds: 5_100_000_000)
+        await runtime.tick()
+        let quietCalls = await roles.calls
+        try check(try store.proactiveReplay().first?.reasonCodes == ["focus_quiet"] && quietCalls == 0, "Final initiative arbitration applies an actual Focus quiet gate before any admission")
+        timing.set { $0.focusUnknown = true }
+        try await Task.sleep(nanoseconds: 5_100_000_000)
+        await runtime.tick()
+        let unknownCalls = await roles.calls
+        try check(try store.proactiveReplay().first?.reasonCodes == ["focus_unknown"] && unknownCalls == 0, "Unknown Focus remains silent with its own reason instead of impersonating a configured quiet filter")
+        timing.set { $0.focusQuiet = false; $0.focusUnknown = false }
+        try await Task.sleep(nanoseconds: 5_100_000_000)
+        await runtime.tick()
         try check(await roles.calls == 0 && (try store.proactiveReplay()).contains { $0.action == "admit" && $0.mode == .shadow }, "Shadow evaluates real pending goals without invoking the character model")
         config["perception"] = ["mode": "live"]
         await runtime.configure(config)

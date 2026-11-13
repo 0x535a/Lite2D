@@ -29,6 +29,27 @@ enum CompanionProactiveTests {
         try check(CompanionArbiter.decide(opportunity, context: context, mode: .shadow, at: now).reasonCodes.contains("manual_pause"), "Manual pause remains a hard gate independently of other state")
         context.manualPause = false; context.idleSeconds = 0
         try check(CompanionArbiter.decide(opportunity, context: context, mode: .live, at: now).selectedModality == .silent, "Active input suppresses unsolicited expression")
+        let audit = try NativeCompanionStore(root: root.appendingPathComponent("decision-coalescing"))
+        let auditOpportunity = CompanionOpportunity(ownerCharacterId: owner, kind: "interest", sourceEventIds: [], topicKey: "audit", priority: 0.8, intrusionCost: 0.2, notBefore: now, expiresAt: now.addingTimeInterval(600))
+        var auditContext = CompanionInterruptContext(); auditContext.idleSeconds = 30; auditContext.focusQuiet = true
+        let first = CompanionArbiter.decide(auditOpportunity, context: auditContext, mode: .live, at: now)
+        try audit.recordDecision(first)
+        let auditRestarted = try NativeCompanionStore(root: audit.root)
+        try auditRestarted.recordDecision(CompanionArbiter.decide(auditOpportunity, context: auditContext, mode: .live, at: now.addingTimeInterval(60)))
+        let repeated = try audit.proactiveReplay()
+        try check(repeated.count == 1 && repeated[0].id == first.id && repeated[0].decidedAt == now && repeated[0].lastEvaluatedAt == now.addingTimeInterval(60) && repeated[0].evaluationCount == 2, "Identical deferred evaluations coalesce across restart with first/last timestamps and a bounded count")
+        var auditQuery = CompanionMonitorQuery(); auditQuery.section = "decisions"
+        let auditPage = try audit.monitorPage(auditQuery, requestID: "coalesced", owners: [owner])
+        try check(auditPage.items.first?.fields.contains { $0.key == "evaluation_count" && $0.value == "2" } == true, "Decision management exposes repeated evaluations instead of duplicating rows")
+        auditContext.focusUnknown = true
+        try audit.recordDecision(CompanionArbiter.decide(auditOpportunity, context: auditContext, mode: .live, at: now.addingTimeInterval(120)))
+        auditContext.focusUnknown = false
+        try audit.recordDecision(CompanionArbiter.decide(auditOpportunity, context: auditContext, mode: .live, at: now.addingTimeInterval(180)))
+        try check(try audit.proactiveReplay().count == 3, "Reason transitions and a later return to an earlier reason remain separate audit events")
+        auditContext.focusQuiet = false
+        let admitted = CompanionArbiter.decide(auditOpportunity, context: auditContext, mode: .live, at: now.addingTimeInterval(240))
+        try audit.recordDecision(admitted)
+        try check(try audit.proactiveReplay().first?.id == admitted.id && audit.proactiveReplay().count == 4, "Admission IDs stay distinct and available to reference from actual output receipts")
         var invalid = observation; invalid.confidence = .nan
         try check(refuses { _ = try store.ingestPerception(invalid, now: now) }, "Nonfinite classifier confidence is rejected")
         observation.revision = 2

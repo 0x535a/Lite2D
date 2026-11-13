@@ -198,6 +198,7 @@ struct CompanionInterruptContext: Codable, Equatable {
     var sleeping = false
     var sessionAvailable = true
     var focusQuiet = false
+    var focusUnknown = false
     var visible = true
     var outputBusy = false
     var cooldown = false
@@ -210,7 +211,9 @@ struct CompanionInterruptContext: Codable, Equatable {
         var result: [String] = []
         if !enabled { result.append("disabled") }; if manualPause { result.append("manual_pause") }
         if sleeping { result.append("sleeping") }; if !sessionAvailable { result.append("session_unknown") }
-        if focusQuiet { result.append("focus_quiet") }; if !visible { result.append("character_hidden") }
+        if focusUnknown { result.append("focus_unknown") }
+        else if focusQuiet { result.append("focus_quiet") }
+        if !visible { result.append("character_hidden") }
         if outputBusy { result.append("output_busy") }; if cooldown { result.append("cooldown") }
         if !budgetAvailable { result.append("budget_exhausted") }; return result
     }
@@ -226,6 +229,9 @@ struct CompanionDecisionRecord: Codable, Equatable {
     var selectedModality: CompanionModality
     var policyRevision: String
     var decidedAt: Date
+    // Optional for compatibility with decisions written before audit coalescing.
+    var lastEvaluatedAt: Date?
+    var evaluationCount: Int?
 }
 enum CompanionArbiter {
     // Pure deterministic function: replay never invokes a model or mutates live state.

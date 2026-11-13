@@ -13,6 +13,9 @@ focus = actions['CompanionQuietFocusFilter']
 activity = actions['CompanionActivityIntent']
 assert 'com.apple.link.systemProtocol.FocusConfiguration' in focus['systemProtocols']
 assert [p['name'] for p in focus['parameters']] == ['quiet']
+quiet_metadata = focus['parameters'][0]['typeSpecificMetadata']
+default_index = quiet_metadata.index('LNValueTypeSpecificMetadataKeyDefaultValue')
+assert quiet_metadata[default_index + 1] == {'int': {'wrapper': 0}}, 'No active Focus filter must default to non-quiet in exported metadata'
 assert [p['name'] for p in activity['parameters']] == ['activity']
 assert not focus['openAppWhenRun'] and not activity['openAppWhenRun']
 assert activity['parameters'][0]['valueType']['linkEnumeration']['wrapper']['identifier'] == 'CompanionExplicitActivity'

@@ -13,6 +13,7 @@ extension NativeCompanionStore {
             "CREATE TABLE IF NOT EXISTS proactive_dependencies(kind TEXT NOT NULL,id TEXT NOT NULL,source_kind TEXT NOT NULL,source_id TEXT NOT NULL,PRIMARY KEY(kind,id,source_kind,source_id))",
             "CREATE TABLE IF NOT EXISTS proactive_decisions(id TEXT PRIMARY KEY,subject_id TEXT NOT NULL,at REAL NOT NULL,payload TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS proactive_decisions_at ON proactive_decisions(at)",
+            "CREATE INDEX IF NOT EXISTS proactive_decisions_subject_at ON proactive_decisions(subject_id,at)",
             "CREATE TABLE IF NOT EXISTS proactive_outputs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,status TEXT NOT NULL,at REAL NOT NULL,payload TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS perception_cursors(source TEXT PRIMARY KEY,generation TEXT NOT NULL,cursor TEXT NOT NULL,epoch INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS proactive_loop_intentions(memory_id TEXT PRIMARY KEY,owner TEXT NOT NULL,intention_id TEXT NOT NULL UNIQUE)",
@@ -201,8 +202,23 @@ extension NativeCompanionStore {
         }
     }
     func recordDecision(_ decision: CompanionDecisionRecord) throws {
-        try execute("INSERT INTO proactive_decisions VALUES (?,?,?,?)", [decision.id, decision.subjectId, decision.decidedAt.timeIntervalSince1970, try CompanionProactiveCoding.encode(decision)])
-        try execute("DELETE FROM proactive_decisions WHERE id IN (SELECT id FROM proactive_decisions ORDER BY at DESC LIMIT -1 OFFSET 10000)")
+        try transaction {
+            if decision.action == "defer",
+               let text = try rows("SELECT payload FROM proactive_decisions WHERE subject_id=? ORDER BY at DESC,rowid DESC LIMIT 1", [decision.subjectId]).first?["payload"] as? String,
+               var previous = try? CompanionProactiveCoding.decode(CompanionDecisionRecord.self, text),
+               previous.action == decision.action, previous.mode == decision.mode,
+               previous.characterId == decision.characterId, previous.reasonCodes == decision.reasonCodes,
+               previous.scores == decision.scores, previous.selectedModality == decision.selectedModality,
+               previous.policyRevision == decision.policyRevision,
+               decision.decidedAt >= (previous.lastEvaluatedAt ?? previous.decidedAt) {
+                previous.lastEvaluatedAt = decision.decidedAt
+                previous.evaluationCount = min(Int.max - 1, previous.evaluationCount ?? 1) + 1
+                try execute("UPDATE proactive_decisions SET at=?,payload=? WHERE id=?", [decision.decidedAt.timeIntervalSince1970, try CompanionProactiveCoding.encode(previous), previous.id])
+                return
+            }
+            try execute("INSERT INTO proactive_decisions VALUES (?,?,?,?)", [decision.id, decision.subjectId, decision.decidedAt.timeIntervalSince1970, try CompanionProactiveCoding.encode(decision)])
+            try execute("DELETE FROM proactive_decisions WHERE id IN (SELECT id FROM proactive_decisions ORDER BY at DESC LIMIT -1 OFFSET 10000)")
+        }
     }
     func proactiveReplay(limit: Int = 100) throws -> [CompanionDecisionRecord] {
         try rows("SELECT payload FROM proactive_decisions ORDER BY at DESC,rowid DESC LIMIT ?", [max(1, min(limit, 1000))]).map { try CompanionProactiveCoding.decode(CompanionDecisionRecord.self, $0["payload"] as! String) }

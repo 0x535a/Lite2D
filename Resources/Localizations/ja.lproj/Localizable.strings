@@ -747,3 +747,8 @@
 "perception.hours" = "{0} 時間";
 
 "perception.audit_retention_help" = "ローカルの自発的な判断ログに適用します。コンパニオンの実行中は毎分整理します。会話履歴、記憶、今後の目標は個別に管理します。";
+
+"monitor.value.focus_unknown" = "アプリの集中状態をまだ確認できません";
+"monitor.value.evaluation_count" = "同じ評価の回数";
+"monitor.value.first_decided_at" = "最初の評価日時";
+"monitor.value.last_evaluated_at" = "最後の評価日時";

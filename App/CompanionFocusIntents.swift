@@ -4,8 +4,14 @@ import AppIntents
 // Standalone declarations so the CMake metadata pass can extract only these public actions.
 struct CompanionQuietFocusFilter: SetFocusFilterIntent {
     static var title: LocalizedStringResource = "focus.intent.title"
-    @Parameter(title: "focus.intent.quiet", default: true) var quiet: Bool
+    // current may return the default instance when no filter is active.
+    // Only an explicitly configured quiet filter may silence the app.
+    @Parameter(title: "focus.intent.quiet", default: false) var quiet: Bool
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "focus.intent.display") }
+    static func suggestedFocusFilters(for context: FocusFilterSuggestionContext) async -> [Self] {
+        let filter = Self(); filter.quiet = true
+        return [filter]
+    }
     func perform() async throws -> some IntentResult {
         // A notification requests a scoped query of our current filter. It never changes manual pause.
         NotificationCenter.default.post(name: Notification.Name("Lite2D.CompanionFocusChanged"), object: nil)

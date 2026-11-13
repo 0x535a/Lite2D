@@ -67,10 +67,15 @@ extension NativeCompanionStore {
     func monitorDecision(_ row: CompanionObject) throws -> CompanionMonitorItem {
         let value = try CompanionProactiveCoding.decode(CompanionDecisionRecord.self, row["payload"] as! String)
         var item = CompanionMonitorItem(id: value.id, kind: "decision", owner: value.characterId, title: value.action)
-        item.status = value.mode.rawValue; item.at = NativeCompanionData.iso(value.decidedAt)
+        item.status = value.mode.rawValue; item.at = NativeCompanionData.iso(value.lastEvaluatedAt ?? value.decidedAt)
         item.content = value.reasonCodes.joined(separator: ", ")
         item.fields = value.scores.sorted { $0.key < $1.key }.map { .init(key: $0.key, value: String($0.value)) }
         item.fields += [.init(key: "modality", value: value.selectedModality.rawValue), .init(key: "policy_revision", value: value.policyRevision)]
+        if let count = value.evaluationCount {
+            item.fields += [.init(key: "evaluation_count", value: String(count)),
+                            .init(key: "first_decided_at", value: NativeCompanionData.iso(value.decidedAt)),
+                            .init(key: "last_evaluated_at", value: NativeCompanionData.iso(value.lastEvaluatedAt ?? value.decidedAt))]
+        }
         item.links = [.init(id: value.subjectId, kind: "opportunity")]
         return item
     }

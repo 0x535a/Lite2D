@@ -333,7 +333,7 @@ struct CompanionHistoryView: View {
     }
     private func fieldValue(_ field: CompanionMonitorField) -> String {
         guard !field.value.isEmpty else { return L10n.text("monitor.not_provided") }
-        if ["occurred_at", "learned_at", "recorded_at", "created_at", "updated_at", "valid_from", "valid_to", "happened_at", "at", "not_before", "expires_at", "cooldown_until", "presented_at", "completed_at"].contains(field.key) { return CompanionMonitorPresentation.date(field.value) }
+        if ["occurred_at", "learned_at", "recorded_at", "created_at", "updated_at", "valid_from", "valid_to", "happened_at", "at", "not_before", "expires_at", "cooldown_until", "presented_at", "completed_at", "first_decided_at", "last_evaluated_at"].contains(field.key) { return CompanionMonitorPresentation.date(field.value) }
         if field.key == "subjects" { return field.value.components(separatedBy: ", ").map(name).joined(separator: ", ") }
         if ["source_actor_id", "target_character_id", "target", "speaker", "actor", "sender", "recipient", "created_by"].contains(field.key) { return name(field.value) }
         if ["scope", "kind", "validity", "state", "role", "result", "last_decision_reason", "reason", "modality", "affect"].contains(field.key) { return monitorLabel(field.value) }
