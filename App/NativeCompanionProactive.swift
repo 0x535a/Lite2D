@@ -243,7 +243,9 @@ enum CompanionArbiter {
         if [.consumed, .expired, .cancelled].contains(opportunity.state) { reasons.append("inactive_opportunity") }
         if !context.idleSeconds.isFinite || context.idleSeconds < 15 { reasons.append("user_active") }
         if context.energyConstrained && opportunity.kind == "intrinsic_interest" { reasons.append("resource_pressure") }
-        let cost = min(1, opportunity.intrusionCost + (context.audioActive ? 0.15 : 0))
+        // Audio device activity is environmental context, not evidence that
+        // the user is unavailable for text bubbles or Live2D companionship.
+        let cost = opportunity.intrusionCost
         let score = opportunity.priority - cost
         if score < 0.15 { reasons.append("low_value") }
         let admitted = reasons.isEmpty

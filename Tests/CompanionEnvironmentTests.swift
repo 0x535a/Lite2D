@@ -39,9 +39,24 @@ enum CompanionEnvironmentTests {
         try check(CompanionArbiter.decide(opportunity, context: context, mode: .live, at: now).reasonCodes.contains("resource_pressure"), "Resource pressure suppresses optional intrinsic inference")
         opportunity.kind = "schedule.upcoming"
         try check(CompanionArbiter.decide(opportunity, context: context, mode: .live, at: now).action == "admit", "Resource pressure does not automatically silence a worthwhile scheduled reminder")
-        context.energyConstrained = false; context.audioActive = true
-        let audioDecision = CompanionArbiter.decide(opportunity, context: context, mode: .live, at: now)
-        try check(audioDecision.action == "admit" && (audioDecision.scores["cost"] ?? 0) > opportunity.intrusionCost, "Audio activity raises interruption cost without claiming a meeting or forcing a hard mute")
+        context.energyConstrained = false
+        opportunity.kind = "intrinsic_interest"
+        opportunity.priority = CompanionCognitiveState(owner: owner, updatedAt: now).interestPriority
+        opportunity.intrusionCost = 0.3
+        for mode in [CompanionProactiveMode.shadow, .live] {
+            for gate in ["available", "user_active", "focus_quiet", "cooldown", "low_value"] {
+                var sample = opportunity
+                context.idleSeconds = gate == "user_active" ? 0 : 30
+                context.focusQuiet = gate == "focus_quiet"
+                context.cooldown = gate == "cooldown"
+                sample.priority = gate == "low_value" ? 0.35 : opportunity.priority
+                context.audioActive = false
+                let silent = CompanionArbiter.decide(sample, context: context, mode: mode, at: now)
+                context.audioActive = true
+                let audio = CompanionArbiter.decide(sample, context: context, mode: mode, at: now)
+                try check(audio.action == silent.action && audio.reasonCodes == silent.reasonCodes && audio.scores == silent.scores && audio.selectedModality == silent.selectedModality && (gate == "available" ? audio.action == "admit" : audio.reasonCodes.contains(gate)), "Audio activity leaves \(mode.rawValue) intrinsic decisions unchanged with \(gate), including default interest priority")
+            }
+        }
         var values: [CompanionMacSignal] = []
         let source = NativeAudioPerception { values.append($0) }
         source.configure(epoch: 9, sleeping: false)

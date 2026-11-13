@@ -447,7 +447,7 @@ actor NativeCompanionRuntime {
     private func initiativeGates() -> CompanionInterruptContext {
         var value = CompanionInterruptContext()
         let timing = interruptibility?()
-        value.policyRevision = "v2"
+        value.policyRevision = "v3"
         value.enabled = enabled; value.manualPause = paused; value.sleeping = perceptionSleeping || config["sleeping"] as? Bool == true || timing?.sleeping == true
         value.sessionAvailable = timing?.sessionAvailable ?? perceptionSessionAvailable
         value.outputBusy = topic != nil || dailyBusy || config["presentationBusy"] as? Bool == true
