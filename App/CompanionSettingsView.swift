@@ -204,7 +204,7 @@ struct CompanionGeneralSections: View {
             Toggle(L10n.text("perception.calendar"), isOn: perception(\.calendar))
             Toggle(L10n.text("perception.reminders"), isOn: perception(\.reminders))
             ForEach(["macos.calendar", "macos.reminders"], id: \.self) { source in
-                if companion.settings.perception.enabled(source) {
+                if companion.settings.perception.enabled(source), NativeCalendarPerception.permission(source) != "available" {
                     Button(L10n.text("perception.authorize", L10n.text("perception." + source))) { companion.authorizePerception(source) }
                 }
             }
