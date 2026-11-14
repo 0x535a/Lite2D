@@ -19,9 +19,11 @@ import Foundation
         let sensor = NativeMacPerception { signals.append($0) }
         sensor.configure(settings, epochs: epochs, suspended: false)
         try await Task.sleep(nanoseconds: 150_000_000)
-        try check(Set(signals.map(\.source)).isSuperset(of: ["macos.session", "macos.workspace", "macos.idle", "macos.power"]), "Native sensors produce initial permission-free snapshots without application content")
-        try check(signals.allSatisfy { $0.epoch == 7 } && ["macos.session", "macos.workspace", "macos.idle", "macos.power"].allSatisfy { source in signals.first(where: { $0.source == source })?.initial == true }, "Initial sensor samples establish a baseline with the configured consent epoch")
-        try check(signals.first(where: { $0.source == "macos.idle" })?.idleSeconds.map { $0.isFinite && $0 >= 0 } == true, "Idle sensor queries any input event rather than the null-event timer")
+        let sleeping = signals.first(where: { $0.source == "macos.session" })?.sleeping == true
+        let expected = sleeping ? ["macos.session"] : ["macos.session", "macos.workspace", "macos.idle", "macos.power"]
+        try check(Set(signals.map(\.source)).isSuperset(of: expected) && (!sleeping || signals.allSatisfy { $0.source == "macos.session" }), "Native sensors establish permission-free snapshots, or only lifecycle state when the real display is asleep")
+        try check(signals.allSatisfy { $0.epoch == 7 } && expected.allSatisfy { source in signals.first(where: { $0.source == source })?.initial == true }, "Initial sensor samples establish a baseline with the configured consent epoch")
+        try check(sleeping ? !signals.contains { $0.source == "macos.idle" } : signals.first(where: { $0.source == "macos.idle" })?.idleSeconds.map { $0.isFinite && $0 >= 0 } == true, "Idle sampling uses the any-input timer while respecting actual display sleep")
         sensor.stop(); let count = signals.count
         try await Task.sleep(nanoseconds: 150_000_000)
         try check(signals.count == count, "Stopping sensors rejects queued native callbacks and cancels monitoring")

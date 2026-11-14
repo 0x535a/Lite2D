@@ -108,6 +108,7 @@ final class NativeCompanionStore {
             "UPDATE deliveries SET status='delivery_unknown' WHERE status='delivering'"
         ] { try execute(sql) }
         try monitorSchema()
+        try generationSchema()
         try dailySchema()
         try notificationSchema()
         try cognitionSchema()
@@ -122,7 +123,7 @@ final class NativeCompanionStore {
                 for evidence in Set(evidenceIDs(row)) { try execute("INSERT OR IGNORE INTO memory_dependencies VALUES (?,?)", [row["id"], evidence]) }
             }
             try execute("INSERT OR IGNORE INTO memory_details SELECT id,NULL,'[]',NULL,0.5,0.5,NULL,created_at,created_at,NULL,NULL,owner_character_id FROM memory_items")
-            try execute("PRAGMA user_version=5")
+            try execute("PRAGMA user_version=6")
         }
     }
     deinit { sqlite3_close(database) }
@@ -271,7 +272,7 @@ final class NativeCompanionStore {
         return view
     }
 
-    @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil, eventID: String? = nil, subjectIDs: [String] = [], sourceRef: String? = nil, confidence: Double = 0.8, salience: Double = 0.5, occurredAt: String? = nil, learnedAt: String? = nil, validFrom: String? = nil, validTo: String? = nil, createdBy: String? = nil) throws -> CompanionObject {
+    @discardableResult func memoryWrite(owner: String, type: String, scope: String = "private", provenance: String = "experienced", content: String, evidenceIDs: [String] = [], sourceActorID: String? = nil, supersedesID: String? = nil, eventID: String? = nil, subjectIDs: [String] = [], sourceRef: String? = nil, confidence: Double = 0.8, salience: Double = 0.5, occurredAt: String? = nil, learnedAt: String? = nil, validFrom: String? = nil, validTo: String? = nil, createdBy: String? = nil, generationID: String? = nil, generationMethod: String? = nil, citedEvidenceIDs: [String]? = nil) throws -> CompanionObject {
         return try transaction {
         guard NativeCompanionData.validID(owner), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Invalid memory") }
         guard confidence.isFinite, salience.isFinite, (0...1).contains(confidence), (0...1).contains(salience),
@@ -286,6 +287,7 @@ final class NativeCompanionStore {
         try execute("INSERT INTO memory_details VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [id, eventID, NativeCompanionData.string(subjectIDs), sourceRef, confidence, salience, occurredAt, learnedAt ?? now, now, validFrom, validTo, createdBy ?? owner])
         if ftsAvailable { try execute("INSERT INTO memory_fts(memory_id,owner_character_id,content) VALUES (?,?,?)", [id, owner, cleaned]) }
         for evidence in Set(evidenceIDs) { try execute("INSERT INTO memory_dependencies VALUES (?,?)", [id, evidence]) }
+        try recordMemoryGeneration(memoryID: id, owner: owner, method: generationMethod ?? createdBy ?? provenance, citations: citedEvidenceIDs ?? evidenceIDs, generationID: generationID, eventID: provenance == "told_by_other" ? eventID : nil)
         try audit(owner: owner, operation: "memory.write", target: id)
         return ["memoryId": id, "revision": 1, "status": "active"]
         }
@@ -329,10 +331,10 @@ final class NativeCompanionStore {
         try memoryDetails(rows("SELECT id,memory_type,scope,provenance,content,evidence_ids,source_actor_id,revision,status,created_at,updated_at,supersedes_id FROM memory_items WHERE id=? AND owner_character_id=? AND status='active'", [id, owner])).first
     }
 
-    func memoryCorrect(_ id: String, owner: String, content: String, expectedRevision: Int, reason: String) throws -> CompanionObject {
+    func memoryCorrect(_ id: String, owner: String, content: String, expectedRevision: Int, reason: String, generationID: String? = nil) throws -> CompanionObject {
         return try transaction {
         guard let old = try memoryRead(id, owner: owner), let revision = old["revision"] as? Int, revision == expectedRevision else { return ["conflict": true] }
-        let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id, eventID: old["event_id"] as? String, occurredAt: old["occurred_at"] as? String)
+        let next = try memoryWrite(owner: owner, type: old["memory_type"] as? String ?? "fact", scope: old["scope"] as? String ?? "private", provenance: "corrected", content: content, evidenceIDs: [id], supersedesID: id, eventID: old["event_id"] as? String, occurredAt: old["occurred_at"] as? String, generationID: generationID)
         try execute("UPDATE memory_items SET status='superseded',updated_at=? WHERE id=? AND owner_character_id=?", [NativeCompanionData.iso(), id, owner])
         try invalidateDependents(of: [id], owner: owner)
         try set("memory:\(owner)", "")
@@ -398,6 +400,7 @@ final class NativeCompanionStore {
                 if ftsAvailable { try execute("DELETE FROM memory_fts WHERE memory_id=?", [item]) }
             }
             try set("memory:\(owner)", "")
+            try purgeGenerations(owner: owner)
             try set("memoryCutoff:\(owner)", NativeCompanionData.iso())
             try set("sessionPolicy:\(owner)", "memory-invalidated")
             try execute("UPDATE deliveries SET status='cancelled' WHERE recipient=? AND status IN ('queued','accepted_pending_context')", [owner])
@@ -408,6 +411,7 @@ final class NativeCompanionStore {
 
     func forgetCharacter(_ owner: String) throws {
         try transaction {
+            try purgeGenerations(owner: owner)
             try execute("DELETE FROM proactive_dependencies WHERE id IN (SELECT id FROM proactive_intentions WHERE owner=?)", [owner])
             try execute("DELETE FROM proactive_intentions WHERE owner=?", [owner])
             try execute("DELETE FROM proactive_outputs WHERE owner=?", [owner])
@@ -431,13 +435,13 @@ final class NativeCompanionStore {
     }
 
     // Only direct, active sources belonging to this actor qualify as growth evidence.
-    func recordDirectMemory(owner: String, source: String, eventID: String, content: String, sourceActorID: String? = nil) throws -> CompanionObject {
+    func recordDirectMemory(owner: String, source: String, eventID: String, content: String, sourceActorID: String? = nil, generationID: String? = nil) throws -> CompanionObject {
         try transaction {
             guard ["experienced", "observed", "told_by_other"].contains(source), !eventID.isEmpty else { throw NativeCompanionData.error("Invalid direct event") }
             if let old = try rows("SELECT m.id,m.status FROM memory_items m JOIN memory_details d ON d.memory_id=m.id WHERE m.owner_character_id=? AND d.event_id=? AND m.memory_type='event' ORDER BY m.rowid DESC LIMIT 1", [owner, eventID]).first {
                 return ["memoryId": old["id"] ?? "", "status": old["status"] ?? "", "duplicate": true]
             }
-            return try memoryWrite(owner: owner, type: "event", provenance: source, content: content, sourceActorID: sourceActorID, eventID: eventID)
+            return try memoryWrite(owner: owner, type: "event", provenance: source, content: content, sourceActorID: sourceActorID, eventID: eventID, generationID: generationID, generationMethod: source == "told_by_other" ? "trace_received_message" : source)
         }
     }
 

@@ -47,6 +47,7 @@ extension NativeCompanionStore {
             let subjects = (all["subject_ids"] as? String)?.data(using: .utf8).flatMap { try? NativeCompanionData.decode($0) } as? [String] ?? []
             item.fields.append(.init(key: "subjects", value: subjects.joined(separator: ", ")))
             item.links = evidenceIDs(row).map { .init(id: $0) }
+            item.links.insert(.init(id: id, kind: "memory_trace", label: "trace_generation"), at: 0)
             if let predecessor = row["supersedes_id"] as? String { item.links.append(.init(id: predecessor, kind: "memory")) }
             for child in try rows("SELECT id FROM memory_items WHERE supersedes_id=? AND owner_character_id=?", [id, owner]) { item.links.append(.init(id: monitorText(child["id"]), kind: "memory")) }
             if status == "active" { item.actions = ["correct", "archive", "forget"] }
@@ -72,6 +73,9 @@ extension NativeCompanionStore {
         return item
     }
     func monitorReference(owner: String, id: String, kind: String = "reference") throws -> CompanionMonitorItem {
+        if kind == "memory_trace" { return try monitorMemoryGeneration(owner: owner, memoryID: id) }
+        if kind == "generation" { return try monitorGeneration(owner: owner, id: id) }
+        if kind == "generation_input" { return try monitorGenerationInput(owner: owner, id: id) }
         let cutoff = get("memoryCutoff:\(owner)") as? String ?? ""
         if id.hasPrefix("dialogue:"), let seq = Int(id.dropFirst(9)),
            let row = try rows("SELECT at,payload FROM events WHERE seq=? AND type='utterance' AND at>=?", [seq, cutoff]).first {
@@ -83,12 +87,14 @@ extension NativeCompanionStore {
                 }
                 var item = CompanionMonitorItem(id: id, kind: "event", owner: owner, title: String((data["text"] as? String ?? "").prefix(90)))
                 item.content = data["text"] as? String ?? ""; item.at = row["at"] as? String ?? ""; item.source = "experienced"
+                if let link = try generationLink(subject: id, owner: owner) { item.links.append(link) }
                 return item
             }
         }
         if id.hasPrefix("delivery:"), let row = try rows("SELECT d.*,r.received_at AS at FROM deliveries d JOIN daily_receipts r ON r.delivery_id=d.id WHERE d.id=? AND d.recipient=? AND d.status IN ('delivered','context_consumed') AND r.received_at>=?", [String(id.dropFirst(9)), owner, cutoff]).first {
             var item = CompanionMonitorItem(id: id, kind: "event", owner: owner, title: String((row["text"] as? String ?? "").prefix(90)))
             item.content = row["text"] as? String ?? ""; item.at = row["at"] as? String ?? ""; item.source = "told_by_other"
+            if let link = try generationLink(subject: id, owner: owner) { item.links.append(link) }
             return item
         }
         if kind == "public", let row = try? readRecord(id), row["exists"] as? Bool == true {
@@ -134,7 +140,12 @@ extension NativeCompanionStore {
     func monitorPage(_ input: CompanionMonitorQuery, requestID: String, owners: [String]) throws -> CompanionMonitorPage {
         var q = input; q.page = min(max(0, q.page), 10_000_000); q.pageSize = min(max(q.pageSize, 1), 100)
         var result = CompanionMonitorPage(requestID: requestID, query: q, items: [], total: 0)
-        if !q.detailID.isEmpty { result.detail = try monitorReference(owner: q.detailOwner.isEmpty ? q.owner : q.detailOwner, id: q.detailID, kind: q.detailKind) }
+        if !q.detailID.isEmpty {
+            let owner = q.detailOwner.isEmpty ? q.owner : q.detailOwner
+            if ["memory_trace", "generation", "generation_input"].contains(q.detailKind) && !owners.contains(owner) {
+                result.detail = .init(id: q.detailID, kind: q.detailKind, owner: owner, title: "unavailable", status: "unavailable")
+            } else { result.detail = try monitorReference(owner: owner, id: q.detailID, kind: q.detailKind) }
+        }
         if ["intentions", "decisions", "outputs", "cognition"].contains(q.section) {
             var page = try initiativeMonitorPage(q, requestID: requestID); page.detail = result.detail; return page
         }
@@ -233,6 +244,7 @@ extension NativeCompanionStore {
                 var item = CompanionMonitorItem(id: self.monitorText(row["id"]), kind: self.monitorText(row["type"]), owner: self.monitorText(payload["characterId"]), title: self.monitorText(row["type"]))
                 item.content = self.monitorText(payload["text"] ?? payload["message"]); item.at = self.monitorText(row["at"]); item.status = self.monitorText(payload["status"])
                 item.fields = self.monitorFields(payload, ["to", "topicId", "reason"])
+                if item.kind == "utterance", let link = try self.generationLink(subject: "dialogue:" + item.id, owner: item.owner) { item.links.append(link) }
                 if item.kind == "delivery" { item.links = try self.rows("SELECT m.id FROM memory_items m JOIN memory_details d ON m.id=d.memory_id WHERE d.event_id=? AND m.owner_character_id=?", [item.id, item.owner]).map { .init(id: self.monitorText($0["id"]), kind: "memory") } }
                 return item
             }

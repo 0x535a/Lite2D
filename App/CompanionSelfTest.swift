@@ -130,6 +130,13 @@ final class CompanionSelfTest {
             if !model.busy && !model.loading { break }; try await Task.sleep(nanoseconds: 30_000_000)
         }
         try check(model.error == nil && model.plan == nil && model.result == "completed", "Confirmed management refreshes the typed panel and reports completion")
+        let traceID = try store.captureGeneration(owner: owner, context: ["currentTime": NativeCompanionData.currentTime(), "activity": ["category": "browsing", "confidence": 0.75]], origin: "trace_role_generation", model: "fixture/companion", final: true)
+        let tracedMemory = try store.memoryWrite(owner: owner, type: "event", provenance: "inferred", content: "Synthetic traced memory", generationID: traceID, generationMethod: "trace_model_memory_write")["memoryId"] as! String
+        let traceItem = try store.monitorReference(owner: owner, id: tracedMemory)
+        model.select(traceItem)
+        model.follow(traceItem.links.first { $0.kind == "memory_trace" }!)
+        try await waitForRead()
+        try check(model.selected?.kind == "generation" && model.selected?.fields.contains { $0.key == "trace_activity" } == true, "Memory detail follows its generation record and supplied environment without model inference")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 780), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         for lang in [AppLanguage.simplifiedChinese, .traditionalChinese, .english, .japanese] {
             LanguageStore.shared.selection = lang
@@ -144,6 +151,9 @@ final class CompanionSelfTest {
                 try await Task.sleep(nanoseconds: 120_000_000)
                 try await verifyMonitorGeometry(window, model: model, name: "\(lang.rawValue)-\(dark ? "dark" : "light")", browser: true, rowsExpected: true)
                 try capture(window, "memory-monitor-\(lang.rawValue)-\(dark ? "dark" : "light")")
+                model.select(try store.monitorGeneration(owner: owner, id: traceID))
+                try await Task.sleep(nanoseconds: 120_000_000)
+                try capture(window, "memory-generation-\(lang.rawValue)-\(dark ? "dark" : "light")")
             }
         }
         for section in ["role_overview", "L0", "L1", "cognition", "intentions", "outputs", "decisions", "L2", "L3", "L4", "L5", "views", "relations", "traits", "reflections", "growth", "legacy"] {

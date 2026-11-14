@@ -28,10 +28,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 def main():
     sources = ['CompanionMonitorModels.swift', 'NativeCompanionMonitor.swift', 'NativePersonaMemory.swift', 'NativeCompanionStore.swift', 'NativeCompanionTransport.swift', 'NativeClaudeHelper.swift',
                'NativeCompanionObservers.swift', 'NativeCompanionRoles.swift', 'NativeOpenCodeServiceMonitor.swift', 'NativeCompanionRuntime.swift', 'NativeCompanionDaily.swift', 'NativeCompanionProactive.swift', 'NativeCompanionProactiveStore.swift', 'NativeMacPerception.swift', 'NativeCalendarPerception.swift', 'NativeCompanionContext.swift', 'NativeCompanionInitiative.swift', 'NativeNotificationDatabase.swift', 'NativeNotificationPerception.swift', 'CompanionPathWatch.swift', 'CompanionFocusIntents.swift', 'NativeFocusPerception.swift', 'NativeDirectoryPerception.swift', 'NativeEnvironmentPerception.swift', 'NativeWindowPerception.swift', 'NativeInitiativeMonitor.swift', 'CompanionModelRouting.swift', 'NativeCompanionCognition.swift']
-    sources.append('NativeCompanionDeferAudit.swift')
+    sources.extend(['NativeCompanionDeferAudit.swift', 'NativeCompanionMemoryTrace.swift'])
     unit = OUT / 'native-tests'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *[str(ROOT / 'App' / name) for name in sources],
-                    str(ROOT / 'Tests/CompanionDeferAuditTests.swift'), str(ROOT / 'Tests/CompanionCognitionTests.swift'), str(ROOT / 'Tests/CompanionInitiativeMonitorTests.swift'), str(ROOT / 'Tests/CompanionWindowTests.swift'), str(ROOT / 'Tests/CompanionEnvironmentTests.swift'), str(ROOT / 'Tests/CompanionFocusTests.swift'), str(ROOT / 'Tests/CompanionNotificationTests.swift'), str(ROOT / 'Tests/CompanionInitiativeTests.swift'), str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
+                    str(ROOT / 'Tests/CompanionMemoryTraceTests.swift'), str(ROOT / 'Tests/CompanionDeferAuditTests.swift'), str(ROOT / 'Tests/CompanionCognitionTests.swift'), str(ROOT / 'Tests/CompanionInitiativeMonitorTests.swift'), str(ROOT / 'Tests/CompanionWindowTests.swift'), str(ROOT / 'Tests/CompanionEnvironmentTests.swift'), str(ROOT / 'Tests/CompanionFocusTests.swift'), str(ROOT / 'Tests/CompanionNotificationTests.swift'), str(ROOT / 'Tests/CompanionInitiativeTests.swift'), str(ROOT / 'Tests/CompanionContextTests.swift'), str(ROOT / 'Tests/CompanionCalendarTests.swift'), str(ROOT / 'Tests/CompanionMacPerceptionTests.swift'), str(ROOT / 'Tests/CompanionProactiveTests.swift'), str(ROOT / 'Tests/CompanionMonitorTests.swift'), str(ROOT / 'Tests/CompanionDailyTests.swift'), str(ROOT / 'Tests/NativeCompanionTests.swift'), '-lsqlite3', '-framework', 'Network', '-framework', 'CoreServices', '-o', str(unit)], check=True)
     resources = APP.parent.parent / 'Resources/Companion'
     subprocess.run([str(unit), str(resources / 'claude-helper.mjs'), str(resources / 'prompt.json'), shutil.which('node') or '/missing/node', str(APP)], check=True)
     state = {'calls': 0, 'sent': False, 'read': False, 'saved': False, 'tools': set(), 'prompts': [], 'messages': [], 'trySearch': False, 'searchDenied': False, 'dailyCalls': 0, 'tryIntention': False, 'intentionProposed': False, 'roleModels': set(), 'archiveModels': set()}
@@ -325,10 +325,18 @@ def main():
             assert db.execute("SELECT COUNT(*) FROM daily_archives WHERE status='completed' AND new_session IS NOT NULL").fetchone()[0] == 2
             assert db.execute("SELECT COUNT(*) FROM daily_open_loops WHERE status='open'").fetchone()[0] == 2
             assert all(json.loads(row[0]) for row in db.execute('SELECT usage FROM daily_archives'))
+            traces = [json.loads(row[0]) for row in db.execute('SELECT payload FROM generation_traces')]
+            assert any(t['origin'] == 'trace_role_generation' and t['coverage'] == 'trace_final_request' for t in traces)
+            assert any(t['origin'] == 'trace_daily_consolidation' and t['coverage'] == 'trace_final_request' for t in traces)
+            assert any(t['tools'] for t in traces), 'Actual MCP returns must be traced'
+            assert db.execute("SELECT COUNT(*) FROM generation_bindings WHERE subject LIKE 'dialogue:%'").fetchone()[0] > 0
+            assert db.execute("SELECT COUNT(*) FROM generation_bindings WHERE subject LIKE 'memory:%'").fetchone()[0] > 0
+            assert all('_generationTraceID' not in str(messages) for messages in state['messages']), 'Internal audit IDs must not enter role model requests'
+
         report = {'passed': True, 'upstreamCalls': state['calls'], 'toolCount': len(state['tools']), 'utterances': [e['text'] for e in all_events if e['type'] == 'utterance'],
                   'helperStartsDuringRoleExchange': diagnostics['helper']['starts'], 'independentSessions': True, 'restartAndContextConsumption': True,
                   'searchRevocationEnforced': state['searchDenied'], 'sharedNoteCreatedViaMCP': state['saved'], 'actual2233IdentityRotation': identity_rotation,
-                  'dailyArchiveCalls': state['dailyCalls'], 'dailyRotationAndRecall': True, 'independentModelRouting': True}
+                  'dailyArchiveCalls': state['dailyCalls'], 'dailyRotationAndRecall': True, 'independentModelRouting': True, 'memoryGenerationSources': True, 'finalInputAndMCPTracing': True}
         (OUT / 'native-protocol.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
     server.shutdown()

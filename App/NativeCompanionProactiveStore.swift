@@ -53,6 +53,7 @@ extension NativeCompanionStore {
         }
     }
     func invalidatePerceptionSource(_ source: String) throws {
+        try redactGenerationActivity(source: source)
         try invalidateProactiveDependency(kind: "source", id: source, reason: "source_revoked")
         let events = try rows("SELECT id FROM perception_events WHERE source=?", [source]).compactMap { $0["id"] as? String }
         for event in events { try invalidateProactiveDependency(kind: "event", id: event, reason: "source_revoked") }

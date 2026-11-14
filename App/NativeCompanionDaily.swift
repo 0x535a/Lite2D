@@ -89,7 +89,7 @@ extension NativeCompanionStore {
             return try rows("SELECT * FROM daily_archives WHERE id=?", [id]).first
         }
     }
-    func dailyCommit(_ id: String, output: CompanionObject) throws {
+    func dailyCommit(_ id: String, output: CompanionObject, generationID: String? = nil) throws {
         try transaction {
             guard let job = try rows("SELECT * FROM daily_archives WHERE id=? AND status='pending'", [id]).first else { return }
             let owner = job["owner"] as! String
@@ -110,7 +110,7 @@ extension NativeCompanionStore {
                 let existing = try rows("SELECT id FROM memory_items WHERE owner_character_id=? AND status='active' AND content=? AND evidence_ids=? LIMIT 1", [owner, NativeCompanionData.clean(content, limit: 32768), NativeCompanionData.string(Array(Set(ids + backgroundIDs)).sorted())]).first?["id"] as? String
                 let memoryID: String
                 if let existing { memoryID = existing }
-                else { memoryID = try memoryWrite(owner: owner, type: type, provenance: "inferred", content: content, evidenceIDs: Array(Set(ids + backgroundIDs)).sorted(), sourceRef: id, salience: kind == "open_loop" ? 0.8 : 0.5, occurredAt: occurredAt, createdBy: "daily_consolidation")["memoryId"] as! String }
+                else { memoryID = try memoryWrite(owner: owner, type: type, provenance: "inferred", content: content, evidenceIDs: Array(Set(ids + backgroundIDs)).sorted(), sourceRef: id, salience: kind == "open_loop" ? 0.8 : 0.5, occurredAt: occurredAt, createdBy: "daily_consolidation", generationID: generationID, generationMethod: "trace_daily_consolidation", citedEvidenceIDs: ids)["memoryId"] as! String }
                 written.append(memoryID)
                 if kind == "open_loop" { try execute("INSERT OR IGNORE INTO daily_open_loops VALUES (?,?,'open')", [memoryID, owner]) }
             }
@@ -124,7 +124,7 @@ extension NativeCompanionStore {
             var summaryID: String?
             if !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 summaryID = try memoryWrite(owner: owner, type: "reflection", provenance: "controller_generated", content: summary,
-                    evidenceIDs: Array(Set(try citations(output["summaryEvidenceIds"]) + written + backgroundIDs)).sorted(), sourceRef: id, createdBy: "daily_consolidation")["memoryId"] as? String
+                    evidenceIDs: Array(Set(try citations(output["summaryEvidenceIds"]) + written + backgroundIDs)).sorted(), sourceRef: id, createdBy: "daily_consolidation", generationID: generationID, generationMethod: "trace_daily_consolidation", citedEvidenceIDs: try citations(output["summaryEvidenceIds"]))["memoryId"] as? String
             }
             if !evidence.isEmpty { try set("dailyNeedsRotation:\(owner)", true) }
             try execute("UPDATE daily_archives SET status='committed',result=?,error=NULL WHERE id=?", [NativeCompanionData.string(["summaryId": summaryID as Any? ?? NSNull(), "memoryIds": written, "revision": try dailyRevision(owner)]), id])

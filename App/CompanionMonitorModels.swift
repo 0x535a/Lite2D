@@ -25,6 +25,13 @@ struct CompanionMonitorField: Codable, Identifiable {
 struct CompanionMonitorLink: Codable, Identifiable {
     var id: String
     var kind = "reference"
+    var label: String? = nil
+}
+struct CompanionMonitorTraceSection: Codable, Identifiable {
+    var key: String
+    var fields: [CompanionMonitorField] = []
+    var links: [CompanionMonitorLink] = []
+    var id: String { key }
 }
 struct CompanionMonitorItem: Codable, Identifiable {
     var id: String
@@ -40,6 +47,7 @@ struct CompanionMonitorItem: Codable, Identifiable {
     var fields: [CompanionMonitorField] = []
     var links: [CompanionMonitorLink] = []
     var actions: [String] = []
+    var traceSections: [CompanionMonitorTraceSection]? = nil
     var key: String { kind + ":" + id }
 }
 struct CompanionMonitorMetric: Codable, Identifiable {

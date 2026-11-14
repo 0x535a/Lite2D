@@ -311,12 +311,20 @@ struct CompanionHistoryView: View {
                 }
                 if item.kind == "working" { Text(L10n.text("monitor.working_help")).foregroundStyle(.secondary) }
                 if item.kind == "audit" { Text(L10n.text("monitor.audit_help")).foregroundStyle(.secondary) }
+                if ["generation", "memory_trace"].contains(item.kind) { Text(L10n.text("monitor.trace_help")).foregroundStyle(.secondary) }
                 if !item.version.isEmpty && item.kind != "public" { LabeledContent(monitorLabel("revision"), value: item.version).textSelection(.enabled) }
                 fieldGrid(item)
+                ForEach(item.traceSections ?? []) { section in
+                    Divider(); Text(monitorLabel(section.key)).font(.headline)
+                    fieldGrid(CompanionMonitorItem(id: section.key, kind: "trace_section", owner: item.owner, title: section.key, fields: section.fields))
+                    ForEach(Array(section.links.enumerated()), id: \.offset) { index, link in
+                        Button { model.follow(link) } label: { Label(monitorLabel(link.label ?? "reference") + " \(index + 1)", systemImage: "link") }.buttonStyle(.link)
+                    }
+                }
                 if !item.links.isEmpty {
                     Divider(); Text(L10n.text("monitor.evidence")).font(.headline)
                     ForEach(Array(item.links.enumerated()), id: \.offset) { index, link in
-                        Button { model.follow(link) } label: { Label(L10n.text("monitor.open_reference") + " \(index + 1)", systemImage: "link") }.buttonStyle(.link)
+                        Button { model.follow(link) } label: { Label(link.label.map(monitorLabel) ?? (L10n.text("monitor.open_reference") + " \(index + 1)"), systemImage: "link") }.buttonStyle(.link)
                     }
                 }
                 if !item.actions.isEmpty {
@@ -336,22 +344,27 @@ struct CompanionHistoryView: View {
                 DisclosureGroup(L10n.text("monitor.technical")) {
                     Text(item.id).textSelection(.enabled)
                     if item.kind == "public" { Text(item.version).textSelection(.enabled) }
-                    ForEach(item.fields.filter { ["raw_hash", "base_hash", "source_ref", "event_id"].contains($0.key) }) { field in Text(field.key + ": " + field.value).textSelection(.enabled) }
+                    ForEach(item.fields.filter(technicalField)) { field in Text(monitorLabel(field.key) + ": " + field.value).textSelection(.enabled) }
                 }.font(.caption)
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
     private func fieldValue(_ field: CompanionMonitorField) -> String {
         guard !field.value.isEmpty else { return L10n.text("monitor.not_provided") }
+        if field.key.hasPrefix("trace_") && field.value.hasPrefix("trace_") { return monitorLabel(field.value) }
+        if field.key == "trace_method" { return monitorLabel(field.value) }
         if ["occurred_at", "learned_at", "recorded_at", "created_at", "updated_at", "valid_from", "valid_to", "happened_at", "at", "not_before", "expires_at", "cooldown_until", "presented_at", "completed_at", "first_decided_at", "last_evaluated_at"].contains(field.key) { return CompanionMonitorPresentation.date(field.value) }
         if field.key == "subjects" { return field.value.components(separatedBy: ", ").map(name).joined(separator: ", ") }
         if ["source_actor_id", "target_character_id", "target", "speaker", "actor", "sender", "recipient", "created_by"].contains(field.key) { return name(field.value) }
         if ["scope", "kind", "validity", "state", "role", "result", "last_decision_reason", "reason", "modality", "affect"].contains(field.key) { return monitorLabel(field.value) }
         return field.value
     }
+    private func technicalField(_ field: CompanionMonitorField) -> Bool {
+        ["raw_hash", "base_hash", "source_ref", "event_id", "trace_session"].contains(field.key) || field.key.hasSuffix("_hash") || field.key.hasPrefix("trace_component_")
+    }
     private func fieldGrid(_ item: CompanionMonitorItem) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
-            ForEach(item.fields.filter { !["raw_hash", "base_hash", "source_ref", "event_id"].contains($0.key) }) { field in
+            ForEach(Array(item.fields.filter { !technicalField($0) }.enumerated()), id: \.offset) { _, field in
                 GridRow {
                     Text(monitorLabel(field.key)).foregroundStyle(.secondary).frame(minWidth: 80, alignment: .leading)
                     Text(fieldValue(field)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)

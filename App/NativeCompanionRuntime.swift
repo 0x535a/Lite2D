@@ -23,6 +23,7 @@ private final class NativeCompanionTopic {
     var decisionId: String?
     var outputIds: [String] = []
     var snapshotExpires: [String: Date] = [:]
+    var generationTraces: [String: String] = [:]
     var participants: [String]
     var speaker: String
     var queue: [CompanionObject] = []
@@ -395,7 +396,8 @@ actor NativeCompanionRuntime {
     func tick() async {
         guard ready, !stopped, enabled else { return }
         if Date() >= perceptionPruneAt {
-            try? store.pruneProactive(auditRetentionHours: perceptionSettings.auditRetentionHours); perceptionPruneAt = Date().addingTimeInterval(60)
+            try? store.pruneProactive(auditRetentionHours: perceptionSettings.auditRetentionHours)
+            try? store.pruneGenerations(); perceptionPruneAt = Date().addingTimeInterval(60)
         }
         if dailyBusy { return }
         if topic == nil, Date() >= dailyCheckAt, config["sleeping"] as? Bool != true {
@@ -552,7 +554,7 @@ actor NativeCompanionRuntime {
                 guard visible.contains(where: { $0["id"] as? String == recipient }) else { continue }
                 if !topic.participants.contains(recipient) { topic.participants.append(recipient) }
                 focus(topic, from: envelope["from"] as? String ?? "", to: recipient)
-                try await turn(id: recipient, input: ["reason": "character_message", "from": envelope["from"] ?? "", "message": envelope["text"] ?? ""], topic: topic, envelope: envelope)
+                try await turn(id: recipient, input: ["reason": "character_message", "from": envelope["from"] ?? "", "message": envelope["text"] ?? "", "messageId": envelope["id"] ?? ""], topic: topic, envelope: envelope)
             }
         } catch {
             if !topic.cancelled && !stopped { roleErrors[topic.speaker] = NativeCompanionData.clean(error.localizedDescription, limit: 240); emit("error", ["characterId": topic.speaker, "message": NativeCompanionData.clean(error.localizedDescription, limit: 240)]) }
@@ -579,9 +581,11 @@ actor NativeCompanionRuntime {
         if let envelope { try store.execute("UPDATE deliveries SET status='delivering' WHERE id=?", [envelope["id"]]) }
         var context = input; context["topicId"] = topic.id; context["quotedEvidence"] = true; context["intent"] = prompt.turnIntent
         context["currentTime"] = NativeCompanionData.currentTime()
+        var activityProjectionSource: String?
         if let activity = activityContext, let policy = try? store.perceptionPolicy(activity.source),
            policy.consentEpoch == activity.consentEpoch, policy.permits(id, use: .activityContext, remote: true) {
             context["activity"] = activity.roleProjection(at: Date())
+            if context["activity"] != nil { activityProjectionSource = activity.source }
         }
         if input["reason"] as? String == "manual_test" { context["manualTest"] = prompt.manualTest }
         try store.syncOpenLoopIntentions(owner: id)
@@ -619,6 +623,9 @@ actor NativeCompanionRuntime {
         }
         guard NativeCompanionData.string(context).utf8.count <= 48000 else { throw NativeCompanionData.error("Compiled context exceeds its limit") }
         if let serviceMonitor { _ = try await serviceMonitor.ensureRunning() }
+        let generationID = try store.captureGeneration(owner: id, context: context, origin: "trace_role_generation", model: roleModel(id), activitySource: activityProjectionSource)
+        topic.generationTraces[id] = generationID
+        context["_generationTraceID"] = generationID
         let output = try await roles.generate(id: id, context: context, model: roleModel(id), reserve: { [weak self] in try await self?.reserveRequest() ?? false })
         try Task.checkCancellation(); guard !topic.cancelled, (topic.snapshotExpires[id] ?? .distantPast) > Date() else { return }
         if let opportunity = topic.opportunity { guard try store.opportunityAuthorized(opportunity, forExpression: true) else { return } }
@@ -627,7 +634,7 @@ actor NativeCompanionRuntime {
             try store.execute("UPDATE deliveries SET status='delivered' WHERE id=?", [envelope["id"]])
             try store.finishSocialDelivery(envelope["id"] as? String ?? "")
             try store.execute("INSERT OR IGNORE INTO daily_receipts VALUES (?,?)", [envelope["id"], NativeCompanionData.iso()])
-            _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: envelope["id"] as? String ?? "", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), sourceActorID: envelope["from"] as? String)
+            _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: envelope["id"] as? String ?? "", content: "收到角色消息：" + (envelope["text"] as? String ?? ""), sourceActorID: envelope["from"] as? String, generationID: generationID)
         }
         if topic.sentBy.remove(id) != nil { return }
         let parsed = NativeCompanionData.output(output)
@@ -672,10 +679,22 @@ actor NativeCompanionRuntime {
             event["perceptionSources"] = opportunity.sourceEventIds.compactMap { (try? store.rows("SELECT source FROM perception_events WHERE id=?", [$0]).first?["source"]) as? String }
         }
         event["expiresAt"] = NativeCompanionData.iso(min(topic.opportunity?.expiresAt ?? .distantFuture, Date().addingTimeInterval(120)))
+        event["generationTraceId"] = topic.generationTraces[id]
         event["outputId"] = receipt.id; event["characterId"] = id; event["name"] = characters.first { $0["id"] as? String == id }?["name"]
-        event["text"] = cleaned; event["topicId"] = topic.id; emit("utterance", event)
+        event["text"] = cleaned; event["topicId"] = topic.id
+        if let saved = try? store.event("utterance", event), let seq = saved["sequence"] as? Int {
+            try? store.bindGeneration(topic.generationTraces[id], subject: "dialogue:\(seq)", owner: id)
+            emitToHost(saved)
+        }
     }
     func tool(token: String, name: String, args: CompanionObject) async throws -> Any {
+        let actor = tokens[token]
+        let generationID = actor.flatMap { topic?.generationTraces[$0] }
+        let result = try await performTool(token: token, name: name, args: args)
+        if let actor { try store.recordGenerationTool(generationID, owner: actor, name: name, args: args, result: result) }
+        return result
+    }
+    private func performTool(token: String, name: String, args: CompanionObject) async throws -> Any {
         guard let actor = tokens[token], enabled, !paused, characters.contains(where: { $0["id"] as? String == actor && $0["enabled"] as? Bool == true }) else { throw NativeCompanionData.error("Character is paused or unauthenticated") }
         if let topic {
             guard (topic.snapshotExpires[actor] ?? Date().addingTimeInterval(1)) > Date() else { throw NativeCompanionData.error("Context snapshot expired") }
@@ -717,7 +736,7 @@ actor NativeCompanionRuntime {
             guard let content = args["content"] as? String, content.utf8.count <= 32768 else { throw NativeCompanionData.error("Memory exceeds 32 KB") }
             let cleaned = NativeCompanionData.clean(content, limit: 32768)
             try store.set("memory:\(actor)", cleaned)
-            _ = try? store.memoryWrite(owner: actor, type: "diary", provenance: "character_edit", content: cleaned)
+            _ = try? store.memoryWrite(owner: actor, type: "diary", provenance: "character_edit", content: cleaned, generationID: topic?.generationTraces[actor], generationMethod: "trace_diary_update")
             try store.exportNotes(); return ["updated": true]
         case "memory_search":
             let query = args["query"] as? String ?? ""
@@ -736,12 +755,12 @@ actor NativeCompanionRuntime {
             guard ["event", "fact", "belief", "opinion", "skill", "habit", "reflection", "relation"].contains(type) else { throw NativeCompanionData.error("Unsupported memory type") }
             if source != "inferred" { _ = try store.verifiedEvidence(owner: actor, ids: evidence) }
             // The model's interpretation remains inferred; direct sources are Controller-recorded events.
-            let result = try store.memoryWrite(owner: actor, type: type, provenance: "inferred", content: content, evidenceIDs: evidence)
+            let result = try store.memoryWrite(owner: actor, type: type, provenance: "inferred", content: content, evidenceIDs: evidence, generationID: topic?.generationTraces[actor], generationMethod: "trace_model_memory_write")
             emit("monitor.invalidate", ["owner": actor]); return result
         case "memory_correct":
             guard let memoryID = args["memoryId"] as? String, let content = args["newContent"] as? String,
                   let expected = Int(args["expectedRevision"] as? String ?? "") else { throw NativeCompanionData.error("Memory correction requires ID, content and revision") }
-            let result = try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction")
+            let result = try store.memoryCorrect(memoryID, owner: actor, content: content, expectedRevision: expected, reason: args["reason"] as? String ?? "user correction", generationID: topic?.generationTraces[actor])
             if result["conflict"] as? Bool != true { try store.exportNotes(); emit("monitor.invalidate", ["owner": actor]) }
             return result
         case "memory_forget":
@@ -967,6 +986,7 @@ actor NativeCompanionRuntime {
                         job = try memoryStore.rows("SELECT * FROM daily_archives WHERE id=?", [jobID]).first!
                     }
                     let snapshot = NativeCompanionData.object(try NativeCompanionData.decode(Data((job["input"] as! String).utf8)))
+                    let generationID = try memoryStore.captureGeneration(owner: id, context: snapshot, origin: "trace_daily_consolidation", model: archiveModel, final: true, systemHash: NativeCompanionData.hash(NativeCompanionDaily.instruction))
                     let result: CompanionObject
                     if NativeCompanionData.array(snapshot["dialogue"]).isEmpty { result = ["summary": "", "items": [], "resolved": []] }
                     else {
@@ -976,7 +996,7 @@ actor NativeCompanionRuntime {
                     }
                     try Task.checkCancellation()
                     guard enabled, !stopped else { return }
-                    try memoryStore.dailyCommit(jobID, output: result)
+                    try memoryStore.dailyCommit(jobID, output: result, generationID: generationID)
                 }
                 try Task.checkCancellation()
                 guard enabled, !stopped else { return }

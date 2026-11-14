@@ -175,6 +175,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
         let instance = try await prepare(id: id, model: model); guard let client else { throw NativeCompanionData.error("Role service stopped") }
         try Task.checkCancellation()
         var context = input
+        let generationID = context.removeValue(forKey: "_generationTraceID") as? String
         if store.get("dailyWakeSession:\(id)") as? String != instance.session {
             var recollection = try store.dailyWake(id)
             recollection["recentRecollection"] = NativeCompanionData.array(recollection["recentRecollection"]).prefix(1).map { item -> CompanionObject in var value = item; value["content"] = String((item["content"] as? String ?? "").prefix(2500)); return value }
@@ -205,6 +206,9 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
             context["pendingCompanionMessages"] = pending.map { ["messageId": $0["id"] ?? "", "from": $0["sender"] ?? "", "text": $0["text"] ?? "", "quotedEvidence": true] }
         }
         guard NativeCompanionData.string(context).utf8.count <= 65536 else { throw NativeCompanionData.error("Role context exceeds its final budget") }
+        if let generationID {
+            _ = try store.captureGeneration(owner: id, context: context, origin: "trace_role_generation", model: model, id: generationID, final: true, systemHash: instance.digest)
+        }
         budgets[id] = Budget(reserve: reserve)
         let admitted = try await client.post("api/session/\(instance.session)/synthetic", ["text": NativeCompanionData.string(context), "delivery": "queue", "resume": true,
             "metadata": ["lite2d": true, "topicId": input["topicId"] ?? "", "synchronizedDeliveries": pending.compactMap { $0["id"] as? String }]])
@@ -233,7 +237,7 @@ actor NativeCompanionRoles: NativeCompanionRoleClient {
                         for row in pending where delivered.contains(inputID) {
                             try store.execute("UPDATE deliveries SET status='context_consumed' WHERE id=?", [row["id"]])
                             try store.execute("INSERT OR IGNORE INTO daily_receipts VALUES (?,?)", [row["id"], NativeCompanionData.iso()])
-                            _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: row["id"] as? String ?? "", content: "收到角色消息：" + (row["text"] as? String ?? ""), sourceActorID: row["sender"] as? String)
+                            _ = try store.recordDirectMemory(owner: id, source: "told_by_other", eventID: row["id"] as? String ?? "", content: "收到角色消息：" + (row["text"] as? String ?? ""), sourceActorID: row["sender"] as? String, generationID: generationID)
                         }
                         budgets.removeValue(forKey: id); return text
                     }

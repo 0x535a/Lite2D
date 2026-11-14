@@ -91,6 +91,7 @@ extension NativeCompanionStore {
     // Display history includes newer initiative receipts/decisions as well as the legacy event timeline.
     func clearConversationHistory() throws {
         try transaction {
+            try purgeGenerations()
             for row in try rows("SELECT seq FROM events WHERE type='utterance'") {
                 try invalidateProactiveDependency(kind: "evidence", id: "dialogue:\(row["seq"]!)", reason: "history_cleared")
             }
