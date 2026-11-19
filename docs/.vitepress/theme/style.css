@@ -1,0 +1,37 @@
+:root {
+  --vp-font-family-base: Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --vp-c-brand-1: #4548b7;
+  --vp-c-brand-2: #4c4fc0;
+  --vp-c-brand-3: #4143aa;
+  --vp-home-hero-name-color: #3c3ea3;
+  --vp-home-hero-image-background-image: radial-gradient(ellipse, #e0ddff 0%, #ecf4ff 55%, transparent 75%);
+  --vp-home-hero-image-filter: blur(28px);
+}
+
+.dark {
+  --vp-c-brand-1: #b4b7ff;
+  --vp-c-brand-2: #7275df;
+  --vp-c-brand-3: #5659bf;
+  --vp-home-hero-name-color: #bbbaff;
+  --vp-home-hero-image-background-image: radial-gradient(ellipse, #474682 0%, #293754 55%, transparent 75%);
+}
+
+.VPHero .tagline {
+  max-width: 28em;
+}
+
+.VPHero .image-src {
+  filter: drop-shadow(0 20px 24px rgb(40 38 86 / 18%));
+}
+
+.VPDoc .vp-doc {
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 960px) {
+  .VPHero .image-src {
+    max-width: 284px;
+    max-height: 284px;
+  }
+}
